@@ -31,6 +31,18 @@ extension AppSettings {
     }
 
     /// What a new tab shows: "home" (the Home page) or "current" (the folder of the tab it opens from).
+    /// Ctrl+T on Windows, ⌘T here: a new tab starts with its address bar open for typing.
+    static var newTabAddress: Bool {
+        get { flag("newTabAddress", false) }
+        set { store(newValue, "newTabAddress") }
+    }
+
+    /// Tabs show the folder's whole path in smaller text instead of its name.
+    static var tabPath: Bool {
+        get { flag("tabPath", false) }
+        set { store(newValue, "tabPath") }
+    }
+
     static var newTabOpens: String {
         get { d.string(forKey: "newTabOpens") ?? "home" }
         set { store(newValue, "newTabOpens") }

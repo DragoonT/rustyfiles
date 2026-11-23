@@ -19,6 +19,9 @@ final class SidebarView: FlippedView {
         var depth = 0
         var expandable = false
         var expanded = false
+        /// A drive: how full it is (0…1) and "used / total", for its bar.
+        var used: Double? = nil
+        var space: String? = nil
     }
 
     /// The folder tree's open folders (paths), kept across starts.
@@ -122,7 +125,7 @@ final class SidebarView: FlippedView {
     }
 
     @objc private func settingsChanged(_ note: Notification) {
-        if ["sidebarHidden", "sidebarTree", "tagList", "hiddenPlaces"].contains(AppSettings.changedKey(note)) { reload() }
+        if ["sidebarHidden", "sidebarTree", "tagList", "hiddenPlaces", "sidebarDriveSpace"].contains(AppSettings.changedKey(note)) { reload() }
     }
 
     @available(*, unavailable)
@@ -156,14 +159,21 @@ final class SidebarView: FlippedView {
                 items += clouds.map { Item(kind: .cloud, title: $0.title, icon: "cloud", url: $0.url) }
             }
         }
-        let keys: [URLResourceKey] = [.volumeLocalizedNameKey, .volumeIsLocalKey]
+        let keys: [URLResourceKey] = [.volumeLocalizedNameKey, .volumeIsLocalKey, .volumeTotalCapacityKey, .volumeAvailableCapacityKey]
         let volumes = fm.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes]) ?? []
         if !volumes.isEmpty, AppSettings.showsSection(.drives) {
             items.append(Item(kind: .header, title: String(localized: "Drives"), icon: "", url: nil))
             for v in volumes where !AppSettings.hidesPlace(v) {
                 let values = try? v.resourceValues(forKeys: Set(keys))
                 let icon = values?.volumeIsLocal == false ? "server" : "hard-drive"
-                items.append(Item(kind: .drive, title: values?.volumeLocalizedName ?? v.lastPathComponent, icon: icon, url: v))
+                var item = Item(kind: .drive, title: values?.volumeLocalizedName ?? v.lastPathComponent, icon: icon, url: v)
+                // a usage bar under the name (red above 90 %); a server that does not answer gets none
+                if values?.volumeIsLocal != false, let total = values?.volumeTotalCapacity, total > 0, let free = values?.volumeAvailableCapacity {
+                    let used = max(total - free, 0)
+                    item.used = Double(used) / Double(total)
+                    item.space = "\(formatSize(bytes: UInt64(used))) / \(formatSize(bytes: UInt64(total)))"
+                }
+                items.append(item)
             }
         }
         // the folder tree (Settings › Appearance › Sidebar sections)
@@ -242,7 +252,9 @@ final class SidebarListView: HoverView {
     private func rects() -> [NSRect] {
         var y: CGFloat = 4
         return items.map { item in
-            let h: CGFloat = item.kind == .header ? 12 + 16 + 4 : 32
+            var h: CGFloat = item.kind == .header ? 12 + 16 + 4 : 32
+            // a drive's bar, and its numbers under it (Settings › Show drive space in numbers)
+            if item.used != nil { h = AppSettings.sidebarDriveSpace ? 54 : 38 }
             let r = NSRect(x: 8, y: y, width: bounds.width - 16, height: h)
             y += h + 2
             return r
@@ -364,6 +376,18 @@ final class SidebarListView: HoverView {
                 continue
             } else {
                 Draw.icon(item.icon, in: NSRect(x: r.minX + 8, y: r.minY, width: 16, height: r.height), size: 16, color: iconColor)
+            }
+            if let used = item.used {
+                // the name, a 2 px bar 5 under it, the numbers 2 under that (workspace.rs sidebar drives)
+                let x = r.minX + 8 + 16 + 8, w = r.width - 40
+                Draw.text(item.title, in: NSRect(x: x, y: r.minY + 6, width: w, height: 20), font: Metrics.textSm, color: p.text)
+                let bar = NSRect(x: x, y: r.minY + 6 + 20 + 3, width: w, height: 2)
+                Draw.roundedRect(bar, radius: 1, fill: p.pressed)
+                Draw.roundedRect(NSRect(x: bar.minX, y: bar.minY, width: bar.width * CGFloat(min(max(used, 0), 1)), height: 2), radius: 1, fill: used > 0.9 ? p.danger : p.accent)
+                if AppSettings.sidebarDriveSpace, let space = item.space {
+                    Draw.text(space, in: NSRect(x: x, y: bar.maxY + 2, width: w, height: 16), font: Metrics.textXs, color: p.textTertiary)
+                }
+                continue
             }
             Draw.text(item.title, in: NSRect(x: r.minX + 8 + 16 + 8, y: r.minY, width: r.width - 40, height: r.height), font: Metrics.textSm, color: p.text)
         }

@@ -4,6 +4,10 @@ import AppKit
 struct TabInfo {
     let title: String
     let icon: String
+    /// The folder's path (with ~), for the tooltip and Settings › The folder's path on tabs.
+    var path: String?
+    /// The folder above that tells this tab from another of the same name.
+    var hint: String?
 }
 
 /// The tabs, drawn as in the Windows app (workspace.rs `tab_strip`): one width for all,
@@ -12,8 +16,45 @@ struct TabInfo {
 /// strip) and its icon is in the accent colour.
 /// Clicks on empty space drag the window; a double click zooms it.
 @MainActor
-final class TabStripView: HoverView {
-    var tabs: [TabInfo] = [] { didSet { needsDisplay = true; superview?.needsLayout = true } }
+final class TabStripView: HoverView, NSViewToolTipOwner {
+    var tabs: [TabInfo] = [] { didSet { needsDisplay = true; superview?.needsLayout = true; needsLayout = true } }
+
+    /// For each tab's folder, the name of a folder above it that tells it apart from the other
+    /// tabs' folders of the same name (workspace.rs `tab_hints`): the nearest level whose name
+    /// differs, up to five levels; nil when no other tab has its name.
+    static func hints(_ urls: [URL?]) -> [String?] {
+        func level(_ u: URL, _ up: Int) -> String? {
+            var d = u
+            for _ in 0..<up {
+                let p = d.deletingLastPathComponent()
+                if p.path == d.path { return nil }
+                d = p
+            }
+            return d.path == "/" ? "/" : d.lastPathComponent
+        }
+        return urls.map { me in
+            guard let me else { return nil }
+            let mine = me.lastPathComponent.lowercased()
+            let others = urls.compactMap { $0 }.filter { $0.lastPathComponent.lowercased() == mine && $0.standardizedFileURL != me.standardizedFileURL }
+            guard !others.isEmpty else { return nil }
+            for up in 1...5 {
+                guard let here = level(me, up) else { return nil }
+                if others.allSatisfy({ level($0, up)?.lowercased() != here.lowercased() }) { return here }
+            }
+            return nil
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        removeAllToolTips()
+        for i in tabs.indices where tabs[i].path != nil { addToolTip(tabRect(i), owner: self, userData: UnsafeMutableRawPointer(bitPattern: i + 1)) }
+    }
+
+    nonisolated func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData data: UnsafeMutableRawPointer?) -> String {
+        let i = Int(bitPattern: data) - 1
+        return MainActor.assumeIsolated { tabs.indices.contains(i) ? (tabs[i].path ?? "") : "" }
+    }
     var active = 0 { didSet { needsDisplay = true; superview?.needsLayout = true } }
     var onSelect: ((Int) -> Void)?
     var onClose: ((Int) -> Void)?
@@ -79,7 +120,19 @@ final class TabStripView: HoverView {
             x += 14 + 8
             let close = showsClose(i, hoveredTab: hoveredTab)
             let textEnd = close ? closeRect(i).minX - 8 : r.maxX - 4
-            Draw.text(t.title, in: NSRect(x: x, y: r.minY, width: max(textEnd - x, 0), height: r.height), font: Metrics.textSm, color: isActive ? p.text : p.textSecondary)
+            let room = NSRect(x: x, y: r.minY, width: max(textEnd - x, 0), height: r.height)
+            let color = isActive ? p.text : p.textSecondary
+            if AppSettings.tabPath, let path = t.path {
+                Draw.text(path, in: room, font: Metrics.textXs, color: color, truncation: .byTruncatingTail)
+            } else if let hint = t.hint {
+                // the name first (never more than 70 % of the room), the telling folder after it, lighter
+                let nameW = min(Draw.textWidth(t.title, font: Metrics.textSm), room.width * 0.7)
+                Draw.text(t.title, in: NSRect(x: room.minX, y: room.minY, width: nameW, height: room.height), font: Metrics.textSm, color: color)
+                let hx = room.minX + nameW + 4
+                Draw.text("@" + hint, in: NSRect(x: hx, y: room.minY, width: max(room.maxX - hx, 0), height: room.height), font: Metrics.textSm, color: p.textTertiary)
+            } else {
+                Draw.text(t.title, in: room, font: Metrics.textSm, color: color)
+            }
             if close {
                 let c = closeRect(i)
                 if let hp = hoverPoint, c.contains(hp) {

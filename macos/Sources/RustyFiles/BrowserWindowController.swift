@@ -276,6 +276,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         let key = AppSettings.changedKey(note)
         if key == "material" || key == "theme" { applyMaterial() }
         if key == "interfacePercent" { applyScale() }
+        if key == "tabPath" { refreshTabs() }
         leftList.apply(settingKey: key)
         rightList.apply(settingKey: key)
         func redraw(_ v: NSView) {
@@ -452,7 +453,16 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     private func refreshTabs() {
         defer { AppDelegate.shared.saveSession() }
-        titleBar.strip.tabs = tabs.map(\.info)
+        // tabs of folders with the same name each get the folder above that tells them apart
+        let hints = TabStripView.hints(tabs.map { $0.isPage || !$0.url.isFileURL ? nil : $0.url })
+        titleBar.strip.tabs = tabs.enumerated().map { i, t in
+            var info = t.info
+            if !t.isPage, t.url.isFileURL {
+                info.path = (t.url.path as NSString).abbreviatingWithTildeInPath
+                info.hint = hints[i]
+            }
+            return info
+        }
         titleBar.strip.active = active
         titleBar.needsLayout = true
         window?.title = tab.info.title
@@ -520,6 +530,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         navBar.omnibar.end()
         load(t)
         refreshTabs()
+        if AppSettings.newTabAddress { DispatchQueue.main.async { [weak self] in self?.navBar.omnibar.begin(.path) } }
     }
 
     override func newWindowForTab(_ sender: Any?) { newTab(sender) }

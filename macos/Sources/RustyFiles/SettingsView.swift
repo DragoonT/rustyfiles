@@ -259,6 +259,12 @@ extension SettingsContent {
                 title: String(localized: "Always switch to a newly opened tab"), detail: nil, icon: "arrow-right-left",
                 control: .toggle(get: { AppSettings.switchToNewTab }, set: { AppSettings.switchToNewTab = $0 })),
             .card(
+                title: String(localized: "Type in the address bar of a new tab"), detail: String(localized: "⌘T and the + button: type or paste a path at once."), icon: "text-cursor-input",
+                control: .toggle(get: { AppSettings.newTabAddress }, set: { AppSettings.newTabAddress = $0 })),
+            .card(
+                title: String(localized: "The folder's path on tabs"), detail: String(localized: "Tabs show the folder's whole path in smaller text instead of its name; what doesn't fit is cut at the end."), icon: "folder-open",
+                control: .toggle(get: { AppSettings.tabPath }, set: { AppSettings.tabPath = $0 })),
+            .card(
                 title: String(localized: "Folders opened from other apps open in a new window"),
                 detail: String(localized: "Off: they open as a tab in the front window."), icon: "app-window",
                 control: .toggle(get: { AppSettings.externalInNewWindow }, set: { AppSettings.externalInNewWindow = $0 })),

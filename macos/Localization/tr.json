@@ -798,5 +798,11 @@
 "Interface scale": "Arayüz ölçeği",
 "Everything in the window bigger or smaller: for a display set to a higher resolution than usual.": "Penceredeki her şey daha büyük ya da küçük: ekran olağandan yüksek bir çözünürlüğe ayarlıysa.",
 "Show details on hover": "Üzerine gelince ayrıntıları göster",
-"The box with the size, the dates and a picture's dimensions when the pointer rests on an item.": "İşaretçi bir öğenin üzerinde durunca boyutu, tarihleri ve resmin boyutlarını gösteren kutu."
+"The box with the size, the dates and a picture's dimensions when the pointer rests on an item.": "İşaretçi bir öğenin üzerinde durunca boyutu, tarihleri ve resmin boyutlarını gösteren kutu.",
+"Show drive space in numbers": "Sürücülerin doluluğunu sayıyla göster",
+"Used and total space under each drive's bar": "Her sürücünün çubuğunun altında kullanılan ve toplam alan",
+"Type in the address bar of a new tab": "Yeni sekmede adres çubuğuna yaz",
+"⌘T and the + button: type or paste a path at once.": "⌘T ve + düğmesi: bir yolu hemen yazabilir ya da yapıştırabilirsiniz.",
+"The folder's path on tabs": "Sekmede klasörün yolu",
+"Tabs show the folder's whole path in smaller text instead of its name; what doesn't fit is cut at the end.": "Sekme, klasörün adı yerine tam yolunu küçük yazıyla gösterir; sığmayan kısım sondan kesilir."
 }

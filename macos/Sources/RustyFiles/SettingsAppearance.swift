@@ -72,6 +72,12 @@ extension AppSettings {
     }
     static var interfaceScale: CGFloat { CGFloat(interfacePercent) / 100 }
 
+    /// Settings › Sidebar sections › Show drive space in numbers: "used / total" under each bar.
+    static var sidebarDriveSpace: Bool {
+        get { flag("sidebarDriveSpace", false) }
+        set { store(newValue, "sidebarDriveSpace") }
+    }
+
     static var showCommandBar: Bool {
         get { flag("showCommandBar", true) }
         set { store(newValue, "showCommandBar") }
@@ -277,6 +283,11 @@ extension SettingsContent {
         rows.append(.section(String(localized: "Sidebar sections")))
         rows += AppSettings.SidebarSection.allCases.filter { $0 != .tags || TagsSupport.ready }.map { s in
             .card(title: s.title, detail: nil, icon: nil, control: .toggle(get: { AppSettings.showsSection(s) }, set: { AppSettings.setShowsSection(s, $0) }))
+        }
+        if AppSettings.showsSection(.drives) {
+            rows.append(.card(
+                title: String(localized: "Show drive space in numbers"), detail: String(localized: "Used and total space under each drive's bar"), icon: nil,
+                control: .toggle(get: { AppSettings.sidebarDriveSpace }, set: { AppSettings.sidebarDriveSpace = $0 })))
         }
         let hidden = AppSettings.hiddenPlaces
         if !hidden.isEmpty {
