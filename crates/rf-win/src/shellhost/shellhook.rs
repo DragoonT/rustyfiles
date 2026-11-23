@@ -10,6 +10,14 @@
 //! code). The window procedure does nothing but look at `wParam == HSHELL_APPCOMMAND` and hand the command to a worker thread: the
 //! work (WinRT, Core Audio) blocks and must not hold a window procedure. Dropping the hook deregisters the window and ends both threads.
 //!
+//! THE TASK MANAGER WINDOW. The same thread holds a second hidden window and registers it with `SetTaskmanWindow` (user32, not in the
+//! documentation; Explorer registers its taskbar this way). WHY: Windows hides a minimized window only when the metrics say
+//! `ARW_HIDE` (`minimized.rs`) AND such a window is registered; with the metrics alone every minimized window stayed a small title bar
+//! at the bottom left (the user, 2026-11-23: "uygulamaları küçültünce sol alta gidiyor"). MEASURED on that PC with no Explorer and
+//! `SM_ARRANGE` = 8: a window of our own minimized to (320, 1412); after `SetTaskmanWindow` on a hidden window, to (-32000, -32000);
+//! when that window was destroyed the registration was gone by itself. It is a window of its own, not the hook window, so that a
+//! shell message is not delivered twice to the window that acts on the keys. Nothing is registered when somebody else has one.
+//!
 //! NOT RUN in the increment that wrote it: the registration changes what Windows delivers to this process only, but it only does
 //! anything useful without Explorer, which the test copy never has.
 
@@ -113,6 +121,7 @@ fn run(tx: Sender<u16>, ready: Sender<Result<isize, String>>) {
             let _ = ready.send(Err("RegisterShellHookWindow failed".into()));
             return;
         }
+        let taskman = register_taskman(hinst.into());
         if ready.send(Ok(hwnd.0 as isize)).is_err() {
             // `start` gave up waiting (its 5 s ran out) and nobody owns this window: take it back
             let _ = windows::Win32::UI::WindowsAndMessaging::DeregisterShellHookWindow(hwnd);
@@ -123,6 +132,49 @@ fn run(tx: Sender<u16>, ready: Sender<Result<isize, String>>) {
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
+        }
+        // (its registration goes with it: Windows forgets a task manager window that is destroyed)
+        if let Some(t) = taskman {
+            let _ = windows::Win32::UI::WindowsAndMessaging::DestroyWindow(t);
+        }
+    }
+}
+
+type SetTaskman = unsafe extern "system" fn(windows::Win32::Foundation::HWND) -> windows::core::BOOL;
+type GetTaskman = unsafe extern "system" fn() -> windows::Win32::Foundation::HWND;
+
+/// `SetTaskmanWindow` and `GetTaskmanWindow` of user32, found by name: they are exported but not in the import library (the linker
+/// does not know them). `None` on a Windows that has none.
+fn taskman_calls() -> Option<(SetTaskman, GetTaskman)> {
+    use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
+    use windows::core::{s, w};
+    // SAFETY: user32 is loaded in every process with a window; the two functions have had these signatures since Windows 2000.
+    unsafe {
+        let user32 = GetModuleHandleW(w!("user32.dll")).ok()?;
+        let set = GetProcAddress(user32, s!("SetTaskmanWindow"))?;
+        let get = GetProcAddress(user32, s!("GetTaskmanWindow"))?;
+        Some((std::mem::transmute::<unsafe extern "system" fn() -> isize, SetTaskman>(set), std::mem::transmute::<unsafe extern "system" fn() -> isize, GetTaskman>(get)))
+    }
+}
+
+/// Makes a hidden window on this thread and registers it as the session's task manager window, unless somebody has one (see the
+/// module). `None`: nothing was registered. The window is the caller's to destroy.
+unsafe fn register_taskman(hinst: windows::Win32::Foundation::HINSTANCE) -> Option<windows::Win32::Foundation::HWND> {
+    use windows::Win32::UI::WindowsAndMessaging::{CreateWindowExW, DestroyWindow, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP};
+    use windows::core::w;
+    let (set_taskman, get_taskman) = taskman_calls()?;
+    unsafe {
+        if !get_taskman().0.is_null() {
+            return None;
+        }
+        let hwnd = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, w!("STATIC"), w!(""), WS_POPUP, 0, 0, 0, 0, None, None, Some(hinst), None).ok()?;
+        if set_taskman(hwnd).as_bool() {
+            log::info!("shell host: no task manager window - ours is registered, so that minimized windows are hidden");
+            Some(hwnd)
+        } else {
+            log::warn!("shell host: the task manager window could not be registered; minimized windows stay as title bars");
+            let _ = DestroyWindow(hwnd);
+            None
         }
     }
 }
