@@ -3504,6 +3504,9 @@ impl Workspace {
                     this.with_tab(cx, |v, cx| if v.selection_paths().is_empty() { v.folder_properties(cx) } else { v.properties(cx) })
                 })
             })))
+            .children(extra("edit").then(|| {
+                cmd("cb-edit", L::FilePen, "Metin düzenleyicide düzenle  (F4)", has_sel, cx, |_, w, cx| w.dispatch_action(Box::new(EditFiles), cx))
+            }))
             .children(extra("terminal").then(|| cmd("cb-terminal", L::SquareTerminal, "Terminalde aç  (Ctrl+Shift+`)", in_folder, cx, |_, w, cx| w.dispatch_action(Box::new(OpenTerminal), cx))))
             // the button shows whether hidden items are shown: an open eye on the selected fill while they are, a struck-out one
             // while they are not (issue 277: it looked switched on either way)
@@ -4699,6 +4702,33 @@ fn tooltip_text(id: &str) -> &'static str {
     }
 }
 
+/// Opens the files among `paths` in the text editor `editor` (Settings; empty: Notepad). Folders are left out. Notepad takes one
+/// file a run, so it is started once per file (at most 20); any other editor gets them all in one run (they open as its tabs).
+pub fn edit_in_text_editor(paths: Vec<PathBuf>, editor: String) {
+    std::thread::spawn(move || {
+        let files: Vec<PathBuf> = paths.into_iter().filter(|p| std::fs::metadata(p).is_ok_and(|m| m.is_file())).collect();
+        if files.is_empty() {
+            return;
+        }
+        let notepad = editor.is_empty() || Path::new(&editor).file_name().is_some_and(|n| n.eq_ignore_ascii_case("notepad.exe"));
+        let program = if editor.is_empty() { "notepad.exe".to_string() } else { editor };
+        let runs: Vec<Vec<PathBuf>> = if notepad { files.into_iter().take(20).map(|f| vec![f]).collect() } else { vec![files] };
+        for run in runs {
+            // (the folder of the first file is the editor's working folder, as Explorer gives it)
+            let dir = run[0].parent().map(Path::to_path_buf);
+            let mut cmd = std::process::Command::new(&program);
+            cmd.args(&run);
+            if let Some(d) = dir {
+                cmd.current_dir(d);
+            }
+            if let Err(e) = cmd.spawn() {
+                log::warn!("edit in text editor ({program}): {e}");
+                return;
+            }
+        }
+    });
+}
+
 /// Drop onto a sidebar entry / breadcrumb segment: Explorer rules (same volume = move).
 /// Opens `dir` in the user's editor (`ide` path, else VS Code's `code` launcher).
 pub fn open_in_ide(dir: PathBuf, ide: String) {
@@ -5663,6 +5693,12 @@ impl Render for Workspace {
                     let d = d.join("icon-themes");
                     let _ = std::fs::create_dir_all(&d);
                     this.open_tab(Location::Path(d), window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &EditFiles, _, cx| {
+                let paths = this.active_tab().read(cx).selection_paths();
+                if !paths.is_empty() {
+                    edit_in_text_editor(paths, cx.global::<crate::settings::Settings>().text_editor_path.clone());
                 }
             }))
             .on_action(cx.listener(|this, _: &OpenInIde, _, cx| {

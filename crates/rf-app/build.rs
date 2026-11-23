@@ -74,6 +74,7 @@ fn main() {
     println!("cargo:rerun-if-changed=rustyfiles.rc");
     println!("cargo:rerun-if-changed=directlook.rc");
     println!("cargo:rerun-if-changed=assets/rustyfiles.ico");
+    println!("cargo:rerun-if-changed=assets/directlook.ico");
     // each exe gets its own name (Windows shows FileDescription in Open with / Task Manager)
     // The .rc files say 0.1.0 as a placeholder: the version resource (Task Manager, Properties →
     // Details, Apps & features) gets the crate's real version, written into a copy in OUT_DIR.

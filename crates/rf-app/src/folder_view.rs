@@ -2778,7 +2778,7 @@ impl FolderView {
     }
     fn grid_row_h(&self) -> Pixels {
         match self.grid_style {
-            GridStyle::Tiles => px(GRID_SIZES[self.grid_size as usize].1),
+            GridStyle::Tiles => px(GRID_SIZES[self.grid_size as usize].1 - if crate::settings::compact_items() { COMPACT_TILE_SAVE } else { 0. }),
             GridStyle::Cards => px(84.),
             GridStyle::List => px(32.),
         }
@@ -2797,7 +2797,8 @@ impl FolderView {
     }
 
     pub fn row_h(&self) -> Pixels {
-        px(ROW_SIZES[(self.row_size as usize).min(ROW_SIZES.len() - 1)])
+        let sizes = if crate::settings::compact_items() { &COMPACT_ROW_SIZES } else { &ROW_SIZES };
+        px(sizes[(self.row_size as usize).min(sizes.len() - 1)])
     }
 
     /// The "Size" slider's position for the current layout (`None`: it has no sizes).
@@ -3193,6 +3194,10 @@ impl FolderView {
         });
         let name_text = crate::rtl::display_text(&row_name(e, show_ext, renamed.as_ref()));
         let base = match style {
+            // (compact: the 4 px around the picture, the gap under it and half the cell's padding go, see COMPACT_TILE_SAVE)
+            GridStyle::Tiles if crate::settings::compact_items() => {
+                v_flex().px_1().py(px(2.)).items_center().child(div().size(visual_px).flex().items_center().justify_center().child(visual)).child(label)
+            }
             GridStyle::Tiles => v_flex().p_1().gap_1().items_center().child(div().size(visual_px + px(4.)).flex().items_center().justify_center().child(visual)).child(label),
             GridStyle::Cards => h_flex()
                 .px_2()
@@ -5277,6 +5282,7 @@ impl FolderView {
         };
         let shown = |k: &str| !hidden.iter().any(|h| h == k);
         let recent: Vec<places::Recent> = places.recent.iter().filter(|r| r.used_ms > cleared).cloned().collect();
+        let recent_off = places.recent_off;
         // every tag with how many items carry it
         let tags: Vec<(u32, String, u32, usize)> = {
             let store = &cx.global::<crate::tags::Tags>().0;
@@ -5492,6 +5498,8 @@ impl FolderView {
         }
 
         let has_recent = !recent.is_empty() && shown("recent");
+        // an empty list because Windows keeps none: said, with where to switch it on (issue 259)
+        let recent_off_note = recent.is_empty() && recent_off && shown("recent");
         let has_devices = has_devices && shown("devices");
         let mut recent_list = v_flex().gap_0p5().max_w(px(900.));
         for (i, r) in recent.into_iter().enumerate() {
@@ -5611,6 +5619,13 @@ impl FolderView {
                     .when(has_devices, |d| d.child(div().h_2()).child(section(t!("Cihazlar"))).child(device_grid))
                     .when(has_network, |d| d.child(div().h_2()).child(section(t!("Ağ konumları"))).child(network_grid))
                     .when(has_tags, |d| d.child(div().h_2()).child(section(t!("Etiketler"))).child(tag_grid))
+                    .when(recent_off_note, |d| {
+                        d.child(div().h_2()).child(section(t!("Son kullanılanlar"))).child(
+                            div().max_w(px(900.)).text_sm().text_color(p.text_secondary).child(t!(
+                                "Windows son açılan öğeleri tutmuyor. Burada görmek için Windows Ayarları › Kişiselleştirme › Başlat'ta \"Son açılan öğeleri Başlat'ta, Atlama Listelerinde ve Dosya Gezgini'nde göster\" seçeneğini açın."
+                            )),
+                        )
+                    })
                     .when(has_recent, |d| {
                         d.child(div().h_2())
                             .child(
@@ -5961,6 +5976,10 @@ const GRID_SIZES: [(f32, f32, u32); 5] = [(76., 94., 64), (92., 112., 80), (124.
 const DEFAULT_GRID_SIZE: u8 = 2;
 /// Details row heights for the "Size" slider (30 = the classic one; 22 = as tight as File Explorer's compact rows, asked for on Threads).
 const ROW_SIZES: [f32; 5] = [22., 30., 36., 44., 52.];
+/// The same with "Compact items" on (Explorer's compact view: its rows are 22 px at the default size).
+const COMPACT_ROW_SIZES: [f32; 5] = [20., 22., 28., 34., 42.];
+/// What "Compact items" takes off a tile's height: the picture's 4 px frame, the 4 px gap under it and 4 of the cell's 8 px padding.
+const COMPACT_TILE_SAVE: f32 = 12.;
 const DEFAULT_ROW_SIZE: u8 = 1;
 
 const SLOW_LOAD: std::time::Duration = std::time::Duration::from_millis(400);

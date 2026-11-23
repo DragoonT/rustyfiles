@@ -79,6 +79,7 @@ fn commands() -> Vec<Cmd> {
         cmd!("Terminalde aç", "Ctrl+Shift+`", L::SquareTerminal, OpenTerminal),
         cmd!("Terminalde yönetici olarak aç", "", L::ShieldCheck, OpenTerminalAdmin),
         cmd!("Düzenleyicide aç", "", L::Code, OpenInIde),
+        cmd!("Metin düzenleyicide düzenle", "F4", L::FilePen, EditFiles),
         cmd!("Klasörü düzenle", "", L::WandSparkles, OrganizeFolder),
         cmd!("Açık / koyu tema", "Ctrl+Alt+T", L::SunMoon, ToggleTheme),
         cmd!("Yeni pencerede aç", "Ctrl+Alt+Enter", L::AppWindow, OpenInNewWindow),

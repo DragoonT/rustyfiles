@@ -115,6 +115,10 @@ fn load_cloud_and_wsl() -> Vec<Pinned> {
     for r in rf_win::syncroots::list() {
         add(r.name, r.path, L::Cloud);
     }
+    // and the folders a client pins to Explorer's navigation pane itself (MEGA's sync folders)
+    for r in rf_win::syncroots::pinned_folders() {
+        add(r.name, r.path, L::Cloud);
+    }
     // WSL distributions registered for this user
     if let Ok(lxss) = windows_registry::CURRENT_USER.open(r"Software\Microsoft\Windows\CurrentVersion\Lxss") {
         if let Ok(keys) = lxss.keys() {
@@ -136,6 +140,8 @@ pub struct Places {
     pub cloud: Vec<Pinned>,
     pub pinned: Vec<Pinned>,
     pub recent: Vec<Recent>,
+    /// Windows writes no recent items (switched off in its settings or by a policy): Home says so instead of an empty list.
+    pub recent_off: bool,
     pub libraries: Vec<rf_win::libraries::Library>,
     /// Network locations ("Add a network location" shortcuts): (name, target).
     pub network: Vec<(String, std::path::PathBuf)>,
@@ -160,6 +166,7 @@ impl Places {
                 cloud: Vec::new(),
                 pinned: Vec::new(),
                 recent: Vec::new(),
+                recent_off: false,
                 libraries: Vec::new(),
                 network: Vec::new(),
                 devices: Vec::new(),
@@ -317,7 +324,7 @@ impl Places {
             // the localized names the jump list and the Home view show for these folders are read here, on this thread: the
             // drawing only looks in the cache (see rf_win::localized::label_if_known)
             rf_win::localized::warm(recent.iter().filter(|r| r.is_dir).flat_map(|r| crate::nav_touch::label_paths(&r.target)));
-            (recent, load_cloud_and_wsl())
+            (recent, rf_win::dock::startrecent::recent_tracking_on(), load_cloud_and_wsl())
         });
         self._task = Some(cx.spawn(async move |this, cx| {
             let (pinned, drives, libraries, network) = work.await;
@@ -333,9 +340,10 @@ impl Places {
                 p.loaded = true;
                 cx.notify();
             });
-            let (recent, cloud) = extras.await;
+            let (recent, tracking, cloud) = extras.await;
             let _ = this.update(cx, |p, cx| {
                 p.recent = recent;
+                p.recent_off = !tracking;
                 p.cloud = cloud;
                 p.extras_loaded = true;
                 cx.notify();

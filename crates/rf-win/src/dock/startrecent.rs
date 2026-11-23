@@ -153,6 +153,27 @@ pub fn recent_dir() -> Option<PathBuf> {
     std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("Microsoft").join("Windows").join("Recent"))
 }
 
+/// Whether Windows writes recent items at all: off when "Show recently opened items in Start, Jump Lists and File Explorer" is
+/// switched off (`Start_TrackDocs` = 0) or a policy forbids the history (`NoRecentDocsHistory` = 1). Then the recent list stays empty
+/// whatever the user opens (issue 259).
+pub fn recent_tracking_on() -> bool {
+    let dword = |hive, key: &str, value: &str| -> Option<u32> {
+        use windows::Win32::System::Registry::{RRF_RT_REG_DWORD, RegGetValueW};
+        let (key, value) = (crate::wide::wide(key), crate::wide::wide(value));
+        let mut v = 0u32;
+        let mut len = 4u32;
+        unsafe { RegGetValueW(hive, windows::core::PCWSTR(key.as_ptr()), windows::core::PCWSTR(value.as_ptr()), RRF_RT_REG_DWORD, None, Some((&mut v as *mut u32).cast()), Some(&mut len)) }
+            .is_ok()
+            .then_some(v)
+    };
+    use windows::Win32::System::Registry::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    let policy = r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer";
+    if dword(HKEY_CURRENT_USER, policy, "NoRecentDocsHistory") == Some(1) || dword(HKEY_LOCAL_MACHINE, policy, "NoRecentDocsHistory") == Some(1) {
+        return false;
+    }
+    dword(HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "Start_TrackDocs") != Some(0)
+}
+
 /// How many shortcuts one job on the shell thread resolves. That thread serves every shell request of the dock, the icon extraction
 /// among them: a batch of 40 resolutions in one job made the first icons of an opening queue behind it. With a few at a time the other
 /// requests get their turn between the batches, and the reading stops as soon as there are enough files.

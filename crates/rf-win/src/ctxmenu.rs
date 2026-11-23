@@ -103,7 +103,7 @@ pub fn show_for_items(
     extra: &[ExtraItem],
 ) -> anyhow::Result<MenuOutcome> {
     let cm = menu_for_items(owner, items)?;
-    run_menu(owner, &cm, screen, extended, true, extra)
+    run_menu(owner, &cm, working_dir(&ShellTarget::Items(items.to_vec())).as_deref(), screen, extended, true, extra)
 }
 
 /// Menu for one item (used by the sidebar).
@@ -116,7 +116,7 @@ pub fn show_for_one(
 ) -> anyhow::Result<MenuOutcome> {
     let cm = menu_for_one(owner, item)?;
     // no inline rename from the sidebar
-    run_menu(owner, &cm, screen, extended, false, extra)
+    run_menu(owner, &cm, working_dir(&ShellTarget::One(item.to_path_buf())).as_deref(), screen, extended, false, extra)
 }
 
 /// Background (empty space) menu of a folder.
@@ -128,7 +128,7 @@ pub fn show_for_background(
     extra: &[ExtraItem],
 ) -> anyhow::Result<MenuOutcome> {
     let cm = menu_for_background(owner, dir)?;
-    run_menu(owner, &cm, screen, extended, false, extra)
+    run_menu(owner, &cm, Some(dir), screen, extended, false, extra)
 }
 
 // ---------- the shell menu as data (rendered by the app's own Fluent menu) ----------
@@ -170,6 +170,8 @@ pub struct ShellItem {
 struct Session {
     id: u64,
     cm: IContextMenu,
+    /// The folder a command runs in (see [`working_dir`]).
+    dir: Option<PathBuf>,
     hmenu: windows::Win32::UI::WindowsAndMessaging::HMENU,
 }
 
@@ -186,6 +188,18 @@ thread_local! {
     static SESSION: std::cell::RefCell<Option<Session>> = const { std::cell::RefCell::new(None) };
 }
 static NEXT_SESSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// The folder a command of `target`'s menu runs in, as Explorer gives it: the items' folder, or the folder itself for its empty area.
+/// Without it a command line that works on the current folder ("Run with PowerShell", a script reading files beside it) ran in
+/// rustyfiles' own working folder (issue 290).
+fn working_dir(target: &ShellTarget) -> Option<PathBuf> {
+    match target {
+        ShellTarget::Items(items) => items.first().and_then(|p| p.parent()).map(Path::to_path_buf),
+        // (a drive root has no parent: it is its own folder)
+        ShellTarget::One(item) => Some(item.parent().map_or_else(|| item.clone(), Path::to_path_buf)),
+        ShellTarget::Background(dir) => Some(dir.clone()),
+    }
+}
 
 fn context_menu_for(owner: HWND, target: &ShellTarget) -> anyhow::Result<(IContextMenu, bool)> {
     Ok(match target {
@@ -217,7 +231,7 @@ pub fn build(owner: HWND, target: &ShellTarget, extended: bool) -> anyhow::Resul
         let cm2: Option<IContextMenu2> = cm.cast().ok();
         let items = read_menu(&cm, cm3.as_ref(), cm2.as_ref(), hmenu, 0);
         let id = NEXT_SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        SESSION.with(|s| *s.borrow_mut() = Some(Session { id, cm, hmenu }));
+        SESSION.with(|s| *s.borrow_mut() = Some(Session { id, cm, dir: working_dir(target), hmenu }));
         Ok((id, items))
     }
 }
@@ -229,7 +243,7 @@ pub fn invoke(owner: HWND, session: u64, id: u32, screen: (i32, i32)) -> anyhow:
     let Some(s) = s.filter(|s| s.id == session) else {
         anyhow::bail!("menu session expired");
     };
-    let r = invoke_offset(owner, &s.cm, id - 1, screen);
+    let r = invoke_offset(owner, &s.cm, s.dir.as_deref(), id - 1, screen);
     drop(s);
     r
 }
@@ -254,10 +268,15 @@ pub fn invoke_verb(owner: HWND, target: &ShellTarget, verb: &str, screen: (i32, 
         let _ = cm.QueryContextMenu(hmenu, 0, 1, 0x7FFF, CMF_NORMAL | CMF_EXPLORE);
         let verb_a = std::ffi::CString::new(verb).unwrap_or_default();
         let verb_w = wide(verb);
+        let dir = working_dir(target);
+        let dir_a = dir.as_ref().filter(|d| d.to_string_lossy().is_ascii()).and_then(|d| std::ffi::CString::new(d.to_string_lossy().as_bytes()).ok());
+        let dir_w = dir.as_ref().map(|d| wide(d));
         let info = CMINVOKECOMMANDINFOEX {
             cbSize: std::mem::size_of::<CMINVOKECOMMANDINFOEX>() as u32,
             fMask: CMIC_MASK_UNICODE | CMIC_MASK_PTINVOKE,
             hwnd: owner,
+            lpDirectory: dir_a.as_ref().map_or(PCSTR::null(), |d| PCSTR(d.as_ptr() as *const u8)),
+            lpDirectoryW: dir_w.as_ref().map_or(PCWSTR::null(), |d| PCWSTR(d.as_ptr())),
             lpVerb: PCSTR(verb_a.as_ptr() as *const u8),
             lpVerbW: PCWSTR(verb_w.as_ptr()),
             nShow: SW_SHOWNORMAL.0,
@@ -280,12 +299,17 @@ fn verb_of(cm: &IContextMenu, offset: usize) -> String {
     }
 }
 
-fn invoke_offset(owner: HWND, cm: &IContextMenu, offset: u32, (x, y): (i32, i32)) -> anyhow::Result<MenuOutcome> {
+fn invoke_offset(owner: HWND, cm: &IContextMenu, dir: Option<&Path>, offset: u32, (x, y): (i32, i32)) -> anyhow::Result<MenuOutcome> {
     let verb = verb_of(cm, offset as usize);
     if verb.eq_ignore_ascii_case("rename") {
         return Ok(MenuOutcome::Rename);
     }
+    // (the ANSI copy only for an ASCII path: other text would reach an ANSI handler as UTF-8 bytes; Unicode handlers read the W one)
+    let dir_a = dir.filter(|d| d.to_string_lossy().is_ascii()).and_then(|d| std::ffi::CString::new(d.to_string_lossy().as_bytes()).ok());
+    let dir_w = dir.map(|d| wide(d));
     let info = CMINVOKECOMMANDINFOEX {
+        lpDirectory: dir_a.as_ref().map_or(PCSTR::null(), |d| PCSTR(d.as_ptr() as *const u8)),
+        lpDirectoryW: dir_w.as_ref().map_or(PCWSTR::null(), |d| PCWSTR(d.as_ptr())),
         cbSize: std::mem::size_of::<CMINVOKECOMMANDINFOEX>() as u32,
         fMask: CMIC_MASK_UNICODE | CMIC_MASK_PTINVOKE,
         hwnd: owner,
@@ -462,6 +486,7 @@ unsafe fn bitmap_bgra(hbm: windows::Win32::Graphics::Gdi::HBITMAP) -> Option<She
 fn run_menu(
     owner: HWND,
     cm: &IContextMenu,
+    dir: Option<&Path>,
     (x, y): (i32, i32),
     extended: bool,
     can_rename: bool,
@@ -527,7 +552,7 @@ fn run_menu(
         } else if id >= EXTRA_BASE {
             Ok(MenuOutcome::Custom(id - EXTRA_BASE))
         } else {
-            invoke_offset(owner, cm, id - 1, (x, y))
+            invoke_offset(owner, cm, dir, id - 1, (x, y))
         };
         let _ = DestroyMenu(hmenu);
         result

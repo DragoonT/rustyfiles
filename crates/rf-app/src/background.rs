@@ -71,9 +71,8 @@ pub fn sync_tray(on: bool) {
     } else {
         rf_win::tray::hide();
     }
-    // One icon in the notification area: while ours is there, DirectLook leaves its own out
-    // (it reads this setting when told to reload; see look::app::tray_wanted).
-    crate::look::ipc::send(crate::look::ipc::Msg::Reload, false);
+    // (one icon in the notification area: while ours is there DirectLook leaves its own out; it reads the setting from the file when
+    // told to reload, so `settings::update` tells it after the save, see look::app::tray_wanted)
 }
 
 /// Routes tray clicks to the app (call once at startup).

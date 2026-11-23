@@ -33,6 +33,8 @@ gpui_kit::actions!(
         FocusSearch,
         ToggleHidden,
         OpenTerminal,
+        /// The selected files in the chosen text editor (Settings › Developer tools; Notepad when none), F4 as in Total Commander.
+        EditFiles,
         Properties,
         ClearSelection,
         CopyItems,
@@ -178,6 +180,7 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("shift-f6", MoveToOtherPane, f),
         KeyBinding::new("shift-delete", DeletePermanently, f),
         KeyBinding::new("f2", RenameItem, f),
+        KeyBinding::new("f4", EditFiles, f),
         KeyBinding::new("ctrl-shift-n", NewFolder, f),
         KeyBinding::new("shift-f10", ShowContextMenu, f),
         KeyBinding::new("menu", ShowContextMenu, f),

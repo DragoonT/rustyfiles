@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><defs>
+    <linearGradient id="dlring" x1="0" y1="0" x2="0.4" y2="1"><stop offset="0" stop-color="#ffb37a"/><stop offset="1" stop-color="#ff6a1a"/></linearGradient>
+    <linearGradient id="dlbolt" x1="0" y1="0" x2="0.3" y2="1"><stop offset="0" stop-color="#ffd2a6"/><stop offset="1" stop-color="#ff6a1a"/></linearGradient>
+    <linearGradient id="dlhandle" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff8a3d"/><stop offset="1" stop-color="#d9480f"/></linearGradient>
+    <linearGradient id="dlglass" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2c2c31"/><stop offset="1" stop-color="#050506"/></linearGradient>
+</defs><line x1="652.3" y1="652.3" x2="885.6" y2="885.6" stroke="url(#dlhandle)" stroke-width="150" stroke-linecap="round"/><circle cx="420" cy="420" r="300" fill="url(#dlglass)" stroke="url(#dlring)" stroke-width="95"/><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z" transform="translate(228.0 228.0) scale(16)" fill="url(#dlbolt)"/></svg>

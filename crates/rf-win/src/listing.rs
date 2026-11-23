@@ -25,6 +25,9 @@ pub enum ListError {
     NotReady,
     #[error("Ağ yolu bulunamadı")]
     NetworkPath,
+    /// The share's server did not answer the quick question of [`crate::netprobe`] (asleep, off or gone).
+    #[error("Sunucu cevap vermiyor")]
+    ServerSilent,
     #[error("Listeleme hatası (kod {0})")]
     Os(u32),
     #[error("İptal edildi")]
@@ -41,6 +44,10 @@ pub fn list_dir(
     cancelled: &dyn Fn() -> bool,
     on_batch: &mut dyn FnMut(Vec<Entry>),
 ) -> Result<usize, ListError> {
+    // a sleeping or switched-off server: said in two seconds, not after Windows' own SMB timeout (21 s and more)
+    if crate::localized::is_network(dir) && crate::netprobe::server_of(dir).is_some_and(|s| !crate::netprobe::answers(&s)) {
+        return Err(ListError::ServerSilent);
+    }
     let mut pattern = long_path(dir);
     pattern.pop(); // NUL
     if pattern.last() != Some(&(b'\\' as u16)) {

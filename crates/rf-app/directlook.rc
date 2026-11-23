@@ -1,5 +1,7 @@
-// App icon: id 1 is what GPUI loads for its windows (platform.rs load_icon).
-1 ICON "assets/rustyfiles.ico"
+// App icon: id 1 is what GPUI loads for its windows (platform.rs load_icon), and the tray icon too (rf_win::tray::app_icon).
+// A magnifier with the bolt, not rustyfiles' folder: the two icons side by side in the tray must tell apart at a glance
+// (Discord, 2026-11-23). Drawn from assets/directlook.svg and directlook-small.svg (24 px and below).
+1 ICON "assets/directlook.ico"
 
 // The name Windows shows (Open with, Default apps, Task Manager).
 1 VERSIONINFO

@@ -4,6 +4,7 @@ use chrono::{Local, TimeZone};
 
 static ENGLISH: AtomicBool = AtomicBool::new(false);
 static DECIMAL: AtomicBool = AtomicBool::new(false);
+static IEC: AtomicBool = AtomicBool::new(false);
 static DATE_STYLE: AtomicU8 = AtomicU8::new(0);
 /// How the system writes a local date and time (Windows' short date and time, set by the app at start: `set_system_format`).
 /// Unset (tests, other platforms): "05.11.2026 13:45".
@@ -48,6 +49,12 @@ pub fn set_decimal_sizes(on: bool) {
     DECIMAL.store(on, Ordering::Relaxed);
 }
 
+/// Powers of 1024 written as KiB, MiB, GiB (the IEC names) instead of Explorer's KB, MB, GB. Decimal sizes keep KB, MB, GB, which are
+/// right for them.
+pub fn set_binary_prefixes(on: bool) {
+    IEC.store(on, Ordering::Relaxed);
+}
+
 /// UI language switch for the few words in number formats: English uses "bytes" and a decimal
 /// point; the default (Turkish) uses "bayt" and a decimal comma.
 pub fn set_english(on: bool) {
@@ -56,12 +63,17 @@ pub fn set_english(on: bool) {
 
 /// "0 bayt", "512 bayt", "1,2 KB", "34,5 MB", "1,02 GB" (Turkish decimal comma).
 pub fn size(bytes: u64) -> String {
-    size_with(bytes, ENGLISH.load(Ordering::Relaxed), DECIMAL.load(Ordering::Relaxed))
+    let decimal = DECIMAL.load(Ordering::Relaxed);
+    size_with(bytes, ENGLISH.load(Ordering::Relaxed), decimal, !decimal && IEC.load(Ordering::Relaxed))
 }
 
-fn size_with(bytes: u64, en: bool, decimal: bool) -> String {
+fn size_with(bytes: u64, en: bool, decimal: bool, iec: bool) -> String {
     let base: f64 = if decimal { 1000.0 } else { 1024.0 };
-    let units: [&str; 6] = [if en { "bytes" } else { "bayt" }, "KB", "MB", "GB", "TB", "PB"];
+    let units: [&str; 6] = if iec {
+        [if en { "bytes" } else { "bayt" }, "KiB", "MiB", "GiB", "TiB", "PiB"]
+    } else {
+        [if en { "bytes" } else { "bayt" }, "KB", "MB", "GB", "TB", "PB"]
+    };
     if (bytes as f64) < base {
         return format!("{bytes} {}", units[0]);
     }
@@ -147,8 +159,11 @@ mod tests {
         assert_eq!(datetime_with(now - 2 * 86_400_000, DateStyle::Relative, now, false), "2 gün önce");
         assert!(datetime_with(now - 30 * 86_400_000, DateStyle::Relative, now, false).contains('.'));
         assert_eq!(datetime_with(now, DateStyle::Universal, now, false).len(), 16);
-        assert_eq!(size_with(1500, false, true), "1,50 KB");
-        assert_eq!(size_with(1500, false, false), "1,46 KB");
+        assert_eq!(size_with(1500, false, true, false), "1,50 KB");
+        assert_eq!(size_with(1500, false, false, false), "1,46 KB");
+        assert_eq!(size_with(1500, true, false, true), "1.46 KiB");
+        assert_eq!(size_with(3 * 1024 * 1024 * 1024, true, false, true), "3.00 GiB");
+        assert_eq!(size_with(512, true, false, true), "512 bytes");
     }
 
     #[test]

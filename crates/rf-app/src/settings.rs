@@ -600,6 +600,10 @@ pub struct Settings {
     /// corners at its right and bottom; icons and text keep their size (a Discord request, 2026-11-22: room on small laptop screens).
     #[serde(default)]
     pub compact_window: bool,
+    /// "Compact items", Explorer's "Compact view": every folder's Details rows are thinner (30 → 22 at the default size) and the grid's
+    /// tiles closer, the name nearer its picture (a Discord request, 2026-11-23).
+    #[serde(default)]
+    pub compact_items: bool,
     pub backdrop: BackdropPref,
     /// Background tint color (0xRRGGBB), `None` = the backdrop as is.
     pub tint: Option<u32>,
@@ -668,6 +672,8 @@ pub struct Settings {
     pub double_click_up: bool,
     pub select_previous_on_up: bool,
     pub decimal_sizes: bool,
+    /// With binary sizes: KiB, MiB, GiB instead of Explorer's KB, MB, GB (a request on Discord, 2026-11-23).
+    pub binary_prefixes: bool,
     pub calculate_folder_sizes: bool,
     /// Folders show their size on disk (files rounded up to whole clusters) instead of the sum
     /// of their file sizes.
@@ -712,6 +718,8 @@ pub struct Settings {
     pub name_index: bool,
     /// Folders left out of the name index (searching inside them walks the disk).
     pub index_excluded: Vec<String>,
+    /// Hard drives (disks with a seek penalty) in the name index too: off by default, walking one is minutes of audible seeking.
+    pub index_hard_drives: bool,
 
     // ---- Developer tools
     pub ide_button: IdePref,
@@ -719,6 +727,9 @@ pub struct Settings {
     pub ide_path: String,
     /// "Open in Terminal" starts this program (a path or a name such as `cmd.exe`); empty: Windows Terminal, else PowerShell (issue 224).
     pub terminal_path: String,
+    /// The program "Edit" (F4) opens files with: empty is Notepad (Discord, 2026-11-23: "select an alternative editor (e.g. Sublime
+    /// Text, Notepad++, VS Code)").
+    pub text_editor_path: String,
 
     // ---- Advanced
     pub show_flatten: bool,
@@ -979,6 +990,7 @@ impl Default for Settings {
             animations: AnimPref::System,
             windows_file_explorer_theme: false,
             compact_window: false,
+            compact_items: false,
             props_size: None,
             app_icon: None,
             backdrop: BackdropPref::Mica,
@@ -1023,6 +1035,7 @@ impl Default for Settings {
             double_click_up: true,
             select_previous_on_up: true,
             decimal_sizes: false,
+            binary_prefixes: false,
             calculate_folder_sizes: false,
             folder_size_on_disk: false,
             fast_file_ops: true,
@@ -1043,9 +1056,11 @@ impl Default for Settings {
             search_index: true,
             name_index: true,
             index_excluded: Vec::new(),
+            index_hard_drives: false,
             ide_button: IdePref::GitRepos,
             ide_path: String::new(),
             terminal_path: String::new(),
+            text_editor_path: String::new(),
             show_flatten: false,
             space_quicklook: false,
             directlook_enabled: true,
@@ -1123,6 +1138,7 @@ pub const HG_DEFAULT: [u8; 5] = [52, 50, 67, 62, 50];
 static THEME: AtomicU8 = AtomicU8::new(0);
 static WINDOWS_FILE_EXPLORER_THEME: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static COMPACT_WINDOW: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static COMPACT_ITEMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static ICON_THEME: AtomicU8 = AtomicU8::new(0);
 /// The selected freedesktop pack's folder name, read by the icon cache without a `Settings` global.
 static ICON_PACK: std::sync::OnceLock<parking_lot::RwLock<String>> = std::sync::OnceLock::new();
@@ -1186,6 +1202,11 @@ pub fn theme_override() -> ThemePref {
 /// The setting "Compact window", read without an `App` (the bars' heights, see `theme::titlebar_h`).
 pub fn compact_window() -> bool {
     COMPACT_WINDOW.load(Ordering::Relaxed)
+}
+
+/// The setting "Compact items", read without an `App` (the lists' row heights, see `FolderView::row_h`).
+pub fn compact_items() -> bool {
+    COMPACT_ITEMS.load(Ordering::Relaxed)
 }
 
 pub fn windows_file_explorer_theme() -> bool {
@@ -1427,7 +1448,7 @@ impl Settings {
     }
 
     pub(crate) fn apply_side_effects(&self) {
-        sync_name_index(self.name_index, &self.index_excluded);
+        sync_name_index(self.name_index, &self.index_excluded, self.index_hard_drives);
         crate::i18n::set(self.language);
         crate::aliases::set(self.folder_aliases.clone());
         rf_win::openrules::set(self.open_rules.clone());
@@ -1447,6 +1468,7 @@ impl Settings {
             DatePref::Universal => rf_core::format::DateStyle::Universal,
         });
         rf_core::format::set_decimal_sizes(self.decimal_sizes);
+        rf_core::format::set_binary_prefixes(self.binary_prefixes);
         SOLID.store(self.backdrop == BackdropPref::Solid, Ordering::Relaxed);
         MAIN_ONLY.store(main_window_only(self.backdrop), Ordering::Relaxed);
         // (the Dock's performance mode: no motion in the Dock's process, whatever the app's own setting)
@@ -1459,6 +1481,7 @@ impl Settings {
         gpui_windows::SMOOTH_SCROLL.store(self.smooth_scroll, Ordering::Relaxed);
         WINDOWS_FILE_EXPLORER_THEME.store(self.windows_file_explorer_theme, Ordering::Relaxed);
         COMPACT_WINDOW.store(self.compact_window, Ordering::Relaxed);
+        COMPACT_ITEMS.store(self.compact_items, Ordering::Relaxed);
         // (Windows' own menus shown by this process: the classic context menu, issue 211)
         rf_win::menu_theme::set_wanted(match self.theme {
             ThemePref::System => None,
@@ -1552,14 +1575,16 @@ pub fn update(cx: &mut App, f: impl FnOnce(&mut Settings)) {
     let explorer_theme_before = old.windows_file_explorer_theme;
     cx.update_global::<Settings, _>(|s, _| f(s));
     let s = cx.global::<Settings>().clone();
-    let explorer_theme_changed = s.windows_file_explorer_theme != explorer_theme_before;
+    // (DirectLook reads both from the file: the explorer theme, and background mode for whether it shows its own tray icon)
+    let directlook_reload = s.windows_file_explorer_theme != explorer_theme_before || s.run_in_background != old.run_in_background;
     s.apply_side_effects();
     apply_component_theme(cx);
     let icon_pack_changed = s.icon_theme != old.icon_theme || s.icon_theme_pack != old.icon_theme_pack;
     let theme_changed = s.theme != old.theme;
     std::thread::spawn(move || {
         s.save();
-        if explorer_theme_changed {
+        // after the save, or DirectLook reads the old value (two tray icons once background mode was turned on)
+        if directlook_reload {
             crate::look::ipc::send(crate::look::ipc::Msg::Reload, false);
         }
         // after the save: the dock process reads the file when it is told to reload
@@ -1866,7 +1891,7 @@ theme = \"dark\"
 
 /// Starts or stops the name index when the setting changes. The first start waits a few seconds
 /// so it never competes with opening the window.
-fn sync_name_index(on: bool, excluded: &[String]) {
+fn sync_name_index(on: bool, excluded: &[String], hard_drives: bool) {
     use std::sync::atomic::{AtomicU8, Ordering};
     // DirectLook reads these settings too: the index is rustyfiles' (a second indexer would walk
     // every drive again and write the same index files)
@@ -1876,6 +1901,7 @@ fn sync_name_index(on: bool, excluded: &[String]) {
     // 0 = not decided yet, 1 = off, 2 = on
     static STATE: AtomicU8 = AtomicU8::new(0);
     static EXCLUDED: parking_lot::Mutex<Option<Vec<String>>> = parking_lot::Mutex::new(None);
+    static HARD_DRIVES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     let list_changed = {
         let mut e = EXCLUDED.lock();
         let changed = e.as_deref() != Some(excluded);
@@ -1883,11 +1909,12 @@ fn sync_name_index(on: bool, excluded: &[String]) {
             *e = Some(excluded.to_vec());
             rf_win::nameindex::set_excluded(&excluded.iter().map(std::path::PathBuf::from).collect::<Vec<_>>());
         }
-        changed
+        // (hard drives in or out: another set of roots, started anew like a changed list)
+        HARD_DRIVES.swap(hard_drives, Ordering::Relaxed) != hard_drives || changed
     };
     let want = if on { 2 } else { 1 };
     let was = STATE.swap(want, Ordering::Relaxed);
-    // a changed exclusion list rebuilds a running index (the fresh walk leaves the folders out)
+    // a changed exclusion list rebuilds a running index (the fresh walk leaves the folders out); so do hard drives taken in or out
     if was == want && !(on && list_changed && was != 0) {
         return;
     }
@@ -1912,7 +1939,7 @@ fn sync_name_index(on: bool, excluded: &[String]) {
         // RUSTYFILES_INDEX_ROOTS="E:\;F:\" picks the roots (testing)
         let roots = match std::env::var("RUSTYFILES_INDEX_ROOTS") {
             Ok(v) => v.split(';').filter(|s| !s.is_empty()).map(std::path::PathBuf::from).collect(),
-            Err(_) => rf_win::indexer::local_roots(),
+            Err(_) => rf_win::indexer::local_roots(HARD_DRIVES.load(Ordering::Relaxed)),
         };
         rf_win::indexer::start(roots, dir);
     });

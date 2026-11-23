@@ -13192,12 +13192,93 @@
   "id": "25ac4d3a",
   "key": "Üzerine gelince ayrıntıları göster",
   "tr": "Üzerine gelince ayrıntıları göster",
-  "en": "Show details on hover"
+  "en": "Show details on hover",
+  "note": "a setting switch: show a small box with file details when the mouse pointer rests on a file"
  },
  {
   "id": "10326180",
   "key": "İşaretçi bir öğenin üzerinde durunca boyutu, tarihleri ve resmin boyutlarını gösteren kutu",
   "tr": "İşaretçi bir öğenin üzerinde durunca boyutu, tarihleri ve resmin boyutlarını gösteren kutu",
   "en": "The box with the size, the dates and a picture's dimensions when the pointer rests on an item"
+ },
+ {
+  "id": "0e27a81b",
+  "key": "Sıkışık öğeler",
+  "tr": "Sıkışık öğeler",
+  "en": "Compact items",
+  "note": "a setting: a denser layout of the file list (less space between items), like Explorer's \"compact view\""
+ },
+ {
+  "id": "5e476957",
+  "key": "Explorer'ın sıkışık görünümü gibi: ayrıntılar görünümünde satırlar incelir, ızgarada öğeler birbirine ve adlar simgelerine yaklaşır. Her klasörde geçerlidir.",
+  "tr": "Explorer'ın sıkışık görünümü gibi: ayrıntılar görünümünde satırlar incelir, ızgarada öğeler birbirine ve adlar simgelerine yaklaşır. Her klasörde geçerlidir.",
+  "en": "Like Explorer's compact view: rows in Details are thinner, and in the grid the items sit closer together and names closer to their pictures. Applies to every folder."
+ },
+ {
+  "id": "3d136994",
+  "key": "İkili, IEC adlarıyla (1 KiB = 1024 bayt)",
+  "tr": "İkili, IEC adlarıyla (1 KiB = 1024 bayt)",
+  "en": "Binary, IEC names (1 KiB = 1024 bytes)"
+ },
+ {
+  "id": "37cfe016",
+  "key": "Sunucu cevap vermiyor",
+  "tr": "Sunucu cevap vermiyor",
+  "en": "The server does not answer",
+  "note": "shown in an empty folder view: the network server holding this shared folder does not respond"
+ },
+ {
+  "id": "6422f057",
+  "key": "Windows son açılan öğeleri tutmuyor. Burada görmek için Windows Ayarları › Kişiselleştirme › Başlat'ta \"Son açılan öğeleri Başlat'ta, Atlama Listelerinde ve Dosya Gezgini'nde göster\" seçeneğini açın.",
+  "tr": "Windows son açılan öğeleri tutmuyor. Burada görmek için Windows Ayarları › Kişiselleştirme › Başlat'ta \"Son açılan öğeleri Başlat'ta, Atlama Listelerinde ve Dosya Gezgini'nde göster\" seçeneğini açın.",
+  "en": "Windows keeps no list of recently opened items. To see them here, turn on \"Show recently opened items in Start, Jump Lists, and File Explorer\" in Windows Settings › Personalization › Start."
+ },
+ {
+  "id": "eb95aac1",
+  "key": "Sabit diskleri de dizinle",
+  "tr": "Sabit diskleri de dizinle",
+  "en": "Index hard drives too",
+  "note": "a setting switch: also add spinning hard disks (HDD) to the file-name search index"
+ },
+ {
+  "id": "35002534",
+  "key": "Dönen diskler (HDD) varsayılan olarak dizine alınmaz: taranmaları dakikalar sürer ve duyulur. Açılırsa tarama bilgisayar boştayken yapılır.",
+  "tr": "Dönen diskler (HDD) varsayılan olarak dizine alınmaz: taranmaları dakikalar sürer ve duyulur. Açılırsa tarama bilgisayar boştayken yapılır.",
+  "en": "Spinning hard drives (HDD) are left out by default: reading one takes minutes and can be heard. When on, the drive is read while the PC is idle."
+ },
+ {
+  "id": "fcc36417",
+  "key": "Metin düzenleyicide düzenle",
+  "tr": "Metin düzenleyicide düzenle",
+  "en": "Edit in text editor",
+  "note": "a command: open the selected files in a text editor program to change them"
+ },
+ {
+  "id": "3f183d7a",
+  "key": "Metin düzenleyicide düzenle  (F4)",
+  "tr": "Metin düzenleyicide düzenle  (F4)",
+  "en": "Edit in text editor  (F4)",
+  "note": "a toolbar button tooltip: open the selected files in a text editor; F4 is its key"
+ },
+ {
+  "id": "7596f080",
+  "key": "Metin düzenleyici (F4)",
+  "tr": "Metin düzenleyici (F4)",
+  "en": "Text editor (F4)",
+  "note": "a setting title: which text editor program the F4 command uses"
+ },
+ {
+  "id": "7f9f54f7",
+  "key": "Otomatik: Not Defteri",
+  "tr": "Otomatik: Not Defteri",
+  "en": "Automatic: Notepad",
+  "note": "a setting value: chosen automatically, Windows Notepad (keep the program name Notepad as Windows calls it in this language)"
+ },
+ {
+  "id": "8207de4b",
+  "key": "Metin düzenleyici seç",
+  "tr": "Metin düzenleyici seç",
+  "en": "Choose text editor",
+  "note": "title of a file dialog: pick the text editor program"
  }
 ]

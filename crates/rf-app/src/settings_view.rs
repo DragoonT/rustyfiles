@@ -1693,6 +1693,13 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         ),
         card(
             p,
+            L::Rows3,
+            t!("Sıkışık öğeler"),
+            Some(t!("Explorer'ın sıkışık görünümü gibi: ayrıntılar görünümünde satırlar incelir, ızgarada öğeler birbirine ve adlar simgelerine yaklaşır. Her klasörde geçerlidir.")),
+            sw("compact-items", p, s.compact_items, |s, v| s.compact_items = v),
+        ),
+        card(
+            p,
             L::Image,
             t!("Uygulama simgesi"),
             Some(t!("Başlat menüsündeki, masaüstündeki ve görev çubuğuna sabitlenmiş rustyfiles kısayollarının simgesi. Güncellemelerden sonra da kalır.")),
@@ -1946,7 +1953,7 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         None,
         move || {
             // (key, id, label, off unless asked for)
-            const BUTTONS: [(&str, &str, &str, bool); 16] = [
+            const BUTTONS: [(&str, &str, &str, bool); 17] = [
                 ("new", "tb-new", "Yeni", false),
                 ("newfolder", "tb-newfolder", "Yeni klasör", true),
                 ("cut", "tb-cut", "Kes", false),
@@ -1956,6 +1963,7 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                 ("share", "tb-share", "Paylaş", false),
                 ("delete", "tb-delete", "Sil", false),
                 ("props", "tb-props", "Özellikler", false),
+                ("edit", "tb-edit", "Metin düzenleyicide düzenle", true),
                 ("terminal", "tb-terminal", "Terminalde aç", true),
                 ("hidden", "tb-hidden", "Gizli öğeleri göster/gizle", true),
                 ("refresh", "tb-refresh", "Yenile", true),
@@ -2327,6 +2335,13 @@ fn files(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         sw("name-index", p, s.name_index, |s, v| s.name_index = v),
     ));
     if s.name_index {
+        v.push(card(
+            p,
+            L::HardDrive,
+            t!("Sabit diskleri de dizinle"),
+            Some(t!("Dönen diskler (HDD) varsayılan olarak dizine alınmaz: taranmaları dakikalar sürer ve duyulur. Açılırsa tarama bilgisayar boştayken yapılır.")),
+            sw("index-hard-drives", p, s.index_hard_drives, |s, v| s.index_hard_drives = v),
+        ));
         v.push(index_exclusions(p, s));
     }
     v.push(card(
@@ -2337,9 +2352,16 @@ fn files(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         dropdown(
             "size-fmt",
             p,
-            s.decimal_sizes,
-            vec![(false, t!("İkili (1 KB = 1024 bayt)").into()), (true, t!("Ondalık (1 KB = 1000 bayt)").into())],
-            |s, v| s.decimal_sizes = v,
+            (s.decimal_sizes, s.binary_prefixes && !s.decimal_sizes),
+            vec![
+                ((false, false), t!("İkili (1 KB = 1024 bayt)").into()),
+                ((false, true), t!("İkili, IEC adlarıyla (1 KiB = 1024 bayt)").into()),
+                ((true, false), t!("Ondalık (1 KB = 1000 bayt)").into()),
+            ],
+            |s, (decimal, iec)| {
+                s.decimal_sizes = decimal;
+                s.binary_prefixes = iec;
+            },
         ),
     ));
     let pp = *p;
@@ -2704,7 +2726,53 @@ fn dev(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                 .into_any_element(),
         ),
         terminal_card(p, s),
+        text_editor_card(p, s, &editors),
     ]
+}
+
+/// The text editors a file can be edited in with F4 (or the toolbar's "Edit"): Notepad, the usual ones that are installed, the code
+/// editors found for "Open in editor", or any program through "Browse".
+fn text_editor_card(p: &Palette, s: &Settings, code_editors: &[rf_win::editors::Editor]) -> AnyElement {
+    // (looked for once: a few files in the programs folders)
+    static FOUND: std::sync::OnceLock<Vec<(&'static str, String)>> = std::sync::OnceLock::new();
+    let found = FOUND.get_or_init(|| {
+        let roots: Vec<std::path::PathBuf> = ["ProgramFiles", "ProgramFiles(x86)"].iter().filter_map(std::env::var_os).map(std::path::PathBuf::from).collect();
+        let mut out = Vec::new();
+        for (name, rel) in [("Notepad++", r"Notepad++\notepad++.exe"), ("Sublime Text", r"Sublime Text\sublime_text.exe"), ("Sublime Text 3", r"Sublime Text 3\sublime_text.exe")] {
+            if let Some(exe) = roots.iter().map(|r| r.join(rel)).find(|p| p.is_file()) {
+                out.push((name, exe.display().to_string()));
+            }
+        }
+        out
+    });
+    let mut choices: Vec<(String, String)> = vec![("Notepad".to_string(), "notepad.exe".to_string())];
+    choices.extend(found.iter().map(|(n, e)| (n.to_string(), e.clone())));
+    choices.extend(code_editors.iter().map(|e| (e.name.to_string(), e.exe.display().to_string())));
+    let label = if s.text_editor_path.is_empty() {
+        t!("Otomatik: Not Defteri").to_string()
+    } else {
+        choices.iter().find(|(_, e)| e.eq_ignore_ascii_case(&s.text_editor_path)).map_or_else(|| s.text_editor_path.clone(), |(n, _)| n.clone())
+    };
+    let buttons = choices.into_iter().enumerate().map(|(i, (name, exe))| {
+        button(("text-editor-pick", i), p, name, move |_, cx| {
+            let exe = exe.clone();
+            settings::update(cx, move |s| s.text_editor_path = exe)
+        })
+    });
+    card(
+        p,
+        L::FilePen,
+        t!("Metin düzenleyici (F4)"),
+        Some(&label),
+        h_flex()
+            .gap_2()
+            .flex_wrap()
+            .justify_end()
+            .children(buttons)
+            .child(button("text-editor-browse", p, t!("Gözat"), |window, cx| pick_into(window, cx, t!("Metin düzenleyici seç"), PickTarget::TextEditor)))
+            .child(button("text-editor-reset", p, t!("Otomatik"), |_, cx| settings::update(cx, |s| s.text_editor_path.clear())))
+            .into_any_element(),
+    )
 }
 
 /// "Open in Terminal" starts this program (issue 224): the usual ones as buttons, any other one through "Browse".
@@ -3456,6 +3524,7 @@ enum PickTarget {
     Export,
     Import,
     Terminal,
+    TextEditor,
 }
 
 /// Runs a Windows file dialog on the shell thread and applies the result.
@@ -3476,6 +3545,7 @@ fn pick_into(_window: &mut Window, cx: &mut App, title: &str, target: PickTarget
         PickTarget::Export => 2,
         PickTarget::Import => 3,
         PickTarget::Terminal => 4,
+        PickTarget::TextEditor => 5,
     };
     rf_win::sta::run(move |owner| {
         use rf_win::dialogs::{Pick, pick};
@@ -3484,7 +3554,7 @@ fn pick_into(_window: &mut Window, cx: &mut App, title: &str, target: PickTarget
         }
         let r = match kind {
             0 => pick(owner, &title, Pick::File { filters: &f(&images) }),
-            1 | 4 => pick(owner, &title, Pick::File { filters: &f(&exe) }),
+            1 | 4 | 5 => pick(owner, &title, Pick::File { filters: &f(&exe) }),
             2 => pick(owner, &title, Pick::Save { filters: &f(&toml), default_name: "rustyfiles-ayarlar.toml" }),
             _ => pick(owner, &title, Pick::File { filters: &f(&toml) }),
         };
@@ -3496,6 +3566,7 @@ fn pick_into(_window: &mut Window, cx: &mut App, title: &str, target: PickTarget
             0 => settings::update(cx, |s| s.background_image = Some(path)),
             1 => settings::update(cx, |s| s.ide_path = path.display().to_string()),
             4 => settings::update(cx, |s| s.terminal_path = path.display().to_string()),
+            5 => settings::update(cx, |s| s.text_editor_path = path.display().to_string()),
             2 => {
                 let s = cx.global::<Settings>().clone();
                 std::thread::spawn(move || {
