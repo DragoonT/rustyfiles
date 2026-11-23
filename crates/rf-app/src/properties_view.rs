@@ -1823,27 +1823,62 @@ fn group(n: u64) -> String {
 }
 
 fn row(p: &Palette, k: &'static str, v: String) -> AnyElement {
+    let group = SharedString::from(format!("prop-row-{k}-{v}"));
     h_flex()
+        .group(group.clone())
         .w_full()
         .gap_3()
         .items_start()
         .py(px(7.))
         .text_sm()
         .child(div().w(px(150.)).flex_shrink_0().text_color(p.text_secondary).child(k))
+        .child(value_cell(p, group, v))
+        .into_any_element()
+}
+
+/// A row's value with a copy button beside it, shown while the pointer is on the row: the window's texts cannot be selected, and
+/// Explorer's can (a request on Discord, 2026-11-23).
+fn value_cell(p: &Palette, group: SharedString, v: String) -> AnyElement {
+    let copy = v.clone();
+    let id = ElementId::Name(SharedString::from(format!("{group}-copy")));
+    h_flex()
+        .flex_1()
+        .min_w_0()
+        .gap_2()
+        .items_start()
         .child(div().flex_1().min_w_0().child(v))
+        .when(!copy.trim().is_empty(), |d| {
+            d.child(
+                div()
+                    .id(id)
+                    .flex_shrink_0()
+                    .p(px(3.))
+                    .rounded(theme::RADIUS_SM)
+                    .cursor_pointer()
+                    .text_color(p.text_secondary)
+                    .invisible()
+                    .group_hover(group, |s| s.visible())
+                    .hover(|s| s.bg(p.hover))
+                    .tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new(t!("Kopyala")).build(w, cx))
+                    .on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(copy.clone())))
+                    .child(Icon::new(L::Copy).size(px(13.))),
+            )
+        })
         .into_any_element()
 }
 
 /// [`row`] with a name that is data (a stream's name), not one of our texts.
 fn row_dyn(p: &Palette, k: String, v: String) -> AnyElement {
+    let group = SharedString::from(format!("prop-row-{k}-{v}"));
     h_flex()
+        .group(group.clone())
         .w_full()
         .gap_3()
         .items_start()
         .py(px(7.))
         .text_sm()
         .child(div().w(px(150.)).flex_shrink_0().overflow_hidden().text_ellipsis().text_color(p.text_secondary).child(k))
-        .child(div().flex_1().min_w_0().child(v))
+        .child(value_cell(p, group, v))
         .into_any_element()
 }
 
