@@ -97,6 +97,12 @@ pub fn get_image(path: &Path, size: u32, kind: Kind) -> anyhow::Result<Bgra> {
         if let Some(b) = design_thumbnail(path, size) {
             return Ok(b);
         }
+        // Photoshop files from the file itself: Windows has no thumbnail provider for them
+        if crate::psd_thumb::handles(path)
+            && let Some(b) = crate::psd_thumb::thumbnail(path, size)
+        {
+            return Ok(b);
+        }
     }
     // A customised folder's icon straight from the file its desktop.ini names. The shell keeps a folder's desktop.ini in this
     // process: asked again after the icon was changed a second time, it gave the first icon back (issue 65). A file that gives no

@@ -20,6 +20,7 @@ pub mod menu_theme;
 pub mod default_fm;
 pub mod desktop;
 pub mod design;
+pub mod psd_thumb;
 pub mod dialog_reg;
 pub mod dialogs;
 pub mod diskusage;
