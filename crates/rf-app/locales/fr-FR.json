@@ -2184,5 +2184,21 @@
  "431d7079": "Choisir un terminal",
  "173a07d0": "Automatique : Windows Terminal, sinon PowerShell",
  "6d29d44c": "Trier",
- "e070104e": "Nouveau"
+ "e070104e": "Nouveau",
+ "a7573fc8": "Saisissez dans la barre d'adresse d'un nouvel onglet",
+ "f4955e82": "Ctrl+T et le bouton + : saisissez ou collez un chemin d'un seul coup",
+ "25ac4d3a": "Afficher les détails au survol",
+ "10326180": "La case avec la taille, les dates et les dimensions d'une image lorsque le pointeur survole un élément",
+ "0e27a81b": "Éléments compacts",
+ "5e476957": "Comme l'affichage compact de l'Explorateur : les lignes de la vue Détails sont plus fines, et dans la grille les éléments sont plus rapprochés, les noms plus proches de leurs images. S'applique à tous les dossiers.",
+ "3d136994": "Binaire, noms CEI (1 Kio = 1024 octets)",
+ "37cfe016": "Le serveur ne répond pas",
+ "6422f057": "Windows ne conserve aucune liste des éléments récemment ouverts. Pour les afficher ici, activez « Afficher les éléments récemment ouverts dans Démarrer, les listes de raccourcis et l'Explorateur de fichiers » dans Paramètres Windows › Personnalisation › Démarrer.",
+ "eb95aac1": "Indexer aussi les disques durs",
+ "35002534": "Les disques durs mécaniques (HDD) sont exclus par défaut : leur lecture prend plusieurs minutes et est audible. Lorsque l'option est activée, le disque est lu pendant que le PC est inactif.",
+ "fcc36417": "Modifier dans l'éditeur de texte",
+ "3f183d7a": "Modifier dans l'éditeur de texte  (F4)",
+ "7596f080": "Éditeur de texte (F4)",
+ "7f9f54f7": "Automatique : Bloc-notes",
+ "8207de4b": "Choisir l'éditeur de texte"
 }

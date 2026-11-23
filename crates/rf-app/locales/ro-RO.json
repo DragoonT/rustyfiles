@@ -2184,5 +2184,21 @@
  "431d7079": "Alegeți terminalul",
  "173a07d0": "Automat: Windows Terminal, altfel PowerShell",
  "6d29d44c": "Sortare",
- "e070104e": "Nou"
+ "e070104e": "Nou",
+ "a7573fc8": "Scrieți în bara de adrese a unei file noi",
+ "f4955e82": "Ctrl+T și butonul +: scrieți sau lipiți imediat o cale",
+ "25ac4d3a": "Afișare detalii la plasarea indicatorului",
+ "10326180": "Caseta cu dimensiunea, datele și dimensiunile unei imagini la plasarea indicatorului peste un element",
+ "0e27a81b": "Elemente compacte",
+ "5e476957": "Ca vizualizarea compactă din Explorer: rândurile din Detalii sunt mai subțiri, iar în grilă elementele stau mai apropiate, iar numele mai aproape de imagini. Se aplică tuturor folderelor.",
+ "3d136994": "Binar, nume IEC (1 KiB = 1024 octeți)",
+ "37cfe016": "Serverul nu răspunde",
+ "6422f057": "Windows nu păstrează o listă a elementelor deschise recent. Pentru a le vedea aici, activați „Afișare elemente deschise recent în Start, listele de salt și File Explorer” în Setări Windows › Personalizare › Start.",
+ "eb95aac1": "Indexare și a hard diskurilor",
+ "35002534": "Hard diskurile rotative (HDD) sunt excluse implicit: citirea lor durează minute și se aude. Când este activat, discul este citit cât timp calculatorul este inactiv.",
+ "fcc36417": "Modificare în editorul de text",
+ "3f183d7a": "Modificare în editorul de text  (F4)",
+ "7596f080": "Editor de text (F4)",
+ "7f9f54f7": "Automat: Notepad",
+ "8207de4b": "Alegere editor de text"
 }

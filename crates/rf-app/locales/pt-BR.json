@@ -2184,5 +2184,21 @@
  "431d7079": "Escolher terminal",
  "173a07d0": "Automático: Windows Terminal, senão PowerShell",
  "6d29d44c": "Classificar",
- "e070104e": "Novo"
+ "e070104e": "Novo",
+ "a7573fc8": "Digite na barra de endereço de uma nova aba",
+ "f4955e82": "Ctrl+T e o botão +: digite ou cole um caminho de uma vez",
+ "25ac4d3a": "Mostrar detalhes ao passar o ponteiro",
+ "10326180": "A caixa com o tamanho, as datas e as dimensões de uma imagem ao passar o ponteiro sobre um item",
+ "0e27a81b": "Itens compactos",
+ "5e476957": "Como a exibição compacta do Explorador: as linhas em Detalhes ficam mais finas, e na grade os itens ficam mais próximos, com os nomes mais perto das imagens. Vale para todas as pastas.",
+ "3d136994": "Binário, nomes IEC (1 KiB = 1024 bytes)",
+ "37cfe016": "O servidor não responde",
+ "6422f057": "O Windows não mantém uma lista dos itens abertos recentemente. Para vê-los aqui, ative \"Mostrar itens abertos recentemente em Iniciar, Listas de Atalhos e no Explorador de Arquivos\" em Configurações do Windows › Personalização › Iniciar.",
+ "eb95aac1": "Indexar também os discos rígidos",
+ "35002534": "Os discos rígidos mecânicos (HDD) ficam de fora por padrão: a leitura de um deles leva minutos e pode ser ouvida. Quando ativado, o disco é lido enquanto o PC está ocioso.",
+ "fcc36417": "Editar no editor de texto",
+ "3f183d7a": "Editar no editor de texto  (F4)",
+ "7596f080": "Editor de texto (F4)",
+ "7f9f54f7": "Automático: Bloco de Notas",
+ "8207de4b": "Escolher editor de texto"
 }

@@ -2184,5 +2184,21 @@
  "431d7079": "Pasirinkite terminalą",
  "173a07d0": "Automatiškai: Windows Terminal, kitaip PowerShell",
  "6d29d44c": "Rūšiuoti",
- "e070104e": "Kurti naują"
+ "e070104e": "Kurti naują",
+ "a7573fc8": "Rašykite naujo skirtuko adreso juostoje",
+ "f4955e82": "Ctrl+T ir mygtukas +: iš karto įveskite arba įklijuokite kelią",
+ "25ac4d3a": "Rodyti išsamią informaciją užvedus žymeklį",
+ "10326180": "Langelis su dydžiu, datomis ir paveikslėlio matmenimis, kai žymeklis užvedamas ant elemento",
+ "0e27a81b": "Tankesni elementai",
+ "5e476957": "Kaip Explorer kompaktiškas rodinys: išsamiame rodinyje eilutės siauresnės, o tinklelio rodinyje elementai ir jų pavadinimai arčiau paveikslėlių. Taikoma visiems aplankams.",
+ "3d136994": "Dvejetainiai, IEC pavadinimai (1 KiB = 1024 baitai)",
+ "37cfe016": "Serveris neatsako",
+ "6422f057": "Windows nesaugo neseniai atidarytų elementų sąrašo. Norėdami jį matyti čia, įjunkite „Rodyti neseniai atidarytus elementus Pradžios meniu, sąrašuose ir File Explorer“ Windows nustatymuose › Personalizavimas › Pradžia.",
+ "eb95aac1": "Indeksuoti ir standžiuosius diskus",
+ "35002534": "Sukamieji standieji diskai (HDD) pagal numatytuosius nustatymus praleidžiami: jų skaitymas trunka kelias minutes ir girdimas. Kai įjungta, diskas skaitomas, kai kompiuteris neveikia.",
+ "fcc36417": "Redaguoti tekstų redaktoriuje",
+ "3f183d7a": "Redaguoti tekstų redaktoriuje  (F4)",
+ "7596f080": "Tekstų redaktorius (F4)",
+ "7f9f54f7": "Automatiškai: Notepad",
+ "8207de4b": "Pasirinkti tekstų redaktorių"
 }

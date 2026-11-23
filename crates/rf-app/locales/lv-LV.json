@@ -2184,5 +2184,21 @@
  "431d7079": "Izvēlieties termināli",
  "173a07d0": "Automātiski: Windows Terminal, citādi PowerShell",
  "6d29d44c": "Kārtot",
- "e070104e": "Jauns"
+ "e070104e": "Jauns",
+ "a7573fc8": "Rakstīt jaunas cilnes adreses joslā",
+ "f4955e82": "Ctrl+T un poga +: uzreiz ierakstīt vai ielīmēt ceļu",
+ "25ac4d3a": "Rādīt informāciju, novietojot rādītāju virs",
+ "10326180": "Logs ar izmēru, datumiem un attēla izmēriem, kad rādītājs atrodas virs vienuma",
+ "0e27a81b": "Kompakti vienumi",
+ "5e476957": "Kā Explorer kompaktais skats: rindas skatā Detalizēti ir šaurākas, bet režģī vienumi novietoti tuvāk viens otram un nosaukumi tuvāk attēliem. Attiecas uz visām mapēm.",
+ "3d136994": "Binārie, IEC nosaukumi (1 KiB = 1024 baiti)",
+ "37cfe016": "Serveris neatbild",
+ "6422f057": "Windows nesaglabā nesen atvērto vienumu sarakstu. Lai tos šeit redzētu, Windows iestatījumos › Personalizācija › Sākt ieslēdziet opciju „Rādīt nesen atvērtos vienumus izvēlnē Sākt, Jump Lists un Failu pārlūkā”.",
+ "eb95aac1": "Indeksēt arī cietos diskus",
+ "35002534": "Rotējošie cietie diski (HDD) pēc noklusējuma nav iekļauti: to nolasīšana aizņem minūtes un ir dzirdama. Ja ieslēgts, disks tiek nolasīts, kad dators ir dīkstāvē.",
+ "fcc36417": "Rediģēt teksta redaktorā",
+ "3f183d7a": "Rediģēt teksta redaktorā  (F4)",
+ "7596f080": "Teksta redaktors (F4)",
+ "7f9f54f7": "Automātiski: Notepad",
+ "8207de4b": "Izvēlēties teksta redaktoru"
 }

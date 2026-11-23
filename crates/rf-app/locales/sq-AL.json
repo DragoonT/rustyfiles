@@ -2184,5 +2184,21 @@
  "431d7079": "Zgjidhni terminalin",
  "173a07d0": "Automatik: Windows Terminal, përndryshe PowerShell",
  "6d29d44c": "Rendit",
- "e070104e": "i/e Re"
+ "e070104e": "i/e Re",
+ "a7573fc8": "Shkruaj në shiritin e adresës të një skedari të ri",
+ "f4955e82": "Ctrl+T dhe butoni +: shkruaj ose ngjit një shteg menjëherë",
+ "25ac4d3a": "Shfaq detajet kur kursori qëndron mbi skedar",
+ "10326180": "Kutia me madhësinë, datat dhe përmasat e një imazhi kur kursori qëndron mbi një element",
+ "0e27a81b": "Elemente të ngjeshur",
+ "5e476957": "Si pamja e ngjeshur e Explorer: rreshtat në Detaje janë më të hollë, ndërsa në rrjet elementët janë më afër njëri-tjetrit dhe emrat më afër imazheve të tyre. Zbatohet për çdo dosje.",
+ "3d136994": "Binar, emra IEC (1 KiB = 1024 byte)",
+ "37cfe016": "Serveri nuk përgjigjet",
+ "6422f057": "Windows nuk mban listë të elementeve të hapura së fundmi. Për t'i parë këtu, aktivizo \"Shfaq elementet e hapura së fundmi në Start, Jump Lists dhe File Explorer\" te Cilësimet e Windows › Personalizimi › Start.",
+ "eb95aac1": "Indekso edhe disqet e forta",
+ "35002534": "Disqet e forta rrotulluese (HDD) lihen jashtë si parazgjedhje: leximi i tyre zgjat minuta dhe dëgjohet. Kur është aktive, disku lexohet kur kompjuteri është në gjendje joaktive.",
+ "fcc36417": "Redakto në redaktuesin e tekstit",
+ "3f183d7a": "Redakto në redaktuesin e tekstit  (F4)",
+ "7596f080": "Redaktuesi i tekstit (F4)",
+ "7f9f54f7": "Automatik: Notepad",
+ "8207de4b": "Zgjidh redaktuesin e tekstit"
 }

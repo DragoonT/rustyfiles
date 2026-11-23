@@ -2184,5 +2184,21 @@
  "431d7079": "Vælg terminal",
  "173a07d0": "Automatisk: Windows Terminal, ellers PowerShell",
  "6d29d44c": "Sortér",
- "e070104e": "Ny"
+ "e070104e": "Ny",
+ "a7573fc8": "Skriv i adresselinjen på en ny fane",
+ "f4955e82": "Ctrl+T og +-knappen: skriv eller indsæt en sti med det samme",
+ "25ac4d3a": "Vis detaljer ved musepeger",
+ "10326180": "Boksen med størrelsen, datoerne og et billedes dimensioner, når markøren hviler på et element",
+ "0e27a81b": "Kompakte elementer",
+ "5e476957": "Svarer til Explorers kompakte visning: rækker i Detaljer er tyndere, og i gitteret står elementerne tættere, og navnene tættere på deres billeder. Gælder for alle mapper.",
+ "3d136994": "Binære IEC-navne (1 KiB = 1024 bytes)",
+ "37cfe016": "Serveren svarer ikke",
+ "6422f057": "Windows gemmer ingen liste over nyligt åbnede elementer. For at se dem her skal du slå \"Vis nyligt åbnede elementer i Start, Springlister og Filudforsker\" til under Windows-indstillinger › Personlig tilpasning › Start.",
+ "eb95aac1": "Indeksér også harddiske",
+ "35002534": "Roterende harddiske (HDD) udelades som standard, fordi det tager minutter at læse dem, og de kan høres. Når det er slået til, læses disken, mens pc'en er inaktiv.",
+ "fcc36417": "Rediger i teksteditor",
+ "3f183d7a": "Rediger i teksteditor  (F4)",
+ "7596f080": "Teksteditor (F4)",
+ "7f9f54f7": "Automatisk: Notesblok",
+ "8207de4b": "Vælg teksteditor"
 }

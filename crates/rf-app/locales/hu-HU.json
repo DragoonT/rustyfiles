@@ -2184,5 +2184,21 @@
  "431d7079": "Terminál kiválasztása",
  "173a07d0": "Automatikus: Windows Terminal, egyébként PowerShell",
  "6d29d44c": "Rendezés",
- "e070104e": "Új"
+ "e070104e": "Új",
+ "a7573fc8": "Írjon be egy útvonalat az új lap címsorába",
+ "f4955e82": "Ctrl+T és a + gomb: útvonalat írhat vagy illeszthet be egyszerre",
+ "25ac4d3a": "Részletek megjelenítése, ha az egérmutató egy fájl fölé kerül",
+ "10326180": "A doboz a méretet, a dátumokat és a képek méretét mutatja, ha az egérmutató egy elem fölé kerül",
+ "0e27a81b": "Tömör elemek",
+ "5e476957": "Mint a Fájlkezelő tömör nézete: a Részletek nézetben a sorok vékonyabbak, a rácsban az elemek és a nevek közelebb kerülnek a képekhez. Minden mappára érvényes.",
+ "3d136994": "Bináris, IEC nevek (1 KiB = 1024 bájt)",
+ "37cfe016": "A kiszolgáló nem válaszol",
+ "6422f057": "A Windows nem tart nyilván a nemrég megnyitott elemek listáját. Ha ide meg szeretné jeleníteni őket, kapcsolja be a Windows-beállításokban a Személyre szabás › Start menü szakaszban a „Nemrég megnyitott elemek megjelenítése a Start menüben, az ugrólistákban és a Fájlkezelőben” lehetőséget.",
+ "eb95aac1": "Merevlemezek indexelése is",
+ "35002534": "A forgó merevlemezek (HDD) alapértelmezés szerint kimaradnak: olvasásuk percekig tart, és hallható. Bekapcsolva a meghajtó tétlen gépnél kerül olvasásra.",
+ "fcc36417": "Szerkesztés szövegszerkesztőben",
+ "3f183d7a": "Szerkesztés szövegszerkesztőben  (F4)",
+ "7596f080": "Szövegszerkesztő (F4)",
+ "7f9f54f7": "Automatikus: Jegyzettömb",
+ "8207de4b": "Szövegszerkesztő kiválasztása"
 }

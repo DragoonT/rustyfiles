@@ -2184,5 +2184,21 @@
  "431d7079": "Pumili ng terminal",
  "173a07d0": "Awtomatiko: Windows Terminal, kung hindi, PowerShell",
  "6d29d44c": "Iayos",
- "e070104e": "Bago"
+ "e070104e": "Bago",
+ "a7573fc8": "I-type sa address bar ng bagong tab",
+ "f4955e82": "Ctrl+T at ang + button: mag-type o mag-paste ng path nang sabay",
+ "25ac4d3a": "Ipakita ang mga detalye sa pag-hover",
+ "10326180": "Ang kahon na may laki, mga petsa, at sukat ng larawan kapag nakaturo ang pointer sa isang item",
+ "0e27a81b": "Siksik na item",
+ "5e476957": "Katulad ng compact view ng Explorer: mas manipis ang mga hilera sa Details, at sa grid ay mas malapit ang mga item at ang mga pangalan sa kanilang mga larawan. Nalalapat sa bawat folder.",
+ "3d136994": "Binary, mga pangalang IEC (1 KiB = 1024 byte)",
+ "37cfe016": "Hindi tumutugon ang server",
+ "6422f057": "Walang tala ang Windows ng mga kamakailang binuksang item. Para makita sila rito, i-on ang \"Show recently opened items in Start, Jump Lists, and File Explorer\" sa Windows Settings › Personalization › Start.",
+ "eb95aac1": "Isama rin ang mga hard drive sa pag-index",
+ "35002534": "Hindi isinasama ang mga umiikot na hard drive (HDD) bilang default: nagtatagal ng ilang minuto ang pagbasa sa kanila at maririnig ang ingay. Kapag naka-on, binabasa ang drive habang walang ginagawa ang PC.",
+ "fcc36417": "I-edit sa text editor",
+ "3f183d7a": "I-edit sa text editor  (F4)",
+ "7596f080": "Text editor (F4)",
+ "7f9f54f7": "Awtomatiko: Notepad",
+ "8207de4b": "Pumili ng text editor"
 }

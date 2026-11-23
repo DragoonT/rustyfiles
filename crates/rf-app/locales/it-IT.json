@@ -2184,5 +2184,21 @@
  "431d7079": "Scegli il terminale",
  "173a07d0": "Automatico: Windows Terminal, altrimenti PowerShell",
  "6d29d44c": "Ordina",
- "e070104e": "Nuovo"
+ "e070104e": "Nuovo",
+ "a7573fc8": "Scrivi nella barra degli indirizzi di una nuova scheda",
+ "f4955e82": "Ctrl+T e il pulsante +: digita o incolla subito un percorso",
+ "25ac4d3a": "Mostra dettagli al passaggio del mouse",
+ "10326180": "Il riquadro con la dimensione, le date e le dimensioni di un'immagine quando il puntatore si posa su un elemento",
+ "0e27a81b": "Elementi compatti",
+ "5e476957": "Come la visualizzazione compatta di Esplora file: nella visualizzazione Dettagli le righe sono più sottili e nella griglia gli elementi sono più vicini, con i nomi più vicini alle immagini. Vale per tutte le cartelle.",
+ "3d136994": "Binari, nomi IEC (1 KiB = 1024 byte)",
+ "37cfe016": "Il server non risponde",
+ "6422f057": "Windows non conserva un elenco degli elementi aperti di recente. Per vederli qui, attiva «Mostra elementi aperti di recente in Start, Elenchi di salto ed Esplora file» in Impostazioni di Windows › Personalizzazione › Start.",
+ "eb95aac1": "Indicizza anche i dischi rigidi",
+ "35002534": "I dischi rigidi a piatti (HDD) sono esclusi per impostazione predefinita: leggerne uno richiede minuti e si sente. Se attivo, il disco viene letto quando il PC è inattivo.",
+ "fcc36417": "Modifica nell'editor di testo",
+ "3f183d7a": "Modifica nell'editor di testo  (F4)",
+ "7596f080": "Editor di testo (F4)",
+ "7f9f54f7": "Automatico: Blocco note",
+ "8207de4b": "Scegli editor di testo"
 }

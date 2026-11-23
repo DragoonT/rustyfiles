@@ -2184,5 +2184,21 @@
  "431d7079": "Kies terminal",
  "173a07d0": "Automatisch: Windows Terminal, anders PowerShell",
  "6d29d44c": "Sorteren",
- "e070104e": "Nieuw"
+ "e070104e": "Nieuw",
+ "a7573fc8": "Typ in de adresbalk van een nieuw tabblad",
+ "f4955e82": "Ctrl+T en de knop +: typ of plak meteen een pad",
+ "25ac4d3a": "Details tonen bij aanwijzen",
+ "10326180": "Het vak met de grootte, de datums en de afmetingen van een afbeelding wanneer de aanwijzer op een item rust",
+ "0e27a81b": "Compacte items",
+ "5e476957": "Zoals de compacte weergave van Verkenner: rijen in Details zijn dunner, en in het raster staan de items dichter op elkaar en staan namen dichter bij hun afbeeldingen. Geldt voor elke map.",
+ "3d136994": "Binair, IEC-namen (1 KiB = 1024 bytes)",
+ "37cfe016": "De server reageert niet",
+ "6422f057": "Windows bewaart geen lijst met recent geopende items. Om ze hier te zien, zet u \"Recent geopende items tonen in Start, Jumplists en Bestandsverkenner\" aan in Windows-instellingen › Personalisatie › Start.",
+ "eb95aac1": "Ook harde schijven indexeren",
+ "35002534": "Draaiende harde schijven (HDD) worden standaard overgeslagen: het lezen ervan duurt minuten en is hoorbaar. Wanneer dit aan staat, wordt de schijf gelezen terwijl de pc inactief is.",
+ "fcc36417": "Bewerken in teksteditor",
+ "3f183d7a": "Bewerken in teksteditor  (F4)",
+ "7596f080": "Teksteditor (F4)",
+ "7f9f54f7": "Automatisch: Kladblok",
+ "8207de4b": "Teksteditor kiezen"
 }

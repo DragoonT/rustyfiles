@@ -2184,5 +2184,21 @@
  "431d7079": "Välj terminal",
  "173a07d0": "Automatiskt: Windows Terminal, annars PowerShell",
  "6d29d44c": "Sortera",
- "e070104e": "Nya"
+ "e070104e": "Nya",
+ "a7573fc8": "Skriv i adressfältet i en ny flik",
+ "f4955e82": "Ctrl+T och +-knappen: skriv eller klistra in en sökväg direkt",
+ "25ac4d3a": "Visa information vid pekning",
+ "10326180": "Rutan med storlek, datum och bildens mått när muspekaren vilar på ett objekt",
+ "0e27a81b": "Kompakta objekt",
+ "5e476957": "Som Utforskarens kompakta vy: raderna i Detaljer blir tunnare, och i rutnätet ligger objekten tätare och namnen närmare bilderna. Gäller alla mappar.",
+ "3d136994": "Binärt, IEC-namn (1 KiB = 1024 byte)",
+ "37cfe016": "Servern svarar inte",
+ "6422f057": "Windows för ingen lista över nyligen öppnade objekt. För att se dem här, aktivera ”Visa nyligen öppnade objekt i Start, Hopplistor och Filutforskaren” i Windows inställningar › Personalisering › Start.",
+ "eb95aac1": "Indexera även hårddiskar",
+ "35002534": "Snurrande hårddiskar (HDD) utelämnas som standard: att läsa en tar minuter och hörs. När det är på läses disken medan datorn är overksam.",
+ "fcc36417": "Redigera i textredigerare",
+ "3f183d7a": "Redigera i textredigerare  (F4)",
+ "7596f080": "Textredigerare (F4)",
+ "7f9f54f7": "Automatiskt: Anteckningar",
+ "8207de4b": "Välj textredigerare"
 }

@@ -2184,5 +2184,21 @@
  "431d7079": "Vyberte terminál",
  "173a07d0": "Automaticky: Windows Terminal, inak PowerShell",
  "6d29d44c": "Zoradiť",
- "e070104e": "Nová položka"
+ "e070104e": "Nová položka",
+ "a7573fc8": "Zadajte do adresného riadka novej karty",
+ "f4955e82": "Ctrl+T a tlačidlo +: hneď zadajte alebo vložte cestu",
+ "25ac4d3a": "Zobraziť podrobnosti pri nabehnutí myšou",
+ "10326180": "Okno s veľkosťou, dátumami a rozmermi obrázka, keď sa ukazovateľ zastaví nad položkou",
+ "0e27a81b": "Kompaktné položky",
+ "5e476957": "Ako kompaktné zobrazenie Prieskumníka: riadky v Podrobnostiach sú tenšie a v mriežke sú položky a názvy bližšie k obrázkom. Platí pre každý priečinok.",
+ "3d136994": "Binárne, názvy IEC (1 KiB = 1024 bajtov)",
+ "37cfe016": "Server neodpovedá",
+ "6422f057": "Windows neuchováva zoznam nedávno otvorených položiek. Ak ich chcete tu vidieť, zapnite v Nastaveniach systému Windows › Prispôsobenie › Štart možnosť „Zobraziť nedávno otvorené položky v Štart, Zoznamoch skratiek a Prieskumníkovi súborov“.",
+ "eb95aac1": "Indexovať aj pevné disky",
+ "35002534": "Pevné disky s rotačným diskom (HDD) sú štandardne vynechané: čítanie trvá minúty a je počuť ho. Keď je zapnuté, disk sa číta, keď je počítač nečinný.",
+ "fcc36417": "Upraviť v textovom editore",
+ "3f183d7a": "Upraviť v textovom editore  (F4)",
+ "7596f080": "Textový editor (F4)",
+ "7f9f54f7": "Automaticky: Poznámkový blok",
+ "8207de4b": "Vyberte textový editor"
 }

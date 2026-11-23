@@ -2184,5 +2184,21 @@
  "431d7079": "Terminal auswählen",
  "173a07d0": "Automatisch: Windows Terminal, sonst PowerShell",
  "6d29d44c": "Sortieren",
- "e070104e": "Neu"
+ "e070104e": "Neu",
+ "a7573fc8": "Im Adressfeld eines neuen Tabs eingeben",
+ "f4955e82": "Strg+T und die Schaltfläche +: Pfad direkt eingeben oder einfügen",
+ "25ac4d3a": "Details beim Darüberfahren anzeigen",
+ "10326180": "Das Feld mit der Größe, den Datumsangaben und den Bildabmessungen, wenn der Zeiger auf einem Element ruht",
+ "0e27a81b": "Kompakte Elemente",
+ "5e476957": "Wie die kompakte Ansicht im Explorer: Zeilen in der Detailansicht sind schmaler, und in der Rasteransicht stehen die Elemente dichter beieinander und die Namen näher an ihren Bildern. Gilt für jeden Ordner.",
+ "3d136994": "Binär, IEC-Namen (1 KiB = 1024 Bytes)",
+ "37cfe016": "Der Server antwortet nicht",
+ "6422f057": "Windows speichert keine Liste zuletzt geöffneter Elemente. Um sie hier anzuzeigen, aktivieren Sie unter Windows-Einstellungen › Personalisierung › Start die Option „Zuletzt geöffnete Elemente in Start, Sprunglisten und im Datei-Explorer anzeigen“.",
+ "eb95aac1": "Auch Festplatten indizieren",
+ "35002534": "Magnetplatten (HDD) werden standardmäßig ausgelassen: Ihr Lesen dauert Minuten und ist hörbar. Ist die Option aktiv, wird das Laufwerk gelesen, während der PC im Leerlauf ist.",
+ "fcc36417": "In Texteditor bearbeiten",
+ "3f183d7a": "In Texteditor bearbeiten  (F4)",
+ "7596f080": "Texteditor (F4)",
+ "7f9f54f7": "Automatisch: Notepad",
+ "8207de4b": "Texteditor auswählen"
 }

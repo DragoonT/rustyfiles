@@ -2184,5 +2184,21 @@
  "431d7079": "Odaberite terminal",
  "173a07d0": "Automatski: Windows Terminal, inače PowerShell",
  "6d29d44c": "Sortiraj",
- "e070104e": "Novo"
+ "e070104e": "Novo",
+ "a7573fc8": "Upiši u adresnu traku nove kartice",
+ "f4955e82": "Ctrl+T i gumb +: upiši ili zalijepi putanju odjednom",
+ "25ac4d3a": "Prikaz detalja pri zadržavanju miša",
+ "10326180": "Okvir s veličinom, datumima i dimenzijama slike kada se pokazivač zadrži na stavci",
+ "0e27a81b": "Zbijeni prikaz stavki",
+ "5e476957": "Kao zbijeni prikaz u Exploreru: retci u pregledu pojedinosti su tanji, a u mreži su stavke i nazivi bliže slikama. Vrijedi za sve mape.",
+ "3d136994": "Binarni, IEC nazivi (1 KiB = 1024 bajta)",
+ "37cfe016": "Poslužitelj ne odgovara",
+ "6422f057": "Windows ne vodi popis nedavno otvorenih stavki. Da ih vidite ovdje, uključite \"Prikaži nedavno otvorene stavke u izborniku Start, popisima skokova i Exploreru datoteka\" u Postavkama sustava Windows › Personalizacija › Početni izbornik.",
+ "eb95aac1": "Indeksiraj i tvrde diskove",
+ "35002534": "Tvrdi diskovi (HDD) su standardno izostavljeni: čitanje takvog diska traje minutama i čuje se. Kada je uključeno, disk se čita dok je računalo neaktivno.",
+ "fcc36417": "Uredi u uređivaču teksta",
+ "3f183d7a": "Uredi u uređivaču teksta  (F4)",
+ "7596f080": "Uređivač teksta (F4)",
+ "7f9f54f7": "Automatski: Notepad",
+ "8207de4b": "Odaberi uređivač teksta"
 }

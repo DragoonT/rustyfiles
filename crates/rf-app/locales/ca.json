@@ -2184,5 +2184,21 @@
  "431d7079": "Trieu un terminal",
  "173a07d0": "Automàtic: Windows Terminal, si no PowerShell",
  "6d29d44c": "Ordena",
- "e070104e": "Nou"
+ "e070104e": "Nou",
+ "a7573fc8": "Escriu a la barra d'adreces d'una pestanya nova",
+ "f4955e82": "Ctrl+T i el botó +: escriu o enganxa una ruta de seguida",
+ "25ac4d3a": "Mostra els detalls en passar-hi el punter",
+ "10326180": "El quadre amb la mida, les dates i les dimensions d'una imatge quan el punter es queda sobre un element",
+ "0e27a81b": "Elements compactes",
+ "5e476957": "Com la vista compacta de l'Explorador: les files de Detalls són més primes, i a la graella els elements estan més junts i els noms més a prop de les imatges. S'aplica a totes les carpetes.",
+ "3d136994": "Binari, noms IEC (1 KiB = 1024 bytes)",
+ "37cfe016": "El servidor no respon",
+ "6422f057": "Windows no guarda cap llista dels elements oberts recentment. Per veure'ls aquí, activa \"Mostra els elements oberts recentment a Inici, a les llistes de salts i a l'Explorador de fitxers\" a Configuració de Windows › Personalització › Inici.",
+ "eb95aac1": "Indexa també els discos durs",
+ "35002534": "Els discos durs de disc giratori (HDD) no s'inclouen per defecte: llegir-ne un triga minuts i se'n sent el soroll. Quan està activat, el disc es llegeix mentre l'ordinador està inactiu.",
+ "fcc36417": "Edita amb l'editor de text",
+ "3f183d7a": "Edita amb l'editor de text  (F4)",
+ "7596f080": "Editor de text (F4)",
+ "7f9f54f7": "Automàtic: Bloc de notes",
+ "8207de4b": "Tria l'editor de text"
 }
