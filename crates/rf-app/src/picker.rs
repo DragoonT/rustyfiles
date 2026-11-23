@@ -285,7 +285,21 @@ fn open_window(pipe: File, req: Request, cx: &mut App) {
                 }
             });
             *session._sub.borrow_mut() = Some(sub);
+            let save = session.req.mode == Mode::Save;
             ws.set_picker(session, window, cx);
+            // Save: the name is what the user came to type, so the box has the keyboard with the name selected up to its extension,
+            // as in Windows' own dialog; nothing had it, and typing went nowhere (Discord, 2026-11-23). On the next frame: a focus
+            // target that is not part of the frame being drawn is dropped by GPUI.
+            if save {
+                cx.on_next_frame(window, move |_, window, cx| {
+                    name.update(cx, |s, cx| {
+                        let text = s.value().to_string();
+                        let stem = text.rfind('.').filter(|&i| i > 0).unwrap_or(text.len());
+                        s.focus(window, cx);
+                        s.set_selected_range(0..stem, cx);
+                    });
+                });
+            }
             crate::preview_trace::mark("picker: workspace built");
             ws
         })
