@@ -1,0 +1,41 @@
+name: Badges
+
+# The README's downloads badge: the sum of the installers, portable zips and Mac disk images downloaded from every release. GitHub's
+# own total (and shields.io's github/downloads badge) also counts each installed copy's update checks (releases.*.json, RELEASES)
+# and update packages, which were 98% of it. The number goes to downloads.json on the `badges` branch (one commit, replaced each
+# time) and the README shows it through shields.io's endpoint badge.
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  downloads:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Count
+        run: |
+          gh api --paginate "repos/${{ github.repository }}/releases?per_page=100" \
+            --jq '.[].assets[] | select(.name | test("(Setup\\.exe|Portable\\.zip|\\.dmg)$")) | .download_count' > counts.txt
+          python3 - <<'PY'
+          import json
+          n = sum(int(x) for x in open("counts.txt") if x.strip())
+          text = f"{n / 1000:.1f}k".replace(".0k", "k") if n >= 1000 else str(n)
+          badge = {"schemaVersion": 1, "label": "downloads", "message": text, "labelColor": "232326", "color": "3d3d44"}
+          json.dump(badge, open("downloads.json", "w"))
+          print(n, text)
+          PY
+      - name: Publish
+        run: |
+          mkdir out && mv downloads.json out/ && cd out
+          git init -q -b badges
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add downloads.json
+          git commit -qm "Downloads badge"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" badges
