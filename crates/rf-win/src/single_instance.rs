@@ -1,7 +1,7 @@
 //! Single-instance plumbing: the first process owns a named mutex and serves a named pipe;
 //! later launches forward their arguments (paths) through the pipe and exit.
 
-use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, ERROR_PIPE_BUSY, GENERIC_WRITE, GetLastError, HANDLE};
+use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, ERROR_PIPE_BUSY, GENERIC_WRITE, GetLastError, HANDLE, WAIT_ABANDONED, WAIT_OBJECT_0};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_NONE, OPEN_EXISTING, PIPE_ACCESS_INBOUND, ReadFile, WriteFile,
 };
@@ -9,7 +9,7 @@ use windows::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES,
     PIPE_WAIT, WaitNamedPipeW,
 };
-use windows::Win32::System::Threading::CreateMutexW;
+use windows::Win32::System::Threading::{CreateMutexW, INFINITE, OpenMutexW, ReleaseMutex, SYNCHRONIZATION_SYNCHRONIZE, WaitForSingleObject};
 use windows::core::PCWSTR;
 
 use crate::wide::wide;
@@ -74,6 +74,68 @@ impl Drop for InstanceGuard {
         unsafe {
             let _ = CloseHandle(self.0);
         }
+    }
+}
+
+/// A sign that another program of the bundle can see and wait on: "`what` is there now". A named mutex that the thread which made it
+/// owns for as long as it keeps this guard, so the other side learns that it is gone on a release and on the owner's death alike (a
+/// quit, a crash, a kill), without asking again and again. Made and dropped on the same thread (a mutex belongs to a thread).
+pub struct Presence(HANDLE);
+impl Drop for Presence {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = ReleaseMutex(self.0);
+            let _ = CloseHandle(self.0);
+        }
+    }
+}
+
+fn presence_name(what: &str) -> Vec<u16> {
+    wide(&format!("{}-here", names_for(what).0))
+}
+
+/// Says "`what` is there" until the guard is dropped. `None` when the sign could not be made ours.
+pub fn announce(what: &str) -> Option<Presence> {
+    let w = presence_name(what);
+    unsafe {
+        let h = CreateMutexW(None, true, PCWSTR(w.as_ptr())).ok()?;
+        // (it was there already: a waiter of the last one holds it for a moment before letting go; ours once that is done)
+        if GetLastError() == ERROR_ALREADY_EXISTS {
+            let got = WaitForSingleObject(h, 1000);
+            if got != WAIT_OBJECT_0 && got != WAIT_ABANDONED {
+                let _ = CloseHandle(h);
+                return None;
+            }
+        }
+        Some(Presence(h))
+    }
+}
+
+/// Is `what` announced (see [`announce`]) at this moment?
+pub fn is_announced(what: &str) -> bool {
+    let w = presence_name(what);
+    unsafe {
+        match OpenMutexW(SYNCHRONIZATION_SYNCHRONIZE, false, PCWSTR(w.as_ptr())) {
+            Ok(h) => {
+                let _ = CloseHandle(h);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+}
+
+/// Blocks until the announcement of `what` is taken back or its owner is gone. `false` at once when nothing is announced.
+pub fn wait_until_gone(what: &str) -> bool {
+    let w = presence_name(what);
+    unsafe {
+        let Ok(h) = OpenMutexW(SYNCHRONIZATION_SYNCHRONIZE, false, PCWSTR(w.as_ptr())) else { return false };
+        let got = WaitForSingleObject(h, INFINITE);
+        if got == WAIT_OBJECT_0 || got == WAIT_ABANDONED {
+            let _ = ReleaseMutex(h);
+        }
+        let _ = CloseHandle(h);
+        true
     }
 }
 
@@ -298,5 +360,47 @@ mod app_tests {
             }
         }
         assert_eq!(got, 200);
+    }
+
+    #[test]
+    fn a_presence_is_seen_and_its_end_is_waited_for() {
+        let what = format!("rf-test-here-{}", std::process::id());
+        assert!(!is_announced(&what));
+        assert!(!wait_until_gone(&what), "nothing announced: no wait");
+        let (go, wait) = std::sync::mpsc::channel::<()>();
+        let (up, is_up) = std::sync::mpsc::channel::<()>();
+        // (a mutex belongs to its thread: the owner is a thread of its own, as the app's main thread is)
+        let owner = {
+            let what = what.clone();
+            std::thread::spawn(move || {
+                let here = announce(&what).expect("announced");
+                up.send(()).unwrap();
+                wait.recv().unwrap();
+                drop(here);
+            })
+        };
+        is_up.recv().unwrap();
+        assert!(is_announced(&what));
+        let waiter = {
+            let what = what.clone();
+            std::thread::spawn(move || {
+                let t = std::time::Instant::now();
+                assert!(wait_until_gone(&what));
+                t.elapsed()
+            })
+        };
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        assert!(!waiter.is_finished(), "it waits while the owner keeps the sign");
+        go.send(()).unwrap();
+        owner.join().unwrap();
+        assert!(waiter.join().unwrap() >= std::time::Duration::from_millis(100));
+        assert!(!is_announced(&what));
+        // an owner that dies without taking the sign back is an end too
+        let dies = {
+            let what = what.clone();
+            std::thread::spawn(move || std::mem::forget(announce(&what).expect("announced again")))
+        };
+        dies.join().unwrap();
+        assert!(wait_until_gone(&what));
     }
 }

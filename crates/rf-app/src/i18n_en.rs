@@ -50,6 +50,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Geri dönüşüm kutusu", "Recycle Bin"),
     ("Adres çubuğuna git", "Focus address bar"),
     ("Ara", "Search"),
+    ("Ada ya da *.pdf gibi bir kalıba göre arayın; Enter alt klasörlere de bakar", "Search by name or a pattern like *.pdf; Enter looks in subfolders too"),
     ("Gizli öğeleri göster/gizle", "Show/hide hidden items"),
     ("Detay görünümü", "Details view"),
     ("Izgara görünümü", "Grid view"),

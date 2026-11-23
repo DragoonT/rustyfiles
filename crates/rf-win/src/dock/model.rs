@@ -190,7 +190,10 @@ pub fn pin_matches(pin: &PinnedApp, group: &str, tasks: &[Task]) -> bool {
         if exe == group {
             return true;
         }
-        return tasks.iter().any(|t| t.exe.as_ref().is_some_and(|p| p.to_string_lossy().to_lowercase() == *exe));
+        // (the program of the window, or the one the window names to be started again: Steam's window is its helper's, the pin is
+        // steam.exe)
+        let same = |p: &std::path::Path| p.to_string_lossy().to_lowercase() == *exe;
+        return tasks.iter().any(|t| t.exe.as_deref().is_some_and(same) || t.relaunch.as_ref().is_some_and(|r| same(&r.program)));
     }
     false
 }
@@ -228,7 +231,12 @@ pub fn jump_identity(app: &DockApp) -> (Option<String>, Option<PathBuf>) {
 /// A name for a running app that has no pin to take it from: the program's file name, else the first window's title.
 pub fn fallback_name(tasks: &[Task]) -> String {
     let t = tasks.first();
-    if let Some(stem) = t.and_then(|t| t.exe.as_ref()).and_then(|p| p.file_stem()).map(|s| s.to_string_lossy().into_owned()) {
+    if let Some(name) = t.and_then(|t| t.relaunch.as_ref()).and_then(|r| r.name.clone()) {
+        return name;
+    }
+    // (the program the window names to be started again before the window's own: "Steam", not "Steamwebhelper")
+    let program = t.and_then(|t| t.relaunch.as_ref().map(|r| &r.program).or(t.exe.as_ref()));
+    if let Some(stem) = program.and_then(|p| p.file_stem()).map(|s| s.to_string_lossy().into_owned()) {
         let mut c = stem.chars();
         return match c.next() {
             Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
@@ -249,15 +257,19 @@ pub fn fallback_name(tasks: &[Task]) -> String {
 fn running_app(group: &str, tasks: &[Task], foreground: isize) -> DockApp {
     let first = &tasks[0];
     let packaged = first.app_id.as_deref().filter(|id| looks_packaged(id));
-    let launch = match (packaged, &first.exe) {
-        (Some(id), _) => Some(Launch::Packaged(id.to_string())),
-        (None, Some(exe)) => Some(Launch::Exe { path: exe.clone(), args: String::new() }),
-        (None, None) => None,
+    // what the window asks to be started again with comes before its own program (see `tasklist::Relaunch`)
+    let again = first.relaunch.as_ref();
+    let launch = match (packaged, again, &first.exe) {
+        (Some(id), _, _) => Some(Launch::Packaged(id.to_string())),
+        (None, Some(r), _) => Some(Launch::Exe { path: r.program.clone(), args: r.args.clone() }),
+        (None, None, Some(exe)) => Some(Launch::Exe { path: exe.clone(), args: String::new() }),
+        (None, None, None) => None,
     };
-    let icon = match (packaged, &first.exe) {
-        (Some(id), _) => IconSource::Packaged(id.to_string()),
-        (None, Some(exe)) => IconSource::File(exe.clone()),
-        (None, None) => IconSource::Window(first.hwnd),
+    let icon = match (packaged, again, &first.exe) {
+        (Some(id), _, _) => IconSource::Packaged(id.to_string()),
+        (None, Some(r), _) => IconSource::File(r.program.clone()),
+        (None, None, Some(exe)) => IconSource::File(exe.clone()),
+        (None, None, None) => IconSource::Window(first.hwnd),
     };
     let windows: Vec<isize> = tasks.iter().map(|t| t.hwnd).collect();
     DockApp { key: group.to_string(), name: fallback_name(tasks), pinned: false, launch, icon, active: windows.contains(&foreground), windows }
@@ -334,7 +346,7 @@ mod tests {
     use super::*;
 
     fn task(hwnd: isize, exe: &str, id: Option<&str>) -> Task {
-        Task { hwnd, title: format!("w{hwnd}"), pid: hwnd as u32, exe: Some(PathBuf::from(exe)), app_id: id.map(String::from), minimized: false }
+        Task { hwnd, title: format!("w{hwnd}"), pid: hwnd as u32, exe: Some(PathBuf::from(exe)), app_id: id.map(String::from), minimized: false, relaunch: None }
     }
 
     fn group(tasks: Vec<Task>) -> (String, Vec<Task>) {
@@ -454,6 +466,24 @@ mod tests {
     }
 
     #[test]
+    fn a_window_that_names_what_starts_it_again_is_that_program() {
+        use crate::tasklist::relaunch_of;
+        // Steam: the window is the helper's, it names steam.exe
+        let mut w = task(7, "C:/Steam/bin/cef/steamwebhelper.exe", Some("Valve.Steam.Client"));
+        w.relaunch = relaunch_of(r#""C:/Steam/steam.exe" -foreground"#, Some("@C:/Steam/steam.exe,-1".into()));
+        let items = merge(&[], vec![group(vec![w.clone()])], 0);
+        let DockItem::App(a) = &items[0] else { panic!("an app") };
+        assert_eq!(a.launch, Some(Launch::Exe { path: PathBuf::from("C:/Steam/steam.exe"), args: "-foreground".into() }));
+        assert_eq!(a.name, "Steam", "named after what is started, not after the helper");
+        assert!(matches!(&a.icon, IconSource::File(p) if p.ends_with("steam.exe")));
+        // a pin of steam.exe (Steam's own shortcut) takes that window: not a pin and a second, running Steam
+        let steam = pin("Steam", Some("c:/steam/steam.exe"), None);
+        assert!(pin_matches(&steam, "valve.steam.client", &[w.clone()]));
+        let other = pin("Other", Some("c:/o/o.exe"), None);
+        assert!(!pin_matches(&other, "valve.steam.client", &[w]));
+    }
+
+    #[test]
     fn packaged_apps_start_by_their_id_and_others_by_their_program() {
         let items = merge(
             &[],
@@ -473,7 +503,7 @@ mod tests {
 
     #[test]
     fn a_program_nobody_can_name_still_gets_a_button() {
-        let t = Task { hwnd: 5, title: "Secret".into(), pid: 9, exe: None, app_id: None, minimized: false };
+        let t = Task { hwnd: 5, title: "Secret".into(), pid: 9, exe: None, app_id: None, minimized: false, relaunch: None };
         let items = merge(&[], vec![group(vec![t])], 0);
         let a = apps(&items);
         assert_eq!(a.len(), 1);

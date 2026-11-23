@@ -115,7 +115,10 @@ impl Filter {
             return false;
         }
         // the shown (localized) name or the real one: "İndir" and "Down" both find Downloads
-        if !self.query.is_empty() && !contains_ignore_case(&e.name, &self.query) && !e.label.as_deref().is_some_and(|l| contains_ignore_case(l, &self.query)) {
+        // (a query with * or ? is a pattern, as it is once Enter sends it to the subfolder search: "*.pdf" typed in the search box
+        // emptied the list until Enter)
+        let found = |name: &str| if self.query.contains(['*', '?']) { matches_patterns(&self.query, name) } else { contains_ignore_case(name, &self.query) };
+        if !self.query.is_empty() && !found(&e.name) && !e.label.as_deref().is_some_and(found) {
             return false;
         }
         true
@@ -220,6 +223,19 @@ mod tests {
         assert!(f.accepts(&normal));
         assert!(!f.accepts(&hidden));
         assert!(contains_ignore_case("Çalışma", "çalış"));
+    }
+
+    #[test]
+    fn a_query_with_a_star_is_a_pattern() {
+        let pdf = Entry::new("Rapor.PDF", EntryKind::File, 0, 0, 0, 0);
+        let txt = Entry::new("pdf notes.txt", EntryKind::File, 0, 0, 0, 0);
+        let f = Filter { query: "*.pdf".into(), ..Default::default() };
+        assert!(f.accepts(&pdf) && !f.accepts(&txt));
+        let f = Filter { query: "rap?r*".into(), ..Default::default() };
+        assert!(f.accepts(&pdf) && !f.accepts(&txt));
+        // without one it stays "contains"
+        let f = Filter { query: "pdf".into(), ..Default::default() };
+        assert!(f.accepts(&pdf) && f.accepts(&txt));
     }
 }
 

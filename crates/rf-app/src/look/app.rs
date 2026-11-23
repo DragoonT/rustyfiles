@@ -54,16 +54,38 @@ fn open_settings() {
 }
 
 /// DirectLook's own icon: when its setting is on and rustyfiles has none (rustyfiles running in
-/// the background has one, with the settings in its menu): one icon, not two.
-fn tray_wanted(cx: &App) -> bool {
-    cx.global::<LookSettings>().look_tray_icon && !cx.global::<crate::settings::Settings>().run_in_background
+/// the background has one, with the settings in its menu): one icon, not two. `app_has_icon`: rustyfiles' icon is there now (its
+/// sign, `background::tray_sign`); the setting alone left no icon at all once rustyfiles had quit with background mode on.
+fn tray_wanted(own_setting: bool, app_has_icon: bool) -> bool {
+    own_setting && !app_has_icon
 }
 
+/// The word that the icon is to be looked at again reaches the app through this (the wait below runs on a thread of its own).
+static AGAIN: std::sync::OnceLock<futures::channel::mpsc::UnboundedSender<Msg>> = std::sync::OnceLock::new();
+
 fn sync_tray(cx: &App) {
-    if tray_wanted(cx) {
+    let sign = crate::background::tray_sign();
+    let app_has_icon = rf_win::single_instance::is_announced(&sign);
+    if tray_wanted(cx.global::<LookSettings>().look_tray_icon, app_has_icon) {
         rf_win::tray::show(tray_labels());
     } else {
         rf_win::tray::hide();
+    }
+    if app_has_icon {
+        // one thread sleeps until rustyfiles' icon is gone (it quit, crashed, or background mode was turned off), then ours is
+        // looked at again; no polling
+        static WAITING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !WAITING.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            std::thread::spawn(move || {
+                rf_win::single_instance::wait_until_gone(&sign);
+                // (never a tight loop, whatever the other side does)
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                WAITING.store(false, std::sync::atomic::Ordering::Release);
+                if let Some(tx) = AGAIN.get() {
+                    let _ = tx.unbounded_send(Msg::TrayAgain);
+                }
+            });
+        }
     }
 }
 
@@ -100,6 +122,7 @@ fn handle(msg: Msg, cx: &mut App) {
             cx.quit();
         }
         Msg::Wake => {}
+        Msg::TrayAgain => sync_tray(cx),
     }
 }
 
@@ -120,6 +143,7 @@ pub fn main() {
         rf_win::single_instance::Role::Primary(g) => g,
     };
     let (tx, mut rx) = futures::channel::mpsc::unbounded::<Msg>();
+    let _ = AGAIN.set(tx.clone());
     {
         let tx = tx.clone();
         rf_win::single_instance::serve_app(&app_name(), move |m| {
@@ -190,6 +214,14 @@ mod tests {
     use super::parse_args;
     use crate::look::ShowOpts;
     use crate::look::ipc::Msg;
+
+    #[test]
+    fn one_icon_in_the_notification_area_and_never_none() {
+        use super::tray_wanted;
+        assert!(tray_wanted(true, false), "rustyfiles has no icon (it quit, or background mode is off): ours is there");
+        assert!(!tray_wanted(true, true), "rustyfiles' icon is there: not two");
+        assert!(!tray_wanted(false, false) && !tray_wanted(false, true), "turned off in DirectLook's settings");
+    }
 
     #[test]
     fn launch_arguments() {

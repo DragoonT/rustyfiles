@@ -33,6 +33,8 @@ pub enum Msg {
     Quit,
     /// Yalnız çalışsın (arka planda başlatma).
     Wake,
+    /// The icon in the notification area is to be looked at again (rustyfiles' own came or went; see `app::sync_tray`).
+    TrayAgain,
 }
 
 impl Msg {
@@ -46,6 +48,7 @@ impl Msg {
             Msg::Reload => format!("{PREFIX}reload"),
             Msg::Quit => format!("{PREFIX}quit"),
             Msg::Wake => String::new(),
+            Msg::TrayAgain => format!("{PREFIX}tray"),
         }
     }
 
@@ -73,6 +76,7 @@ impl Msg {
             "close" => Msg::Close,
             "reload" => Msg::Reload,
             "quit" => Msg::Quit,
+            "tray" => Msg::TrayAgain,
             _ => return None,
         })
     }
@@ -162,6 +166,7 @@ mod tests {
             Msg::Reload,
             Msg::Quit,
             Msg::Wake,
+            Msg::TrayAgain,
         ] {
             assert_eq!(Msg::decode(&m.encode()), Some(m.clone()), "{m:?}");
         }

@@ -61,7 +61,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn task(hwnd: isize, pid: u32, exe: &str, id: Option<&str>) -> Task {
-        Task { hwnd, title: String::new(), pid, exe: Some(PathBuf::from(exe)), app_id: id.map(String::from), minimized: false }
+        Task { hwnd, title: String::new(), pid, exe: Some(PathBuf::from(exe)), app_id: id.map(String::from), minimized: false, relaunch: None }
     }
 
     // The identities below are the ones found on this machine (see the dock_probe example): the windows of these apps set no

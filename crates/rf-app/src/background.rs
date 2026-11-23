@@ -71,8 +71,24 @@ pub fn sync_tray(on: bool) {
     } else {
         rf_win::tray::hide();
     }
-    // (one icon in the notification area: while ours is there DirectLook leaves its own out; it reads the setting from the file when
-    // told to reload, so `settings::update` tells it after the save, see look::app::tray_wanted)
+    // One icon in the notification area: while ours is there DirectLook leaves its own out. That ours IS there it sees from this
+    // sign, not from the setting alone: with background mode on and rustyfiles quit (or never started) there was no icon at all,
+    // DirectLook's settings and its Quit out of reach. The sign goes with this process however it ends.
+    thread_local! {
+        static HERE: std::cell::RefCell<Option<rf_win::single_instance::Presence>> = const { std::cell::RefCell::new(None) };
+    }
+    HERE.with(|h| *h.borrow_mut() = on.then(|| rf_win::single_instance::announce(&tray_sign())).flatten());
+    if on {
+        // (a DirectLook that runs already shows its own: it looks again. Taking ours away needs no word, it waits on the sign.)
+        std::thread::spawn(|| {
+            let _ = rf_win::single_instance::send_to(&crate::look::ipc::app_name(), &crate::look::ipc::Msg::Reload.encode());
+        });
+    }
+}
+
+/// The name of the sign "rustyfiles has its icon in the notification area" (see [`sync_tray`]).
+pub fn tray_sign() -> String {
+    format!("{}-tray", rf_win::single_instance::instance_name())
 }
 
 /// Routes tray clicks to the app (call once at startup).

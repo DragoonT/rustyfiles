@@ -1556,7 +1556,7 @@ mod tests {
         use rf_win::dock::{IconSource, Launch, PinnedApp};
         let pin = |id: &str| PinnedApp { name: id.into(), aumid: Some(id.into()), exe: None, launch: Launch::Packaged(id.into()), icon: IconSource::Packaged(id.into()) };
         let pins = vec![pin("a"), pin("b")];
-        let running = vec![("b".to_string(), vec![Task { hwnd: 2, title: "B".into(), pid: 2, exe: None, app_id: Some("b".into()), minimized: false }])];
+        let running = vec![("b".to_string(), vec![Task { hwnd: 2, title: "B".into(), pid: 2, exe: None, app_id: Some("b".into()), minimized: false, relaunch: None }])];
         let mut items = model::merge(&pins, running, 0);
         let left = take_idle_pins(&mut items);
         assert_eq!(left.iter().map(|a| a.key.as_str()).collect::<Vec<_>>(), ["a"], "a is pinned and not running");
@@ -1572,8 +1572,8 @@ mod tests {
         // (an island with nothing running and nothing pinned has only the separator and the two places)
         assert_eq!(nth_app(&items, 0), None);
         let running = vec![
-            ("a".to_string(), vec![Task { hwnd: 1, title: "A".into(), pid: 1, exe: None, app_id: Some("a".into()), minimized: false }]),
-            ("b".to_string(), vec![Task { hwnd: 2, title: "B".into(), pid: 2, exe: None, app_id: Some("b".into()), minimized: false }]),
+            ("a".to_string(), vec![Task { hwnd: 1, title: "A".into(), pid: 1, exe: None, app_id: Some("a".into()), minimized: false, relaunch: None }]),
+            ("b".to_string(), vec![Task { hwnd: 2, title: "B".into(), pid: 2, exe: None, app_id: Some("b".into()), minimized: false, relaunch: None }]),
         ];
         let items = model::merge(&[], running, 0);
         let apps: Vec<usize> = (0..3).filter_map(|n| nth_app(&items, n)).collect();
@@ -1664,7 +1664,7 @@ mod tests {
     }
 
     fn task(hwnd: isize, title: &str, app: &str) -> Task {
-        Task { hwnd, title: title.into(), pid: hwnd as u32, exe: Some(std::path::PathBuf::from(app)), app_id: None, minimized: false }
+        Task { hwnd, title: title.into(), pid: hwnd as u32, exe: Some(std::path::PathBuf::from(app)), app_id: None, minimized: false, relaunch: None }
     }
 
     /// `MiddleIsland::apply` repaints only when the items differ. What the island does not draw (a window's title, whether it is

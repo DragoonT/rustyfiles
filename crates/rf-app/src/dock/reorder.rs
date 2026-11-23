@@ -598,7 +598,7 @@ mod tests {
     }
 
     fn running(name: &str, hwnd: isize) -> (String, Vec<rf_win::tasklist::Task>) {
-        let task = rf_win::tasklist::Task { hwnd, title: name.into(), pid: hwnd as u32, exe: Some(format!("c:/apps/{name}.exe").into()), app_id: None, minimized: false };
+        let task = rf_win::tasklist::Task { hwnd, title: name.into(), pid: hwnd as u32, exe: Some(format!("c:/apps/{name}.exe").into()), app_id: None, minimized: false, relaunch: None };
         (task.group(), vec![task])
     }
 

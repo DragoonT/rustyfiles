@@ -29,6 +29,34 @@ pub struct Task {
     /// The window's AppUserModelID, when it sets one.
     pub app_id: Option<String>,
     pub minimized: bool,
+    /// How the window asks to be started again, when it says so (see [`Relaunch`]).
+    pub relaunch: Option<Relaunch>,
+}
+
+/// What a window tells the taskbar to start for it (`System.AppUserModel.RelaunchCommand` in its property store) when the program
+/// that owns the window is not the one to start: Steam's window belongs to `steamwebhelper.exe`, which does nothing started alone,
+/// and names `steam.exe` here. Windows' taskbar pins and starts this; the dock took the window's own program, so a Steam pinned from
+/// its running window never started.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Relaunch {
+    pub program: PathBuf,
+    pub args: String,
+    /// `System.AppUserModel.RelaunchDisplayNameResource` when it is a plain name (not a `@file,-id` reference).
+    pub name: Option<String>,
+}
+
+/// A relaunch command line's program and arguments: the program ends with its `.exe` and may stand in quotes. `None` for a command
+/// that names no program.
+pub fn relaunch_of(command: &str, name: Option<String>) -> Option<Relaunch> {
+    let line = command.trim();
+    let end = line.to_ascii_lowercase().find(".exe")? + 4;
+    let program = line[..end].trim().trim_matches('"');
+    if program.is_empty() {
+        return None;
+    }
+    let args = line[end..].trim_start_matches('"').trim().to_string();
+    let name = name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty() && !n.starts_with('@'));
+    Some(Relaunch { program: PathBuf::from(program), args, name })
 }
 
 impl Task {
@@ -93,18 +121,27 @@ pub fn process_exe_path(pid: u32) -> Option<PathBuf> {
     exe_of(pid)
 }
 
-/// The window's AppUserModelID (`System.AppUserModel.ID` in its property store).
-fn app_id_of(h: HWND) -> Option<String> {
+/// The window's AppUserModelID (`System.AppUserModel.ID` in its property store) and how it asks to be started again (a command
+/// whose program is on the disk; else none).
+fn identity_of(h: HWND) -> (Option<String>, Option<Relaunch>) {
+    use windows::Win32::Foundation::PROPERTYKEY;
+    use windows::Win32::Storage::EnhancedStorage::{PKEY_AppUserModel_ID, PKEY_AppUserModel_RelaunchCommand, PKEY_AppUserModel_RelaunchDisplayNameResource};
     use windows::Win32::System::Com::StructuredStorage::PropVariantToStringAlloc;
     use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow};
-    use windows::Win32::Storage::EnhancedStorage::PKEY_AppUserModel_ID;
     unsafe {
-        let store: IPropertyStore = SHGetPropertyStoreForWindow(h).ok()?;
-        let v = store.GetValue(&PKEY_AppUserModel_ID).ok()?;
-        let p = PropVariantToStringAlloc(&v).ok()?;
-        let s = p.to_string().ok();
-        windows::Win32::System::Com::CoTaskMemFree(Some(p.0 as *const _));
-        s.filter(|s| !s.is_empty())
+        let Ok(store) = SHGetPropertyStoreForWindow::<IPropertyStore>(h) else { return (None, None) };
+        let text = |key: &PROPERTYKEY| -> Option<String> {
+            let v = store.GetValue(key).ok()?;
+            let p = PropVariantToStringAlloc(&v).ok()?;
+            let s = p.to_string().ok();
+            windows::Win32::System::Com::CoTaskMemFree(Some(p.0 as *const _));
+            s.filter(|s| !s.is_empty())
+        };
+        let id = text(&PKEY_AppUserModel_ID);
+        let relaunch = text(&PKEY_AppUserModel_RelaunchCommand)
+            .and_then(|c| relaunch_of(&c, text(&PKEY_AppUserModel_RelaunchDisplayNameResource)))
+            .filter(|r| r.program.is_file());
+        (id, relaunch)
     }
 }
 
@@ -127,7 +164,8 @@ fn task_of(h: HWND) -> Option<Task> {
         if is_helper(&title, r.right - r.left, r.bottom - r.top, minimized) {
             return None;
         }
-        Some(Task { hwnd: h.0 as isize, title, pid, exe: exe_of(pid), app_id: app_id_of(h), minimized })
+        let (app_id, relaunch) = identity_of(h);
+        Some(Task { hwnd: h.0 as isize, title, pid, exe: exe_of(pid), app_id, minimized, relaunch })
     }
 }
 
@@ -331,7 +369,7 @@ mod tests {
 
     #[test]
     fn groups_by_app_id_then_program() {
-        let t = |pid, exe: &str, id: Option<&str>| Task { hwnd: pid as isize, title: String::new(), pid, exe: Some(PathBuf::from(exe)), app_id: id.map(String::from), minimized: false };
+        let t = |pid, exe: &str, id: Option<&str>| Task { hwnd: pid as isize, title: String::new(), pid, exe: Some(PathBuf::from(exe)), app_id: id.map(String::from), minimized: false, relaunch: None };
         let g = grouped(vec![
             t(1, r"C:\a\Chrome.exe", None),
             t(2, r"C:\b\code.exe", Some("Microsoft.VisualStudioCode")),
@@ -420,10 +458,23 @@ mod helper_tests {
 
 #[cfg(test)]
 mod known_tests {
-    use super::{Task, with_known};
+    use std::path::PathBuf;
+
+    use super::{Task, relaunch_of, with_known};
+
+    #[test]
+    fn a_relaunch_command_is_a_program_and_its_arguments() {
+        let r = relaunch_of(r#""C:/Program Files (x86)/Steam/steam.exe" -foreground"#, Some("Steam".into())).unwrap();
+        assert_eq!(r.program, PathBuf::from("C:/Program Files (x86)/Steam/steam.exe"));
+        assert_eq!((r.args.as_str(), r.name.as_deref()), ("-foreground", Some("Steam")));
+        let r = relaunch_of("C:/a/b.EXE", Some("@C:/a/b.exe,-101".into())).unwrap();
+        assert_eq!((r.program, r.args.as_str(), r.name), (PathBuf::from("C:/a/b.EXE"), "", None), "a resource reference is no name");
+        assert_eq!(relaunch_of("  ", None), None);
+        assert_eq!(relaunch_of("shell:AppsFolder/x", None), None, "no program named");
+    }
 
     fn task(h: isize) -> Task {
-        Task { hwnd: h, title: format!("w{h}"), pid: 1, exe: None, app_id: None, minimized: false }
+        Task { hwnd: h, title: format!("w{h}"), pid: 1, exe: None, app_id: None, minimized: false, relaunch: None }
     }
 
     #[test]

@@ -583,6 +583,9 @@ pub struct Settings {
     pub dual_pane_new_tabs: bool,
     /// Dual pane side by side (true) or stacked (false).
     pub dual_pane_vertical: bool,
+    /// The share of the tab the first pane takes (the left one, or the upper one when stacked): the divider between the two panes is
+    /// dragged (issue 284: "I kept trying to drag the middle divider, but I cannot"). 0.5 is the middle.
+    pub dual_pane_split: f32,
     pub menu: MenuPrefs,
     pub smooth_scroll: bool,
 
@@ -982,6 +985,7 @@ impl Default for Settings {
             sessions_in_this_window: false,
             dual_pane_new_tabs: false,
             dual_pane_vertical: true,
+            dual_pane_split: 0.5,
             menu: MenuPrefs::default(),
             smooth_scroll: true,
             show_scrollbar: true,
