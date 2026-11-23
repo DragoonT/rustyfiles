@@ -346,9 +346,9 @@ disk.
 
 The same file manager, drawn natively with AppKit and Liquid Glass over the same Rust core: tabs,
 dual pane, every view, Quick Look on <kbd>Space</kbd>, archives as folders, bulk rename, disk usage,
-the Shelf, colour tags, Git status, Connect to Server and Ferry. The Dock, the desktop, HyperSearch,
-HyperDownload and DirectLook stay on Windows for now. Apple silicon and macOS 26 (Tahoe), English and
-Turkish so far. It updates itself like the Windows app.
+the Shelf, colour tags, Git status, Connect to Server, Ferry and the same 49 languages. The Dock, the
+desktop, HyperSearch and DirectLook stay on Windows for now, and HyperDownload's Mac build follows in
+its own release. Apple silicon and macOS 26 (Tahoe). It updates itself like the Windows app.
 
 ## Install
 
