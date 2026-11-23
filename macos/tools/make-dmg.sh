@@ -17,7 +17,8 @@ OUT=build/rustyfiles-mac-arm64.dmg
 PROFILE="${NOTARY_PROFILE:-rustyfiles}"
 [ -d "$APP" ] || { echo "no $APP: run ./build.sh first" >&2; exit 1; }
 
-ID="${SIGN_ID:-$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1)}"
+# (by its SHA-1: a name with letters such as "Ö" does not survive the trip through the shell)
+ID="${SIGN_ID:-$(security find-identity -v -p codesigning | awk '/"Developer ID Application: / { print $2; exit }')}"
 
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
