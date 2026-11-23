@@ -650,6 +650,14 @@ final class CardView: FlippedView {
         layer?.cornerRadius = Metrics.radius
         layer?.borderWidth = 1
         layer?.masksToBounds = true
+        applyCompact()
+    }
+
+    /// Compact window: only the corner facing the sidebar and the bars stays round.
+    func applyCompact() {
+        layer?.maskedCorners = Metrics.compact
+            ? (isFlipped && layer?.isGeometryFlipped == true ? [.layerMinXMinYCorner] : [.layerMinXMaxYCorner])
+            : [.layerMinXMinYCorner, .layerMaxXMinYCorner, .layerMinXMaxYCorner, .layerMaxXMaxYCorner]
     }
 
     @available(*, unavailable)

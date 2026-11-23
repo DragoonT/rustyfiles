@@ -98,7 +98,7 @@ enum MenuActions {
     }
 
     static func openInTerminal(_ dir: URL) {
-        guard let terminal = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") else { return }
+        guard let terminal = Terminals.app() else { return }
         NSWorkspace.shared.open([dir], withApplicationAt: terminal, configuration: NSWorkspace.OpenConfiguration())
     }
 
@@ -236,5 +236,32 @@ extension FileOps {
         let dir = urls[0].deletingLastPathComponent()
         let base = urls.count == 1 ? urls[0].deletingPathExtension().lastPathComponent : dir.lastPathComponent
         return unique(base.isEmpty ? String(localized: "Archive") : base, ext: ext, in: dir)
+    }
+}
+
+/// Settings › Advanced › Developer tools › Terminal: the terminals installed, and the one chosen.
+@MainActor
+enum Terminals {
+    static let known: [(id: String, name: String)] = [
+        ("com.apple.Terminal", "Terminal"), ("com.googlecode.iterm2", "iTerm2"), ("com.mitchellh.ghostty", "Ghostty"),
+        ("dev.warp.Warp-Stable", "Warp"), ("com.github.wez.wezterm", "WezTerm"), ("net.kovidgoyal.kitty", "kitty"),
+        ("org.alacritty", "Alacritty"), ("co.zeit.hyper", "Hyper"), ("com.raphaelamorim.rio", "Rio"),
+    ]
+
+    /// The choices: Terminal first (as ""), the other installed ones, and an app chosen by hand.
+    static func options() -> [(String, String)] {
+        var out: [(String, String)] = [("", "Terminal")]
+        for t in known.dropFirst() where NSWorkspace.shared.urlForApplication(withBundleIdentifier: t.id) != nil { out.append((t.id, t.name)) }
+        let chosen = AppSettings.terminalApp
+        if chosen.hasPrefix("/") { out.append((chosen, FileManager.default.displayName(atPath: chosen))) }
+        return out
+    }
+
+    /// The app to open folders in; Terminal when the chosen one is gone.
+    static func app() -> URL? {
+        let chosen = AppSettings.terminalApp
+        if chosen.hasPrefix("/"), FileManager.default.fileExists(atPath: chosen) { return URL(fileURLWithPath: chosen) }
+        if !chosen.isEmpty, let u = NSWorkspace.shared.urlForApplication(withBundleIdentifier: chosen) { return u }
+        return NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal")
     }
 }

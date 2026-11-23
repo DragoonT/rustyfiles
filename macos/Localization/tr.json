@@ -806,5 +806,10 @@
 "The folder's path on tabs": "Sekmede klasörün yolu",
 "Tabs show the folder's whole path in smaller text instead of its name; what doesn't fit is cut at the end.": "Sekme, klasörün adı yerine tam yolunu küçük yazıyla gösterir; sığmayan kısım sondan kesilir.",
 "Show password": "Parolayı göster",
-"Hide password": "Parolayı gizle"
+"Hide password": "Parolayı gizle",
+"Terminal": "Terminal",
+"What “Open in Terminal” opens the folder in.": "“Terminalde aç”ın klasörü açtığı program.",
+"Another terminal": "Başka bir terminal",
+"Compact window": "Kompakt pencere",
+"The tabs, the address bar and the command bar are thinner, and the content reaches the window's right and bottom edges. Icons and text keep their size.": "Sekmeler, adres çubuğu ve komut çubuğu daha ince olur, içerik pencerenin sağına ve altına kadar uzanır. Simgeler ve yazılar aynı boyda kalır."
 }

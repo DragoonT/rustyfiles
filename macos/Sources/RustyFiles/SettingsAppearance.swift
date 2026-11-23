@@ -78,6 +78,14 @@ extension AppSettings {
         set { store(newValue, "sidebarDriveSpace") }
     }
 
+    static var compactWindow: Bool {
+        get { flag("compactWindow", false) }
+        set {
+            Metrics.compact = newValue
+            store(newValue, "compactWindow")
+        }
+    }
+
     static var showCommandBar: Bool {
         get { flag("showCommandBar", true) }
         set { store(newValue, "showCommandBar") }
@@ -219,6 +227,11 @@ extension SettingsContent {
             .card(
                 title: String(localized: "Show scroll bars"), detail: nil, icon: "move-vertical",
                 control: .toggle(get: { AppSettings.showScrollBars }, set: { AppSettings.showScrollBars = $0 })),
+            .card(
+                title: String(localized: "Compact window"),
+                detail: String(localized: "The tabs, the address bar and the command bar are thinner, and the content reaches the window's right and bottom edges. Icons and text keep their size."),
+                icon: "minimize-2",
+                control: .toggle(get: { AppSettings.compactWindow }, set: { AppSettings.compactWindow = $0 })),
             .card(
                 title: String(localized: "Interface scale"),
                 detail: String(localized: "Everything in the window bigger or smaller: for a display set to a higher resolution than usual."),

@@ -277,6 +277,13 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         if key == "material" || key == "theme" { applyMaterial() }
         if key == "interfacePercent" { applyScale() }
         if key == "tabPath" { refreshTabs() }
+        if key == "compactWindow" {
+            [leftList, rightList].forEach { $0.card.applyCompact(); $0.card.needsLayout = true }
+            root.needsLayout = true
+            titleBar.needsLayout = true
+            titleBar.strip.needsDisplay = true
+            navBar.needsLayout = true
+        }
         leftList.apply(settingKey: key)
         rightList.apply(settingKey: key)
         func redraw(_ v: NSView) {

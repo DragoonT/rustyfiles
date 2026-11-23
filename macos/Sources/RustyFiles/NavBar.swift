@@ -337,7 +337,8 @@ final class NavBarView: FlippedView {
         let right = bounds.width - 8 - 32
         statusCenter.frame = NSRect(x: right, y: (h - 32) / 2, width: 32, height: 32)
         x += 4
-        omnibar.frame = NSRect(x: x, y: (h - 36) / 2, width: max(right - 4 - 4 - x, 160), height: 36)
+        let oh: CGFloat = Metrics.compact ? 32 : 36
+        omnibar.frame = NSRect(x: x, y: (h - oh) / 2, width: max(right - 4 - 4 - x, 160), height: oh)
     }
 
     override func mouseDown(with event: NSEvent) {

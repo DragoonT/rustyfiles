@@ -20,6 +20,13 @@ extension AppSettings {
         set { store(newValue.isEmpty ? nil : newValue, "editorApp") }
     }
 
+    /// The terminal "Open in Terminal" uses (#224 on Windows): a bundle id or an app's path;
+    /// "" is macOS's Terminal.
+    static var terminalApp: String {
+        get { d.string(forKey: "terminalApp") ?? "" }
+        set { store(newValue.isEmpty ? nil : newValue, "terminalApp") }
+    }
+
     /// When the menus offer "Open in editor": "git" (inside a Git repository), "always", "never".
     static var editorMenu: String {
         get { d.string(forKey: "editorMenu") ?? "git" }
@@ -232,6 +239,20 @@ extension SettingsContent {
                         if panel.runModal() == .OK, let u = panel.url { AppSettings.editorApp = u.path }
                     }),
                     (String(localized: "Automatic"), { AppSettings.editorApp = "" }),
+                ])),
+            .card(
+                title: String(localized: "Terminal"), detail: String(localized: "What “Open in Terminal” opens the folder in."), icon: "square-terminal",
+                control: .choice(
+                    options: Terminals.options(), get: { AppSettings.terminalApp }, set: { AppSettings.terminalApp = $0 })),
+            .card(
+                title: String(localized: "Another terminal"), detail: nil, icon: nil,
+                control: .buttons([
+                    (String(localized: "Choose…"), {
+                        let panel = NSOpenPanel()
+                        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+                        panel.allowedContentTypes = [.application]
+                        if panel.runModal() == .OK, let u = panel.url { AppSettings.terminalApp = u.path }
+                    }),
                 ])),
             .card(
                 title: String(localized: "“Open in editor” in the menus"), detail: nil, icon: "square-code",

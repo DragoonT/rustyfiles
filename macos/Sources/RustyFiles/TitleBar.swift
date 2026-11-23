@@ -65,7 +65,7 @@ final class TabStripView: HoverView, NSViewToolTipOwner {
 
     private static let minW: CGFloat = 72
     private static let maxW: CGFloat = 220
-    private static let height: CGFloat = 32
+    private static var height: CGFloat { Metrics.compact ? 28 : 32 }
 
     override var mouseDownCanMoveWindow: Bool { false }
 
