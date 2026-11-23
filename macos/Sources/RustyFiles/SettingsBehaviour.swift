@@ -87,6 +87,12 @@ extension AppSettings {
     }
 
     /// Resting the pointer on a row selects it.
+    /// The details shown when the pointer rests on an item (size, dates, a picture's size).
+    static var hoverDetails: Bool {
+        get { flag("hoverDetails", true) }
+        set { store(newValue, "hoverDetails") }
+    }
+
     static var selectOnHover: Bool {
         get { flag("selectOnHover", false) }
         set { store(newValue, "selectOnHover") }

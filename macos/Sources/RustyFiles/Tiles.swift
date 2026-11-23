@@ -77,7 +77,14 @@ final class ThumbnailCache {
 
 /// One tile (folder_view.rs, grid): radius 8, `p_1`, the picture in a box 4 larger than it,
 /// the name under it. Selected: selection fill and a 1 px `selection_border`; hover: hover fill.
-final class TileView: HoverView {
+final class TileView: HoverView, NSViewToolTipOwner {
+    /// Settings › Files › Show details on hover: the text, asked for only when the tip shows.
+    var detailTip: (() -> String?)? { didSet { needsLayout = true } }
+
+    nonisolated func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData data: UnsafeMutableRawPointer?) -> String {
+        MainActor.assumeIsolated { detailTip?() ?? "" }
+    }
+
     let picture = NSImageView()
     let label = NSTextField(wrappingLabelWithString: "")
     /// Cards: the type, size and date beside the picture.
@@ -141,6 +148,8 @@ final class TileView: HoverView {
 
     override func layout() {
         super.layout()
+        removeAllToolTips()
+        if detailTip != nil { addToolTip(bounds, owner: self, userData: nil) }
         switch style {
         case .cards:
             // px_2 gap_3: the picture 60 (in a box of 64), the name and the facts beside it

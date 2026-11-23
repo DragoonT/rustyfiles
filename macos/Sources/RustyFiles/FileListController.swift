@@ -45,7 +45,7 @@ enum ViewMode: String, CaseIterable {
 /// is on screen.
 @MainActor
 final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate,
-    NSCollectionViewDataSource, NSCollectionViewDelegate,
+    NSCollectionViewDataSource, NSCollectionViewDelegate, NSCollectionViewDelegateFlowLayout,
     @preconcurrency QLPreviewPanelDataSource, @preconcurrency QLPreviewPanelDelegate
 {
     let card = CardView()
@@ -160,6 +160,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         tileScroll.documentView = tiles
         tileScroll.drawsBackground = false
         tileScroll.hasVerticalScroller = true
+        tileScroll.hasHorizontalScroller = true
         tileScroll.scrollerStyle = .overlay
 
         header.table = table
@@ -360,14 +361,32 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             millerNext.frame = NSRect(x: x, y: barH, width: max(w, b.width - x), height: h)
         }
         tileScroll.frame = NSRect(x: 0, y: barH, width: b.width, height: b.height - statusH - barH)
-        // as many columns as fit, left-aligned with 4 between them (not spread out)
-        let cellW = viewMode.cellSize.width
-        let cols = max(Int((b.width - 2 * TileMetrics.padX + TileMetrics.gap) / (cellW + TileMetrics.gap)), 1)
-        let used = CGFloat(cols) * (cellW + TileMetrics.gap) - TileMetrics.gap
-        let right = max(b.width - TileMetrics.padX - used, TileMetrics.padX)
-        if tileLayout.sectionInset.right != right {
-            tileLayout.sectionInset.right = right
-            tileLayout.invalidateLayout()
+        if listByColumns {
+            // List: filled column by column, each column as wide as its longest name
+            if tileLayout.scrollDirection != .horizontal || tileLayout.sectionInset.right != TileMetrics.padX {
+                tileLayout.scrollDirection = .horizontal
+                tileLayout.sectionInset.right = TileMetrics.padX
+                listWidths = nil
+                tileLayout.invalidateLayout()
+            }
+            if listRowsPerColumn != listWidths?.rows {
+                listWidths = nil
+                tileLayout.invalidateLayout()
+            }
+        } else {
+            if tileLayout.scrollDirection != .vertical {
+                tileLayout.scrollDirection = .vertical
+                tileLayout.invalidateLayout()
+            }
+            // as many columns as fit, left-aligned with 4 between them (not spread out)
+            let cellW = viewMode.cellSize.width
+            let cols = max(Int((b.width - 2 * TileMetrics.padX + TileMetrics.gap) / (cellW + TileMetrics.gap)), 1)
+            let used = CGFloat(cols) * (cellW + TileMetrics.gap) - TileMetrics.gap
+            let right = max(b.width - TileMetrics.padX - used, TileMetrics.padX)
+            if tileLayout.sectionInset.right != right {
+                tileLayout.sectionInset.right = right
+                tileLayout.invalidateLayout()
+            }
         }
         message.frame = NSRect(x: 40, y: top + 40, width: b.width - 80, height: 80)
         settingsView?.frame = card.bounds
@@ -525,6 +544,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
 
     private func reloadItems() {
         computeGroups()
+        listWidths = nil
         switch viewMode {
         case .details, .columns: table.reloadData()
         case .tiles, .cards, .list: tiles.reloadData()
@@ -638,6 +658,8 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             rearrange()
         case "showHidden":
             showHidden = AppSettings.showHidden
+        case "hoverDetails":
+            if folder != nil { reloadItems() }
         case "showSystemFiles":
             setShowSystemFiles(show: AppSettings.showSystemFiles)
             rearrange()
@@ -1656,6 +1678,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         v.groupTitle = groupTitles[row]
         v.groupCount = groupTitles[row].flatMap { groupCounts[$0] }
         v.groupFolded = foldedRows.contains(row)
+        v.detailTip = AppSettings.hoverDetails && !foldedRows.contains(row) ? { [weak self] in self?.hoverDetails(row: row) } : nil
         v.onLens = AppSettings.isGlass && tableView.selectedRowIndexes.count == 1 && tableView.selectedRowIndexes.first == row
         return v
     }
@@ -1912,6 +1935,56 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         return IndexPath(item: row - start, section: max(lo, 0))
     }
 
+    // MARK: List, column by column (folder_view.rs `list_column_widths`)
+
+    /// List without groups fills column by column and scrolls sideways, as on Windows.
+    var listByColumns: Bool { viewMode == .list && gridTitles.isEmpty }
+
+    /// How many rows a List column holds in the height there is.
+    var listRowsPerColumn: Int {
+        let h = tileScroll.contentSize.height - 2 * TileMetrics.padY
+        let rowH = ViewMode.list.cellSize.height
+        return max(Int((h + TileMetrics.gap) / (rowH + TileMetrics.gap)), 1)
+    }
+
+    /// Each column's width, kept until the folder, the names or the height change.
+    var listWidths: (rows: Int, count: Int, widths: [CGFloat])?
+
+    private func listColumnWidth(_ column: Int) -> CGFloat {
+        let n = Int(folder?.count() ?? 0), rows = listRowsPerColumn
+        if listWidths == nil || listWidths?.rows != rows || listWidths?.count != n {
+            var widths: [CGFloat] = []
+            let font = Metrics.textSm
+            if let folder, n <= 4000 {
+                var start = 0
+                while start < n {
+                    var most: CGFloat = 0
+                    for r in start..<min(start + rows, n) {
+                        if let item = folder.item(row: UInt32(r)) { most = max(most, Draw.textWidth(display.name(item), font: font)) }
+                    }
+                    // the icon, the gaps and the padding (LIST_CELL_CHROME), within 140…460
+                    widths.append(min(max(ceil(most) + 8 + 20 + 8 + 8 + 12, 140), 460))
+                    start += rows
+                }
+            }
+            listWidths = (rows, n, widths)
+        }
+        let w = listWidths?.widths ?? []
+        return w.indices.contains(column) ? w[column] : ViewMode.list.cellSize.width
+    }
+
+    func collectionView(_ collectionView: NSCollectionView, layout collectionViewLayout: NSCollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> NSSize {
+        let size = viewMode.cellSize
+        guard listByColumns else { return size }
+        return NSSize(width: listColumnWidth(indexPath.item / listRowsPerColumn), height: size.height)
+    }
+
+    /// The details box for a row (Settings › Files › Show details on hover).
+    func hoverDetails(row: Int) -> String? {
+        guard let folder, archive == nil, let item = folder.item(row: UInt32(row)), let p = folder.childPath(row: UInt32(row)) else { return nil }
+        return PreviewPane.hoverDetails(URL(fileURLWithPath: p), folder: item.isDir)
+    }
+
     /// Hidden items and items cut but not yet pasted are drawn faded.
     func faded(_ item: FileItem, row: Int) -> Bool {
         item.hidden || (!Clipboard.cutPaths.isEmpty && folder?.childPath(row: UInt32(row)).map(Clipboard.isCut) == true)
@@ -1949,6 +2022,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         tile.label.textColor = Palette.of(collectionView).text
         tile.alphaValue = entry.hidden || Clipboard.isCut(path) ? 0.6 : 1
         tile.isSelected = item.isSelected
+        tile.detailTip = AppSettings.hoverDetails ? { [weak self] in self?.hoverDetails(row: row) } : nil
         if AppSettings.showThumbnails, let thumb = ThumbnailCache.shared.cached(path) {
             tile.picture.image = thumb
             tile.isThumbnail = true

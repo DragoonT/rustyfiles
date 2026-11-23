@@ -287,7 +287,20 @@ final class ListHeaderView: HoverView {
 /// selection fill with the 3 px accent pill; the cursor row of a multiple selection also gets
 /// a 1 px `selection_border`. A row that is the only selection stands on the list's glass
 /// lens instead and draws no fill of its own.
-final class FileRowView: NSTableRowView {
+final class FileRowView: NSTableRowView, NSViewToolTipOwner {
+    /// Settings › Files › Show details on hover: the text, asked for only when the tip shows.
+    var detailTip: (() -> String?)? { didSet { needsLayout = true } }
+
+    override func layout() {
+        super.layout()
+        removeAllToolTips()
+        if detailTip != nil { addToolTip(bounds, owner: self, userData: nil) }
+    }
+
+    nonisolated func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData data: UnsafeMutableRawPointer?) -> String {
+        MainActor.assumeIsolated { detailTip?() ?? "" }
+    }
+
     var geometry = ListGeometry()
     var onLens = false { didSet { if onLens != oldValue { needsDisplay = true } } }
     var hovered = false { didSet { if hovered != oldValue { needsDisplay = true } } }

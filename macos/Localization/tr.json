@@ -796,5 +796,7 @@
 "Smaller Interface": "Arayüzü Küçült",
 "Actual Size": "Gerçek Boyut",
 "Interface scale": "Arayüz ölçeği",
-"Everything in the window bigger or smaller: for a display set to a higher resolution than usual.": "Penceredeki her şey daha büyük ya da küçük: ekran olağandan yüksek bir çözünürlüğe ayarlıysa."
+"Everything in the window bigger or smaller: for a display set to a higher resolution than usual.": "Penceredeki her şey daha büyük ya da küçük: ekran olağandan yüksek bir çözünürlüğe ayarlıysa.",
+"Show details on hover": "Üzerine gelince ayrıntıları göster",
+"The box with the size, the dates and a picture's dimensions when the pointer rests on an item.": "İşaretçi bir öğenin üzerinde durunca boyutu, tarihleri ve resmin boyutlarını gösteren kutu."
 }

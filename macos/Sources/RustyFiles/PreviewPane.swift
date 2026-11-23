@@ -226,6 +226,25 @@ final class PreviewPane: FlippedView {
 
     nonisolated private static func quickPropertiesRaw(_ url: URL) -> URLResourceValues? { try? url.resourceValues(forKeys: keys) }
 
+    /// The box shown when the pointer rests on an item (Explorer's info tip, folder_view.rs
+    /// `item_tooltip_text`): its name, then type, size, dates and a picture's dimensions.
+    static func hoverDetails(_ url: URL, folder: Bool) -> String {
+        let v = quickPropertiesRaw(url)
+        var lines = [FileManager.default.displayName(atPath: url.path)]
+        func add(_ k: String, _ value: String?) { if let value, !value.isEmpty { lines.append("\(k): \(value)") } }
+        add(String(localized: "Type"), v?.localizedTypeDescription ?? (folder ? String(localized: "Folder") : nil))
+        if !folder { add(String(localized: "Size"), v?.fileSize.map { formatSize(bytes: UInt64($0)) }) }
+        if !folder, let src = CGImageSourceCreateWithURL(url as CFURL, nil),
+            let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
+            let w = props[kCGImagePropertyPixelWidth] as? Int, let h = props[kCGImagePropertyPixelHeight] as? Int
+        {
+            add(String(localized: "Dimensions"), "\(w) × \(h)")
+        }
+        add(String(localized: "Modified"), when(v?.contentModificationDate))
+        add(String(localized: "Created"), when(v?.creationDate))
+        return lines.joined(separator: "\n")
+    }
+
     private static func quickProperties(_ url: URL, folder: Bool) -> [(String, String)] {
         let v = quickPropertiesRaw(url)
         var out: [(String, String)] = []

@@ -151,6 +151,9 @@ enum SettingsContent {
                     title: String(localized: "Select on hover"), detail: String(localized: "Resting the pointer on an item for a moment selects it."), icon: "mouse-pointer",
                     control: .toggle(get: { AppSettings.selectOnHover }, set: { AppSettings.selectOnHover = $0 })),
                 .card(
+                    title: String(localized: "Show details on hover"), detail: String(localized: "The box with the size, the dates and a picture's dimensions when the pointer rests on an item."), icon: "info",
+                    control: .toggle(get: { AppSettings.hoverDetails }, set: { AppSettings.hoverDetails = $0 })),
+                .card(
                     title: String(localized: "Show thumbnails"), detail: String(localized: "Pictures of the files themselves in the Tiles layout."), icon: "image",
                     control: .toggle(get: { AppSettings.showThumbnails }, set: { AppSettings.showThumbnails = $0 })),
                 .section(String(localized: "Behaviours")),
