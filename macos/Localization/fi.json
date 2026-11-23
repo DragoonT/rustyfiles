@@ -887,5 +887,9 @@
 "Downloading: %@": "Ladataan: %@",
 "The download stopped.": "Lataus pysähtyi.",
 "This item is still being copied. Rename it when the copy is done.": "Kohdetta kopioidaan vielä. Nimeä se uudelleen, kun kopiointi on valmis.",
-"%@ + %@ more": "%1$@ + %2$@ muuta"
+"%@ + %@ more": "%1$@ + %2$@ muuta",
+"Shortcut that opens rustyfiles from any app": "Pikanäppäin, joka avaa rustyfilesin mistä tahansa sovelluksesta",
+"Like Win+E on Windows: a new window at Home, whatever app is in front.": "Kuten Win+E Windowsissa: uusi ikkuna Kotiin riippumatta siitä, mikä sovellus on edessä.",
+"Open disks when they're connected": "Avaa levyt, kun ne liitetään",
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB-muisti, kortti tai levykuva avautuu välilehdelle, kuten Finderissa."
 }

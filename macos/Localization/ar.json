@@ -887,5 +887,9 @@
 "Downloading: %@": "جارٍ التنزيل: %@",
 "The download stopped.": "توقّف التنزيل.",
 "This item is still being copied. Rename it when the copy is done.": "هذا العنصر ما زال قيد النسخ. أعد تسميته بعد انتهاء النسخ.",
-"%@ + %@ more": "%1$@ + %2$@ أخرى"
+"%@ + %@ more": "%1$@ + %2$@ أخرى",
+"Shortcut that opens rustyfiles from any app": "اختصار يفتح rustyfiles من أي تطبيق",
+"Like Win+E on Windows: a new window at Home, whatever app is in front.": "مثل Win+E على Windows: نافذة جديدة في الصفحة الرئيسية، أيًّا كان التطبيق الذي في المقدمة.",
+"Open disks when they're connected": "افتح الأقراص عند توصيلها",
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "تُفتح عصا USB أو بطاقة أو صورة قرص في علامة تبويب، كما يفعل Finder."
 }

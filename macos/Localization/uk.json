@@ -887,5 +887,9 @@
 "Downloading: %@": "Завантаження: %@",
 "The download stopped.": "Завантаження зупинилося.",
 "This item is still being copied. Rename it when the copy is done.": "Цей елемент ще копіюється. Перейменуйте його, коли копіювання завершиться.",
-"%@ + %@ more": "%1$@ + ще %2$@"
+"%@ + %@ more": "%1$@ + ще %2$@",
+"Shortcut that opens rustyfiles from any app": "Комбінація клавіш, яка відкриває rustyfiles з будь-якого застосунку",
+"Like Win+E on Windows: a new window at Home, whatever app is in front.": "Як Win+E у Windows: нове вікно на «Основному», хай би який застосунок був на передньому плані.",
+"Open disks when they're connected": "Відкривати диски, коли їх підключено",
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB-флешка, картка або образ диска відкривається у вкладці, як у Finder."
 }

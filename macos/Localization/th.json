@@ -887,5 +887,9 @@
 "Downloading: %@": "กำลังดาวน์โหลด: %@",
 "The download stopped.": "การดาวน์โหลดหยุดแล้ว",
 "This item is still being copied. Rename it when the copy is done.": "รายการนี้ยังคงกำลังคัดลอกอยู่ เปลี่ยนชื่อเมื่อการคัดลอกเสร็จแล้ว",
-"%@ + %@ more": "%1$@ + อีก %2$@"
+"%@ + %@ more": "%1$@ + อีก %2$@",
+"Shortcut that opens rustyfiles from any app": "ทางลัดที่เปิด rustyfiles จากแอปใดก็ได้",
+"Like Win+E on Windows: a new window at Home, whatever app is in front.": "เหมือน Win+E บน Windows: เปิดหน้าต่างใหม่ที่หน้าแรก ไม่ว่าแอปใดจะอยู่ด้านหน้า",
+"Open disks when they're connected": "เปิดดิสก์เมื่อเชื่อมต่อ",
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "แฟลชไดรฟ์ USB การ์ด หรือไฟล์อิมเมจดิสก์จะเปิดในแท็บ เหมือนใน Finder"
 }

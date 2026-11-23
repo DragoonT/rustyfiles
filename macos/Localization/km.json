@@ -887,5 +887,9 @@
 "Downloading: %@": "កំពុងទាញយក៖ %@",
 "The download stopped.": "ការទាញយកបានឈប់។",
 "This item is still being copied. Rename it when the copy is done.": "ធាតុនេះនៅតែកំពុងចម្លង។ សូមប្ដូរឈ្មោះវាពេលចម្លងរួចរាល់។",
-"%@ + %@ more": "%1$@ + %2$@ ទៀត"
+"%@ + %@ more": "%1$@ + %2$@ ទៀត",
+"Shortcut that opens rustyfiles from any app": "ផ្លូវកាត់ដែលបើក rustyfiles ពីកម្មវិធីណាក៏បាន",
+"Like Win+E on Windows: a new window at Home, whatever app is in front.": "ដូច Win+E នៅលើ Windows៖ ផ្ទាំងថ្មីនៅ ទំព័រដើម មិនថាកម្មវិធីណានៅខាងមុខឡើយ។",
+"Open disks when they're connected": "បើកថាសនៅពេលភ្ជាប់",
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "ឌីស USB កាតឬរូបភាពឌីស បើកក្នុងផ្ទាំង ដូច Finder ។"
 }

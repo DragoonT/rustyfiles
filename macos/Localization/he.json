@@ -887,5 +887,9 @@
 "Downloading: %@": "מוריד: %@",
 "The download stopped.": "ההורדה נעצרה.",
 "This item is still being copied. Rename it when the copy is done.": "הפריט עדיין מועתק. אפשר לשנות את שמו כשההעתקה תסתיים.",
-"%@ + %@ more": "%1$@ + עוד %2$@"
+"%@ + %@ more": "%1$@ + עוד %2$@",
+"Shortcut that opens rustyfiles from any app": "קיצור דרך שפותח את rustyfiles מכל אפליקציה",
+"Like Win+E on Windows: a new window at Home, whatever app is in front.": "כמו Win+E ב-Windows: חלון חדש בדף הבית, לא משנה איזו אפליקציה פתוחה לפניו.",
+"Open disks when they're connected": "לפתוח דיסקים כשהם מחוברים",
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "דיסק USB, כרטיס או קובץ תמונת דיסק נפתחים בכרטיסייה, כמו ב-Finder."
 }

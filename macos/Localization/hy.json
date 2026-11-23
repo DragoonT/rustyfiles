@@ -887,5 +887,9 @@
 "Downloading: %@": "Ներբեռնվում է․ %@",
 "The download stopped.": "Ներբեռնումը կանգ առավ։",
 "This item is still being copied. Rename it when the copy is done.": "Այս տարրը դեռ պատճենվում է։ Վերանվանեք այն, երբ պատճենումը ավարտվի։",
-"%@ + %@ more": "%1$@ + ևս %2$@"
+"%@ + %@ more": "%1$@ + ևս %2$@",
+"Shortcut that opens rustyfiles from any app": "Դյուրանցում, որը ցանկացած հավելվածից բացում է rustyfiles-ը",
+"Like Win+E on Windows: a new window at Home, whatever app is in front.": "Ինչպես Windows-ի Win+E-ն. նոր պատուհան Տուն էջում, անկախ նրանից, թե որ հավելվածն է առաջին պլանում։",
+"Open disks when they're connected": "Բացել սկավառակները, երբ միացվում են",
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB սարքը, քարտը կամ սկավառակի պատկերը բացվում է ներդիրում, ինչպես Finder-ում։"
 }

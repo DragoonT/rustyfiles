@@ -887,5 +887,9 @@
 "Downloading: %@": "正在下載：%@",
 "The download stopped.": "下載已停止。",
 "This item is still being copied. Rename it when the copy is done.": "此項目仍在複製中。複製完成後再重新命名。",
-"%@ + %@ more": "%1$@ 等 %2$@ 項"
+"%@ + %@ more": "%1$@ 等 %2$@ 項",
+"Shortcut that opens rustyfiles from any app": "在任何 App 中開啟 rustyfiles 的快捷鍵",
+"Like Win+E on Windows: a new window at Home, whatever app is in front.": "類似 Windows 的 Win+E：不論前景是哪個 App，都會在「首頁」開啟新視窗。",
+"Open disks when they're connected": "磁碟連接時開啟",
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB 隨身碟、記憶卡或磁碟映像會像 Finder 一樣在分頁中開啟。"
 }

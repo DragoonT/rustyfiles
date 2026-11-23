@@ -887,5 +887,9 @@
 "Downloading: %@": "Изтегляне: %@",
 "The download stopped.": "Изтеглянето спря.",
 "This item is still being copied. Rename it when the copy is done.": "Този елемент още се копира. Преименувайте го, когато копирането приключи.",
-"%@ + %@ more": "%1$@ + още %2$@"
+"%@ + %@ more": "%1$@ + още %2$@",
+"Shortcut that opens rustyfiles from any app": "Пряк път, който отваря rustyfiles от всяко приложение",
+"Like Win+E on Windows: a new window at Home, whatever app is in front.": "Като Win+E в Windows: нов прозорец в Начало, каквото и приложение да е отворено отпред.",
+"Open disks when they're connected": "Отваряй дисковете, когато са свързани",
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB флашка, карта или образ на диск се отварят в раздел, както във Finder."
 }

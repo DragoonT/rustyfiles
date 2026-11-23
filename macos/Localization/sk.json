@@ -887,5 +887,9 @@
 "Downloading: %@": "Sťahuje sa: %@",
 "The download stopped.": "Sťahovanie sa zastavilo.",
 "This item is still being copied. Rename it when the copy is done.": "Táto položka sa stále kopíruje. Premenujte ju, keď sa kopírovanie skončí.",
-"%@ + %@ more": "%1$@ + %2$@ ďalších"
+"%@ + %@ more": "%1$@ + %2$@ ďalších",
+"Shortcut that opens rustyfiles from any app": "Skratka, ktorá otvorí rustyfiles z ľubovoľnej aplikácie",
+"Like Win+E on Windows: a new window at Home, whatever app is in front.": "Ako Win+E vo Windows: nové okno na Domov, nech je vpredu ktorákoľvek aplikácia.",
+"Open disks when they're connected": "Otvárať disky, keď sa pripoja",
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB kľúč, karta alebo obraz disku sa otvorí na karte, ako vo Finderi."
 }

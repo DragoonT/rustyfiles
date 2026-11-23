@@ -887,5 +887,9 @@
 "Downloading: %@": "Wird heruntergeladen: %@",
 "The download stopped.": "Der Download wurde unterbrochen.",
 "This item is still being copied. Rename it when the copy is done.": "Dieses Element wird noch kopiert. Benenne es um, wenn der Kopiervorgang abgeschlossen ist.",
-"%@ + %@ more": "%1$@ + %2$@ weitere"
+"%@ + %@ more": "%1$@ + %2$@ weitere",
+"Shortcut that opens rustyfiles from any app": "Kurzbefehl, der rustyfiles aus jeder App öffnet",
+"Like Win+E on Windows: a new window at Home, whatever app is in front.": "Wie Win+E unter Windows: ein neues Fenster auf der Startseite, egal welche App gerade vorne ist.",
+"Open disks when they're connected": "Laufwerke öffnen, sobald sie angeschlossen sind",
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "Ein USB-Stick, eine Karte oder ein Disk-Image öffnet sich wie im Finder in einem Tab."
 }

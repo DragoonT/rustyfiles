@@ -887,5 +887,9 @@
 "Downloading: %@": "Descarregant: %@",
 "The download stopped.": "La descàrrega s'ha aturat.",
 "This item is still being copied. Rename it when the copy is done.": "Aquest element encara s'està copiant. Canvia'n el nom quan acabi la còpia.",
-"%@ + %@ more": "%1$@ + %2$@ més"
+"%@ + %@ more": "%1$@ + %2$@ més",
+"Shortcut that opens rustyfiles from any app": "Drecera que obre rustyfiles des de qualsevol aplicació",
+"Like Win+E on Windows: a new window at Home, whatever app is in front.": "Com Win+E a Windows: una finestra nova a Inici, sigui quina sigui l’app que hi ha al davant.",
+"Open disks when they're connected": "Obre els discos quan es connectin",
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "Una memòria USB, una targeta o una imatge de disc s’obre en una pestanya, com fa el Finder."
 }

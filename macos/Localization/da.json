@@ -887,5 +887,9 @@
 "Downloading: %@": "Henter: %@",
 "The download stopped.": "Hentningen stoppede.",
 "This item is still being copied. Rename it when the copy is done.": "Dette emne kopieres stadig. Omdøb det, når kopieringen er færdig.",
-"%@ + %@ more": "%1$@ + %2$@ mere"
+"%@ + %@ more": "%1$@ + %2$@ mere",
+"Shortcut that opens rustyfiles from any app": "Genvej, der åbner rustyfiles fra alle apps",
+"Like Win+E on Windows: a new window at Home, whatever app is in front.": "Som Win+E på Windows: et nyt vindue på Startside, uanset hvilken app der er forrest.",
+"Open disks when they're connected": "Åbn diske, når de er tilsluttet",
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "En USB-stik, et kort eller en diskfil åbnes i en fane, ligesom i Finder."
 }

@@ -887,5 +887,9 @@
 "Downloading: %@": "Preuzimanje: %@",
 "The download stopped.": "Preuzimanje je stalo.",
 "This item is still being copied. Rename it when the copy is done.": "Ova stavka se još kopira. Preimenuj je kad kopiranje završi.",
-"%@ + %@ more": "%1$@ + još %2$@"
+"%@ + %@ more": "%1$@ + još %2$@",
+"Shortcut that opens rustyfiles from any app": "Prečac koji otvara rustyfiles iz bilo koje aplikacije",
+"Like Win+E on Windows: a new window at Home, whatever app is in front.": "Kao Win+E u sustavu Windows: novi prozor na Početnom, bez obzira na to koja je aplikacija u prvom planu.",
+"Open disks when they're connected": "Otvaraj diskove kad se priključe",
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB stick, kartica ili slika diska otvara se u kartici, kao u Finderu."
 }

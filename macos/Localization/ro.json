@@ -887,5 +887,9 @@
 "Downloading: %@": "Se descarcă: %@",
 "The download stopped.": "Descărcarea s-a oprit.",
 "This item is still being copied. Rename it when the copy is done.": "Acest element este încă în curs de copiere. Redenumiți-l când copierea s-a încheiat.",
-"%@ + %@ more": "%1$@ + încă %2$@"
+"%@ + %@ more": "%1$@ + încă %2$@",
+"Shortcut that opens rustyfiles from any app": "Comandă rapidă care deschide rustyfiles din orice aplicație",
+"Like Win+E on Windows: a new window at Home, whatever app is in front.": "Ca Win+E pe Windows: o fereastră nouă la Pornire, indiferent ce aplicație este în față.",
+"Open disks when they're connected": "Deschide discurile când sunt conectate",
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "Un stick USB, un card sau o imagine de disc se deschide într-un tab, ca în Finder."
 }

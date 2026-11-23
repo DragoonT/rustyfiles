@@ -887,5 +887,9 @@
 "Downloading: %@": "ჩამოიტვირთება: %@",
 "The download stopped.": "ჩამოტვირთვა შეწყდა.",
 "This item is still being copied. Rename it when the copy is done.": "ეს ელემენტი ჯერ კიდევ კოპირდება. გადაარქვით სახელი, როცა კოპირება დასრულდება.",
-"%@ + %@ more": "%1$@ + კიდევ %2$@"
+"%@ + %@ more": "%1$@ + კიდევ %2$@",
+"Shortcut that opens rustyfiles from any app": "მალსახმობი, რომელიც rustyfiles-ს ნებისმიერი აპლიკაციიდან ხსნის",
+"Like Win+E on Windows: a new window at Home, whatever app is in front.": "როგორც Windows-ში Win+E: ახალი ფანჯარა მთავარში, რომელი აპიც არ უნდა იყოს წინა პლანზე.",
+"Open disks when they're connected": "დისკების გახსნა მათი დაკავშირებისას",
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB ფლეშკა, ბარათი ან დისკის სურათი ჩანართში იხსნება, როგორც Finder-ში."
 }

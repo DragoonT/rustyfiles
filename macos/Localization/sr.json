@@ -887,5 +887,9 @@
 "Downloading: %@": "Преузимање: %@",
 "The download stopped.": "Преузимање је стало.",
 "This item is still being copied. Rename it when the copy is done.": "Ова ставка се још копира. Преименујте је када копирање буде готово.",
-"%@ + %@ more": "%1$@ + још %2$@"
+"%@ + %@ more": "%1$@ + још %2$@",
+"Shortcut that opens rustyfiles from any app": "Пречица која отвара rustyfiles из било које апликације",
+"Like Win+E on Windows: a new window at Home, whatever app is in front.": "Као Win+E на Windows-у: нови прозор на Почетној, ма која апликација била испред.",
+"Open disks when they're connected": "Отварај дискове када се повезују",
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB стик, картица или слика диска отвара се у картици, као у Finder-у."
 }

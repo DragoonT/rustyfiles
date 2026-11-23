@@ -887,5 +887,9 @@
 "Downloading: %@": "பதிவிறக்கம் நடக்கிறது: %@",
 "The download stopped.": "பதிவிறக்கம் நின்றுவிட்டது.",
 "This item is still being copied. Rename it when the copy is done.": "இந்த உருப்படி இன்னும் நகலெடுக்கப்படுகிறது. நகலெடுப்பு முடிந்ததும் அதன் பெயரை மாற்றுங்கள்.",
-"%@ + %@ more": "%1$@ + மேலும் %2$@"
+"%@ + %@ more": "%1$@ + மேலும் %2$@",
+"Shortcut that opens rustyfiles from any app": "எந்தப் பயன்பாட்டிலிருந்தும் rustyfiles-ஐத் திறக்கும் குறுக்குவழி",
+"Like Win+E on Windows: a new window at Home, whatever app is in front.": "Windows-இன் Win+E போல: முகப்பில் புதிய சாளரம், எந்தப் பயன்பாடு முன்னால் இருந்தாலும்.",
+"Open disks when they're connected": "இணைக்கப்படும்போது வட்டுகளைத் திற",
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB குச்சி, அட்டை அல்லது வட்டுப் படிமம் Finder-ஐப் போலவே ஒரு தாவலில் திறக்கும்."
 }

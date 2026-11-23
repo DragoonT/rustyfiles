@@ -887,5 +887,9 @@
 "Downloading: %@": "डाउनलोड हो रहा है: %@",
 "The download stopped.": "डाउनलोड रुक गया।",
 "This item is still being copied. Rename it when the copy is done.": "यह आइटम अभी कॉपी हो रहा है। कॉपी पूरी होने के बाद इसका नाम बदलें।",
-"%@ + %@ more": "%1$@ + %2$@ और"
+"%@ + %@ more": "%1$@ + %2$@ और",
+"Shortcut that opens rustyfiles from any app": "एक शॉर्टकट जो किसी भी ऐप से rustyfiles खोलता है",
+"Like Win+E on Windows: a new window at Home, whatever app is in front.": "Windows के Win+E जैसा: मुख पृष्ठ पर एक नई विंडो, चाहे सामने कोई भी ऐप हो।",
+"Open disks when they're connected": "डिस्क जुड़ते ही उन्हें खोलें",
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB स्टिक, कार्ड या डिस्क इमेज Finder की तरह एक टैब में खुलती है।"
 }
