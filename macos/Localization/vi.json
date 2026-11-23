@@ -885,5 +885,6 @@
 "Choose the files to download": "Chọn các tệp cần tải xuống",
 "Choose at least one file": "Chọn ít nhất một tệp",
 "Downloading: %@": "Đang tải xuống: %@",
-"The download stopped.": "Quá trình tải xuống đã dừng."
+"The download stopped.": "Quá trình tải xuống đã dừng.",
+"This item is still being copied. Rename it when the copy is done.": "Mục này vẫn đang được sao chép. Hãy đổi tên khi quá trình sao chép hoàn tất."
 }

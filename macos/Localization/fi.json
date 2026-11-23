@@ -885,5 +885,6 @@
 "Choose the files to download": "Valitse ladattavat tiedostot",
 "Choose at least one file": "Valitse vähintään yksi tiedosto",
 "Downloading: %@": "Ladataan: %@",
-"The download stopped.": "Lataus pysähtyi."
+"The download stopped.": "Lataus pysähtyi.",
+"This item is still being copied. Rename it when the copy is done.": "Kohdetta kopioidaan vielä. Nimeä se uudelleen, kun kopiointi on valmis."
 }

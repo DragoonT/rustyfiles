@@ -885,5 +885,6 @@
 "Choose the files to download": "Виберіть файли для завантаження",
 "Choose at least one file": "Виберіть принаймні один файл",
 "Downloading: %@": "Завантаження: %@",
-"The download stopped.": "Завантаження зупинилося."
+"The download stopped.": "Завантаження зупинилося.",
+"This item is still being copied. Rename it when the copy is done.": "Цей елемент ще копіюється. Перейменуйте його, коли копіювання завершиться."
 }

@@ -885,5 +885,6 @@
 "Choose the files to download": "Välj filerna att hämta",
 "Choose at least one file": "Välj minst en fil",
 "Downloading: %@": "Hämtar: %@",
-"The download stopped.": "Hämtningen stoppades."
+"The download stopped.": "Hämtningen stoppades.",
+"This item is still being copied. Rename it when the copy is done.": "Objektet kopieras fortfarande. Byt namn på det när kopieringen är klar."
 }

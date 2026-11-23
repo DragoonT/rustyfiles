@@ -885,5 +885,6 @@
 "Choose the files to download": "Válassza ki a letöltendő fájlokat",
 "Choose at least one file": "Válasszon ki legalább egy fájlt",
 "Downloading: %@": "Letöltés: %@",
-"The download stopped.": "A letöltés megszakadt."
+"The download stopped.": "A letöltés megszakadt.",
+"This item is still being copied. Rename it when the copy is done.": "Ez az elem még másolás alatt áll. Nevezze át, ha a másolás befejeződött."
 }

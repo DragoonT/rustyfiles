@@ -885,5 +885,6 @@
 "Choose the files to download": "Choose the files to download",
 "Choose at least one file": "Choose at least one file",
 "Downloading: %@": "Downloading: %@",
-"The download stopped.": "The download stopped."
+"The download stopped.": "The download stopped.",
+"This item is still being copied. Rename it when the copy is done.": "This item is still being copied. Rename it when the copy is done."
 }

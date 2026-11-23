@@ -885,5 +885,6 @@
 "Choose the files to download": "Vælg de filer, der skal hentes",
 "Choose at least one file": "Vælg mindst én fil",
 "Downloading: %@": "Henter: %@",
-"The download stopped.": "Hentningen stoppede."
+"The download stopped.": "Hentningen stoppede.",
+"This item is still being copied. Rename it when the copy is done.": "Dette emne kopieres stadig. Omdøb det, når kopieringen er færdig."
 }

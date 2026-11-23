@@ -885,5 +885,6 @@
 "Choose the files to download": "Pilih fail untuk dimuat turun",
 "Choose at least one file": "Pilih sekurang-kurangnya satu fail",
 "Downloading: %@": "Memuat turun: %@",
-"The download stopped.": "Muat turun terhenti."
+"The download stopped.": "Muat turun terhenti.",
+"This item is still being copied. Rename it when the copy is done.": "Item ini masih disalin. Namakan semula selepas salinan selesai."
 }

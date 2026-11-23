@@ -885,5 +885,6 @@
 "Choose the files to download": "Επιλέξτε τα αρχεία για λήψη",
 "Choose at least one file": "Επιλέξτε τουλάχιστον ένα αρχείο",
 "Downloading: %@": "Λήψη: %@",
-"The download stopped.": "Η λήψη διακόπηκε."
+"The download stopped.": "Η λήψη διακόπηκε.",
+"This item is still being copied. Rename it when the copy is done.": "Αυτό το στοιχείο εξακολουθεί να αντιγράφεται. Μετονομάστε το όταν ολοκληρωθεί η αντιγραφή."
 }

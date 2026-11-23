@@ -885,5 +885,6 @@
 "Choose the files to download": "בחרו את הקבצים להורדה",
 "Choose at least one file": "בחרו לפחות קובץ אחד",
 "Downloading: %@": "מוריד: %@",
-"The download stopped.": "ההורדה נעצרה."
+"The download stopped.": "ההורדה נעצרה.",
+"This item is still being copied. Rename it when the copy is done.": "הפריט עדיין מועתק. אפשר לשנות את שמו כשההעתקה תסתיים."
 }

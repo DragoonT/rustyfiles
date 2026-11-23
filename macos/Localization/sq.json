@@ -885,5 +885,6 @@
 "Choose the files to download": "Zgjidhni skedarët për t'u shkarkuar",
 "Choose at least one file": "Zgjidhni të paktën një skedar",
 "Downloading: %@": "Po shkarkohet: %@",
-"The download stopped.": "Shkarkimi u ndal."
+"The download stopped.": "Shkarkimi u ndal.",
+"This item is still being copied. Rename it when the copy is done.": "Ky element po kopjohet ende. Riemërtoje kur të mbarojë kopjimi."
 }

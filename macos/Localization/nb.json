@@ -885,5 +885,6 @@
 "Choose the files to download": "Velg filene som skal lastes ned",
 "Choose at least one file": "Velg minst én fil",
 "Downloading: %@": "Laster ned: %@",
-"The download stopped.": "Nedlastingen stoppet."
+"The download stopped.": "Nedlastingen stoppet.",
+"This item is still being copied. Rename it when the copy is done.": "Dette elementet kopieres fortsatt. Gi det nytt navn når kopieringen er ferdig."
 }

@@ -885,5 +885,6 @@
 "Choose the files to download": "डाउनलोड करने के लिए फ़ाइलें चुनें",
 "Choose at least one file": "कम से कम एक फ़ाइल चुनें",
 "Downloading: %@": "डाउनलोड हो रहा है: %@",
-"The download stopped.": "डाउनलोड रुक गया।"
+"The download stopped.": "डाउनलोड रुक गया।",
+"This item is still being copied. Rename it when the copy is done.": "यह आइटम अभी कॉपी हो रहा है। कॉपी पूरी होने के बाद इसका नाम बदलें।"
 }

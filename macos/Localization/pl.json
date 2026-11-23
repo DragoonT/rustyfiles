@@ -885,5 +885,6 @@
 "Choose the files to download": "Wybierz pliki do pobrania",
 "Choose at least one file": "Wybierz co najmniej jeden plik",
 "Downloading: %@": "Pobieranie: %@",
-"The download stopped.": "Pobieranie zostało przerwane."
+"The download stopped.": "Pobieranie zostało przerwane.",
+"This item is still being copied. Rename it when the copy is done.": "Ten element jest nadal kopiowany. Zmień jego nazwę, gdy kopiowanie się zakończy."
 }

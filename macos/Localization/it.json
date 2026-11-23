@@ -885,5 +885,6 @@
 "Choose the files to download": "Scegli i file da scaricare",
 "Choose at least one file": "Scegli almeno un file",
 "Downloading: %@": "Download in corso: %@",
-"The download stopped.": "Il download si è interrotto."
+"The download stopped.": "Il download si è interrotto.",
+"This item is still being copied. Rename it when the copy is done.": "Questo elemento è ancora in fase di copia. Rinominalo al termine della copia."
 }

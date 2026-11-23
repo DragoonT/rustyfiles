@@ -885,5 +885,6 @@
 "Choose the files to download": "选择要下载的文件",
 "Choose at least one file": "请至少选择一个文件",
 "Downloading: %@": "正在下载：%@",
-"The download stopped.": "下载已停止。"
+"The download stopped.": "下载已停止。",
+"This item is still being copied. Rename it when the copy is done.": "该项目仍在复制中。复制完成后再重命名。"
 }

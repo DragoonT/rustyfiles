@@ -885,5 +885,6 @@
 "Choose the files to download": "Alegeți fișierele de descărcat",
 "Choose at least one file": "Alegeți cel puțin un fișier",
 "Downloading: %@": "Se descarcă: %@",
-"The download stopped.": "Descărcarea s-a oprit."
+"The download stopped.": "Descărcarea s-a oprit.",
+"This item is still being copied. Rename it when the copy is done.": "Acest element este încă în curs de copiere. Redenumiți-l când copierea s-a încheiat."
 }

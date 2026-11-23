@@ -885,5 +885,6 @@
 "Choose the files to download": "ダウンロードするファイルを選択",
 "Choose at least one file": "少なくとも 1 つのファイルを選択してください",
 "Downloading: %@": "ダウンロード中: %@",
-"The download stopped.": "ダウンロードが停止しました。"
+"The download stopped.": "ダウンロードが停止しました。",
+"This item is still being copied. Rename it when the copy is done.": "このアイテムはまだコピー中です。コピーが終わってから名前を変更してください。"
 }

@@ -885,5 +885,6 @@
 "Choose the files to download": "เลือกไฟล์ที่จะดาวน์โหลด",
 "Choose at least one file": "เลือกไฟล์อย่างน้อยหนึ่งไฟล์",
 "Downloading: %@": "กำลังดาวน์โหลด: %@",
-"The download stopped.": "การดาวน์โหลดหยุดแล้ว"
+"The download stopped.": "การดาวน์โหลดหยุดแล้ว",
+"This item is still being copied. Rename it when the copy is done.": "รายการนี้ยังคงกำลังคัดลอกอยู่ เปลี่ยนชื่อเมื่อการคัดลอกเสร็จแล้ว"
 }

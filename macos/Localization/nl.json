@@ -885,5 +885,6 @@
 "Choose the files to download": "Kies de bestanden om te downloaden",
 "Choose at least one file": "Kies minstens één bestand",
 "Downloading: %@": "Downloaden: %@",
-"The download stopped.": "De download is gestopt."
+"The download stopped.": "De download is gestopt.",
+"This item is still being copied. Rename it when the copy is done.": "Dit item wordt nog gekopieerd. Hernoem het wanneer het kopiëren klaar is."
 }

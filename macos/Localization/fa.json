@@ -885,5 +885,6 @@
 "Choose the files to download": "فایل‌های موردنظر برای دانلود را انتخاب کنید",
 "Choose at least one file": "حداقل یک فایل را انتخاب کنید",
 "Downloading: %@": "در حال دانلود: %@",
-"The download stopped.": "دانلود متوقف شد."
+"The download stopped.": "دانلود متوقف شد.",
+"This item is still being copied. Rename it when the copy is done.": "این مورد هنوز در حال کپی شدن است. وقتی کپی تمام شد، نامش را تغییر دهید."
 }

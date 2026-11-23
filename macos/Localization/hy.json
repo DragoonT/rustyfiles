@@ -885,5 +885,6 @@
 "Choose the files to download": "Ընտրեք ներբեռնվող ֆայլերը",
 "Choose at least one file": "Ընտրեք առնվազն մեկ ֆայլ",
 "Downloading: %@": "Ներբեռնվում է․ %@",
-"The download stopped.": "Ներբեռնումը կանգ առավ։"
+"The download stopped.": "Ներբեռնումը կանգ առավ։",
+"This item is still being copied. Rename it when the copy is done.": "Այս տարրը դեռ պատճենվում է։ Վերանվանեք այն, երբ պատճենումը ավարտվի։"
 }

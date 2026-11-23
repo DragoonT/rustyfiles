@@ -885,5 +885,6 @@
 "Choose the files to download": "Kies die lêers om af te laai",
 "Choose at least one file": "Kies ten minste een lêer",
 "Downloading: %@": "Laai af: %@",
-"The download stopped.": "Die aflaai het gestop."
+"The download stopped.": "Die aflaai het gestop.",
+"This item is still being copied. Rename it when the copy is done.": "Hierdie item word steeds gekopieer. Hernoem dit wanneer die kopie klaar is."
 }

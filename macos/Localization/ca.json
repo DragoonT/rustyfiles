@@ -885,5 +885,6 @@
 "Choose the files to download": "Tria els fitxers que vols descarregar",
 "Choose at least one file": "Tria almenys un fitxer",
 "Downloading: %@": "Descarregant: %@",
-"The download stopped.": "La descàrrega s'ha aturat."
+"The download stopped.": "La descàrrega s'ha aturat.",
+"This item is still being copied. Rename it when the copy is done.": "Aquest element encara s'està copiant. Canvia'n el nom quan acabi la còpia."
 }
