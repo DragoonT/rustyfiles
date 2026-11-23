@@ -12,7 +12,8 @@
 # person who downloads it to allow it once (Privacy & Security › Open Anyway).
 set -eu
 cd "$(dirname "$0")/.."
-APP=build/rustyfiles.app
+# (APP: another bundle to pack, such as the one vpk made in release.sh)
+APP="${APP:-build/rustyfiles.app}"
 OUT=build/rustyfiles-mac-arm64.dmg
 PROFILE="${NOTARY_PROFILE:-rustyfiles}"
 [ -d "$APP" ] || { echo "no $APP: run ./build.sh first" >&2; exit 1; }
@@ -24,7 +25,9 @@ STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 ditto "$APP" "$STAGE/rustyfiles.app"
 
-if [ -n "$ID" ]; then
+if [ -n "$ID" ] && codesign -dv --verbose=2 "$STAGE/rustyfiles.app" 2>&1 | grep -q "Authority=Developer ID Application"; then
+    echo "the app is already signed with a Developer ID (by vpk): kept as it is"
+elif [ -n "$ID" ]; then
     # the hardened runtime and a secure timestamp are what notarization asks for; the app
     # needs no entitlements (it only receives Apple Events, and Ferry's local network use is
     # declared in Info.plist)
