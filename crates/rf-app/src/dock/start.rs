@@ -104,6 +104,13 @@ struct AppMenu {
 /// Whether a click or Enter does anything: the panel is shown, it is not on its way out (a choice was made: a double click or a held
 /// Enter must not choose twice) and no menu was dismissed a moment ago (the second click of a double click on a menu item must not
 /// fall through to what lies under the place the menu was).
+/// Whether the dock may start a window-less rustyfiles by itself now, `last` being when it last did.
+fn auto_start_due(last: Option<Instant>, now: Instant) -> bool {
+    last.is_none_or(|t| now.duration_since(t) >= AUTO_START_EVERY)
+}
+
+const AUTO_START_EVERY: Duration = Duration::from_secs(60);
+
 fn acts(shown: bool, closing: bool, now: Instant, quiet_until: Instant) -> bool {
     shown && !closing && now >= quiet_until
 }
@@ -235,6 +242,8 @@ pub struct StartView {
     _search: Option<Task<()>>,
     _files: Option<Task<()>>,
     _starter: Option<Task<()>>,
+    /// When the dock last started a window-less rustyfiles by itself for the file search (see [`auto_start_due`]).
+    auto_started: Option<Instant>,
 
     icons: IconCache,
     icon_scale: f32,
@@ -461,6 +470,7 @@ impl StartView {
             _search: None,
             _files: None,
             _starter: None,
+            auto_started: None,
             icons: IconCache::default(),
             icon_scale: 0.0,
             _subs: subs,
@@ -789,8 +799,17 @@ impl StartView {
                     me.files_state = Files::Pending;
                     return true;
                 }
-                // nobody is listening: no rustyfiles is running (unless the user has just asked for one, which is still on its way)
+                // nobody is listening: no rustyfiles is running (unless one is already on its way). The files need its index, so one is
+                // started without a window, as if the user had chosen the row that offers it: typing in Start is asking for them. (A user
+                // with "run in the background" off saw no files at all and did not notice the row.) Not more than once a minute, so a
+                // rustyfiles that cannot start is not started again at every keystroke; then the row stays the way.
                 if me.files_state != Files::Starting {
+                    let now = Instant::now();
+                    if auto_start_due(me.auto_started, now) {
+                        me.auto_started = Some(now);
+                        me.start_main(cx);
+                        return false;
+                    }
                     me.files_state = Files::NoMain;
                 }
                 me.rebuild_entries();
@@ -2131,9 +2150,19 @@ fn power_icon(a: PowerAction) -> L {
 #[cfg(test)]
 mod tests {
     // (not `super::*`: gpui's own `test` attribute would come with it)
-    use super::{AppMenu, AppMenuItem, CELL_W, FieldAt, PAD, PANEL_H, PANEL_W, PowerAction, QUIET, acts, pins_path, placeholder_for, power_icon, power_label, startpins};
+    use super::{AppMenu, AppMenuItem, AUTO_START_EVERY, CELL_W, FieldAt, PAD, PANEL_H, PANEL_W, PowerAction, QUIET, acts, auto_start_due, pins_path, placeholder_for, power_icon, power_label, startpins};
     use crate::t;
     use std::time::{Duration, Instant};
+
+    /// Typing in Start with no rustyfiles running starts one without a window for the files, at once the first time and then not
+    /// more than once a minute (one that cannot start is not started again at every keystroke).
+    #[test]
+    fn the_dock_starts_rustyfiles_for_the_files_at_once_and_then_at_most_once_a_minute() {
+        let now = Instant::now();
+        assert!(auto_start_due(None, now));
+        assert!(!auto_start_due(Some(now), now + Duration::from_secs(5)));
+        assert!(auto_start_due(Some(now), now + AUTO_START_EVERY));
+    }
 
     fn menu(location: Option<&str>) -> AppMenu {
         AppMenu { app: rf_win::apps::App { name: "Paint".into(), id: "p!App".into() }, at: gpui_kit::point(gpui_kit::px(0.), gpui_kit::px(0.)), location: location.map(Into::into), in_folder: false }

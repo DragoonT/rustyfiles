@@ -623,8 +623,10 @@ the dock simply finds no search pipe and says "no main app"), the main app searc
 (about 1.2 ms per keystroke in a debug build, 273 apps and the bookmarks); the files arrive after them and slot in after the apps
 without moving the row the user has moved to (the selection follows the row, not its number), and an Enter before they arrive waits
 for them only when the first row is not an app. The files of the previous query stay on the screen until the answer for the new query
-replaces them (rows that vanish at every keystroke and come back make the list jump). If no rustyfiles is running there is one row
-that says so and starts it without a window (`rustyfiles.exe --no-window`) when chosen; the query is asked again when it answers. That
+replaces them (rows that vanish at every keystroke and come back make the list jump). If no rustyfiles is running the dock starts one
+without a window (`rustyfiles.exe --no-window`) by itself, at most once a minute (a user with "run in the background" off saw no files
+and did not notice the row that offered it, 2026-11-23), and asks again when it answers; if that fails there is one row that says so
+and starts it when chosen. That
 process has no window and no tray icon, so it ends itself after 10 minutes without a request for files, if no window has been opened
 in it by then (`search_pipe::watch_idle`; a window opened in it makes it an ordinary rustyfiles). The field in the left island shows what is
 typed in the panel (the island is never activated, so it cannot take keys itself).
