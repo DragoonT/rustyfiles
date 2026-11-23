@@ -30,8 +30,8 @@ vpk download github --repoUrl "$REPO" -c osx -o "$OUT" || true
 
 # no Developer ID Installer certificate: no .pkg, the .dmg below is the installer
 vpk pack -u rustyfiles -v "$VERSION" -c osx -o "$OUT" -p build/rustyfiles.app -e RustyFiles \
-    --packTitle rustyfiles --packAuthors "Özer Güzel" -i target/mac/AppIcon.icns \
-    --signAppIdentity "$ID" --notaryProfile rustyfiles --noInst
+    --packTitle rustyfiles --packAuthors "Özer Güzel" -i build/rustyfiles.app/Contents/Resources/AppIcon.icns \
+    --signAppIdentity "$ID" --signEntitlements rustyfiles.entitlements --notaryProfile rustyfiles --noInst
 
 # the disk image carries the app vpk made (it has the updater in it)
 rm -rf build/vpk-app
