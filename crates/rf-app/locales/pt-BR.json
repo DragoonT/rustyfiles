@@ -2182,5 +2182,7 @@
  "38ffe584": "As guias, a barra de endereços e a barra de comandos ficam mais finas, e o conteúdo chega às bordas direita e inferior da janela. Os ícones e o texto mantêm o tamanho.",
  "2560942b": "Deseja remover este item da seção de fixados?",
  "431d7079": "Escolher terminal",
- "173a07d0": "Automático: Windows Terminal, senão PowerShell"
+ "173a07d0": "Automático: Windows Terminal, senão PowerShell",
+ "6d29d44c": "Classificar",
+ "e070104e": "Novo"
 }

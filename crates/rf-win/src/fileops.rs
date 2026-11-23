@@ -27,7 +27,7 @@ pub enum Transfer {
 }
 
 fn item(p: &Path) -> anyhow::Result<IShellItem> {
-    let w = wide(p);
+    let w = crate::wide::shell_name(p);
     match unsafe { SHCreateItemFromParsingName(PCWSTR(w.as_ptr()), None) } {
         Ok(item) => Ok(item),
         // a phone's item the shell does not take back by its name (issue 221): found by walking down to it

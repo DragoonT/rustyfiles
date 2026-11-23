@@ -133,7 +133,10 @@ impl FolderView {
             let (result, own, targets, packaged) = rx.await.unwrap_or_else(|_| (Err("cancelled".into()), Vec::new(), Vec::new(), Vec::new()));
             let _ = cx.update(|cx| {
                 let (more, open_with, new) = match result {
-                    Ok((session, shell)) => split_shell_items(&me, session, shell, background, cx),
+                    Ok((session, shell)) => {
+                        let ours: Vec<String> = if send_to { targets.iter().map(|(t, _)| t.name.clone()).collect() } else { Vec::new() };
+                        split_shell_items(&me, session, shell, background, &ours, cx)
+                    }
                     Err(e) => {
                         log::warn!("shell menu: {e}");
                         (Pending::Failed, Pending::Failed, Pending::Failed)
@@ -741,7 +744,7 @@ impl FolderView {
                 cx.spawn(async move |_, cx| {
                     let Ok(Some((session, shell))) = rx.await else { return };
                     let _ = cx.update(|cx| {
-                        if let (_, _, Pending::Ready(items)) = split_shell_items(&me, session, shell, true, cx) {
+                        if let (_, _, Pending::Ready(items)) = split_shell_items(&me, session, shell, true, &[], cx) {
                             if let Some(m) = weak.upgrade() {
                                 m.update(cx, |m, cx| m.set_root((*items).clone(), cx));
                             }
@@ -1236,7 +1239,41 @@ fn with_own_programs(me: &Me, own: Vec<OwnProgram>, rest: Pending) -> Pending {
 
 /// Turns the shell menu into our three lazy lists: "Show more options" (what is left after
 /// hiding our own commands), "Open with" and "New".
-fn split_shell_items(me: &Me, session: u64, shell: Vec<ShellItem>, background: bool, cx: &mut App) -> (Pending, Pending, Pending) {
+/// Whether `it` is the shell's own "Send to" submenu: its entries are the SendTo folder's, `ours` (the menu's own "Send to" lists
+/// them already; issue 273: it was there twice). Told by the entries, as the submenu has no verb and its name is Windows' language.
+fn is_shells_send_to(it: &ShellItem, ours: &[String]) -> bool {
+    if ours.is_empty() || it.children.is_empty() || !it.verb.is_empty() {
+        return false;
+    }
+    let plain = |s: &str| s.replace('&', "").trim().to_lowercase();
+    let names: Vec<String> = ours.iter().map(|n| plain(n)).collect();
+    let hits = it.children.iter().filter(|c| !c.separator && names.contains(&plain(&c.label))).count();
+    hits >= 2.min(names.len()) && hits * 2 >= names.len().min(it.children.iter().filter(|c| !c.separator).count())
+}
+
+#[cfg(test)]
+mod send_to_tests {
+    use super::{ShellItem, is_shells_send_to};
+
+    fn item(label: &str, verb: &str, children: Vec<ShellItem>) -> ShellItem {
+        ShellItem { id: 0, label: label.into(), hint: None, verb: verb.into(), icon: None, enabled: true, separator: false, children }
+    }
+
+    #[test]
+    fn the_shells_send_to_is_told_by_its_entries_whatever_its_language() {
+        let ours = vec!["Mail recipient".to_string(), "Desktop (create shortcut)".to_string(), "Documents".to_string()];
+        let kids = |names: &[&str]| names.iter().map(|n| item(n, "", vec![])).collect::<Vec<_>>();
+        let send_to = item("Wy&ślij do", "", kids(&["&Mail recipient", "Desktop (create shortcut)", "Documents", "USB (E:)"]));
+        assert!(is_shells_send_to(&send_to, &ours));
+        let other = item("Bandizip", "", kids(&["Extract here", "Documents"]));
+        assert!(!is_shells_send_to(&other, &ours), "one name in common is not enough");
+        assert!(!is_shells_send_to(&send_to, &[]), "no menu of our own: the shell's stays");
+        let verb = item("Something", "openas", kids(&["Mail recipient", "Documents"]));
+        assert!(!is_shells_send_to(&verb, &ours));
+    }
+}
+
+fn split_shell_items(me: &Me, session: u64, shell: Vec<ShellItem>, background: bool, send_to_names: &[String], cx: &mut App) -> (Pending, Pending, Pending) {
     let is_hidden = |it: &ShellItem| !it.verb.is_empty() && HIDDEN_VERBS.contains(&it.verb.to_ascii_lowercase().as_str());
     let has_child_verb = |it: &ShellItem, verb: &str| it.children.iter().any(|c| c.verb.eq_ignore_ascii_case(verb));
 
@@ -1256,7 +1293,7 @@ fn split_shell_items(me: &Me, session: u64, shell: Vec<ShellItem>, background: b
             // a single "Open with…" entry: say what it does
             open_with = Some(vec![ShellItem { label: t!("Başka bir uygulama seç").into(), ..it.clone() }]);
         }
-        if is_hidden(&it) {
+        if is_hidden(&it) || is_shells_send_to(&it, send_to_names) {
             continue;
         }
         more_src.push(it);

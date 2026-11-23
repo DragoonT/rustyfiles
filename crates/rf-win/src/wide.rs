@@ -7,6 +7,24 @@ pub fn wide(s: impl AsRef<OsStr>) -> Vec<u16> {
     s.as_ref().encode_wide().chain(std::iter::once(0)).collect()
 }
 
+/// [`wide`] for a name given to the shell (`SHParseDisplayName`, `SHCreateItemFromParsingName`): an FTP address with its backslashes
+/// turned into slashes. `Path::join` puts a backslash before each name it adds, and the shell refuses `ftp://host:port\DCIM` with
+/// "The parameter is incorrect" (0x80070057), so dragging, copying and the menu failed on FTP while the list worked (issue 223).
+pub fn shell_name(s: impl AsRef<OsStr>) -> Vec<u16> {
+    let mut w: Vec<u16> = s.as_ref().encode_wide().collect();
+    let ftp: Vec<u16> = "ftp://".encode_utf16().collect();
+    let is_ftp = w.len() > ftp.len() && w[..ftp.len()].iter().zip(&ftp).all(|(a, b)| char::from_u32(u32::from(*a)).is_some_and(|c| c.to_ascii_lowercase() as u32 == u32::from(*b)));
+    if is_ftp {
+        for c in w.iter_mut() {
+            if *c == u16::from(b'\\') {
+                *c = u16::from(b'/');
+            }
+        }
+    }
+    w.push(0);
+    w
+}
+
 /// UTF-16 buffer (possibly NUL-terminated) → String.
 pub fn from_wide(buf: &[u16]) -> String {
     let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
@@ -39,4 +57,18 @@ pub fn long_path(p: &Path) -> Vec<u16> {
     }
     out.push(0);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_ftp_address_reaches_the_shell_with_slashes_and_a_path_as_it_is() {
+        let text = |w: Vec<u16>| from_wide(&w);
+        assert_eq!(text(shell_name(r"ftp://192.168.1.5:2221\DCIM\a.jpg")), "ftp://192.168.1.5:2221/DCIM/a.jpg");
+        assert_eq!(text(shell_name(r"FTP://h\x")), "FTP://h/x");
+        assert_eq!(text(shell_name(r"C:\Users\x")), r"C:\Users\x");
+        assert_eq!(text(shell_name(r"::{20D04FE0-3AEA-1069-A2D8-08002B30309D}\x")), r"::{20D04FE0-3AEA-1069-A2D8-08002B30309D}\x");
+    }
 }

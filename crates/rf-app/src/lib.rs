@@ -659,7 +659,8 @@ pub fn main() {
             start = Some(Location::Shell { parsing: place.parsing, name: place.name });
         } else {
             // a network server root (\\nas) isn't a "directory" to Rust, but we browse its shares
-            let server = rf_win::network::server_root(std::path::Path::new(&arg)).is_some();
+            // (an FTP address is browsed here too: it went to Explorer)
+            let server = rf_win::network::server_root(std::path::Path::new(&arg)).is_some() || rf_win::ftp::is_ftp(std::path::Path::new(&arg));
             let is_dir = if shell_namespace {
                 Some(false)
             } else if server {

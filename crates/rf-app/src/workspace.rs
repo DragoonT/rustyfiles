@@ -1312,7 +1312,22 @@ impl Workspace {
         self.tabs.push(Tab { left: view, right: None, right_active: false });
     }
 
+    /// Another tab that shows Settings: Settings is opened once per window, a second request goes to that tab (issue 281).
+    fn settings_tab_elsewhere(&self, cx: &App) -> Option<usize> {
+        self.tabs.iter().enumerate().find_map(|(i, t)| {
+            let shows = std::iter::once(&t.left).chain(t.right.as_ref()).any(|v| matches!(v.read(cx).location(), Location::Settings));
+            (i != self.active && shows).then_some(i)
+        })
+    }
+
     pub fn open_tab(&mut self, loc: Location, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(loc, Location::Settings) && let Some(ix) = self.settings_tab_elsewhere(cx).or_else(|| {
+            let t = &self.tabs[self.active];
+            std::iter::once(&t.left).chain(t.right.as_ref()).any(|v| matches!(v.read(cx).location(), Location::Settings)).then_some(self.active)
+        }) {
+            self.activate(ix, window, cx);
+            return;
+        }
         let view = self.new_view(loc, window, cx);
         self.tabs.push(Tab { left: view.clone(), right: None, right_active: false });
         let ix = self.tabs.len() - 1;
@@ -1897,6 +1912,10 @@ impl Workspace {
     }
 
     fn navigate(&mut self, loc: Location, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(loc, Location::Settings) && let Some(ix) = self.settings_tab_elsewhere(cx) {
+            self.activate(ix, window, cx);
+            return;
+        }
         self.active_tab().clone().update(cx, |v, cx| v.navigate(loc, cx));
         self.search.update(cx, |s, cx| s.set_value("", window, cx));
         self.focus_active(window, cx);
@@ -3317,15 +3336,17 @@ impl Workspace {
         let in_folder = tab.location().path().is_some();
         let (sel, _, _) = tab.selection_summary();
         let has_sel = sel > 0;
-        // a phone's folder is read-only here: changing commands are greyed out, not refused later
-        let writable_sel = has_sel && !matches!(tab.location(), Location::Shell { .. });
+        // a phone's folder takes a cut, a delete and a paste through Windows' engine (issue 221); its items are not renamed here
+        let in_shell = matches!(tab.location(), Location::Shell { .. });
+        let writable_sel = has_sel;
+        let renamable_sel = has_sel && !in_shell;
         let preview_open = self.preview_open;
         let windows_theme = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
         let command_width = if windows_theme && self.viewport_w >= 1200. { px(46.) } else { px(36.) };
-        let sort_label = (windows_theme && self.viewport_w >= 1200.).then_some(("Sırala", "Sort"));
-        let view_label = (windows_theme && self.viewport_w >= 1200.).then_some(("Görünüm", "View"));
+        let sort_label = (windows_theme && self.viewport_w >= 1200.).then(|| crate::i18n::tx("Sırala", "Sort"));
+        let view_label = (windows_theme && self.viewport_w >= 1200.).then(|| crate::i18n::tx("Görünüm", "View"));
         let filter_on = self.filter_bar;
-        let paste_ok = in_folder && rf_win::clipboard::can_paste();
+        let paste_ok = (in_folder || in_shell) && rf_win::clipboard::can_paste();
         let toolbar_icon = |icon: L| {
             #[cfg(target_os = "windows")]
             if windows_theme {
@@ -3358,8 +3379,9 @@ impl Workspace {
                 })
                 .child(toolbar_icon(icon))
         };
+        let hidden_shown = self.active_tab().read(cx).filter.show_hidden;
         let popups_open = self.popups_open(cx);
-        let drop = |id: &'static str, icon: L, label: Option<(&'static str, &'static str)>, tip: &'static str, enabled: bool, cx: &mut Context<Self>, which: fn(&Self, &App) -> crate::ctx_menu::BarMenu| {
+        let drop = |id: &'static str, icon: L, label: Option<&'static str>, tip: &'static str, enabled: bool, cx: &mut Context<Self>, which: fn(&Self, &App) -> crate::ctx_menu::BarMenu| {
             h_flex()
                 .id(id)
                 .h(px(32.))
@@ -3372,10 +3394,9 @@ impl Workspace {
                 .text_color(if enabled { p.text } else { p.text_tertiary })
                 .when(!popups_open, |d| d.tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(crate::i18n::t(tip)).build(w, cx)))
                 .child(toolbar_icon(icon))
-                .children(label.map(|l| {
-                    div().child(if windows_theme { crate::i18n::tx(l.0, l.1) } else { crate::i18n::t(l.0) })
-                }))
-                .child(div().text_color(p.text_secondary).child(toolbar_icon(L::ChevronDown)))
+                .children(label.map(|l| div().child(l)))
+                // (Explorer's "See more" has no arrow, issue 229)
+                .when(!(windows_theme && id == "cb-more"), |d| d.child(div().text_color(p.text_secondary).child(toolbar_icon(L::ChevronDown))))
                 .when(enabled, |d| {
                     d.hover(|s| s.bg(p.hover)).active(|s| s.bg(p.pressed)).on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
                         let menu = which(this, cx);
@@ -3426,7 +3447,7 @@ impl Workspace {
             .when(windows_theme, |d| d.border_t_1())
             .border_b_1()
             .border_color(bar_border)
-            .children(on("new").then(|| drop("cb-new", L::CirclePlus, Some(("Yeni", "New")), "Yeni öğe", in_folder, cx, |_, _| crate::ctx_menu::BarMenu::New)))
+            .children(on("new").then(|| drop("cb-new", L::CirclePlus, Some(if windows_theme { crate::i18n::tx("Yeni", "New") } else { crate::i18n::t("Yeni") }), "Yeni öğe", in_folder, cx, |_, _| crate::ctx_menu::BarMenu::New)))
             .children(extra("newfolder").then(|| {
                 cmd("cb-newfolder", L::FolderPlus, "Yeni klasör  (Ctrl+Shift+N)", in_folder, cx, |_, w, cx| w.dispatch_action(Box::new(NewFolder), cx))
             }))
@@ -3443,7 +3464,7 @@ impl Workspace {
             }))
             .children(on("paste").then(|| cmd("cb-paste", L::ClipboardPaste, "Yapıştır  (Ctrl+V)", paste_ok, cx, |this, w, cx| this.with_tab(cx, |v, cx| v.paste(w, cx)))))
             .children(on("rename").then(|| {
-                cmd("cb-rename", L::TextCursorInput, "Yeniden adlandır  (F2)", writable_sel, cx, |this, w, cx| this.with_tab(cx, |v, cx| v.rename_selection(w, cx)))
+                cmd("cb-rename", L::TextCursorInput, "Yeniden adlandır  (F2)", renamable_sel, cx, |this, w, cx| this.with_tab(cx, |v, cx| v.rename_selection(w, cx)))
             }))
             .children(on("share").then(|| cmd("cb-share", L::Share2, "Paylaş", writable_sel, cx, |this, w, cx| this.with_tab(cx, |v, cx| v.share(w, cx)))))
             .children(on("delete").then(|| {
@@ -3455,7 +3476,14 @@ impl Workspace {
                 })
             })))
             .children(extra("terminal").then(|| cmd("cb-terminal", L::SquareTerminal, "Terminalde aç  (Ctrl+Shift+`)", in_folder, cx, |_, w, cx| w.dispatch_action(Box::new(OpenTerminal), cx))))
-            .children(extra("hidden").then(|| cmd("cb-hidden", L::Eye, "Gizli öğeleri göster/gizle  (Ctrl+H)", in_folder, cx, |_, w, cx| w.dispatch_action(Box::new(ToggleHidden), cx))))
+            // the button shows whether hidden items are shown: an open eye on the selected fill while they are, a struck-out one
+            // while they are not (issue 277: it looked switched on either way)
+            .children(extra("hidden").then(|| {
+                cmd("cb-hidden", if hidden_shown { L::Eye } else { L::EyeOff }, "Gizli öğeleri göster/gizle  (Ctrl+H)", in_folder, cx, |_, w, cx| {
+                    w.dispatch_action(Box::new(ToggleHidden), cx)
+                })
+                .when(hidden_shown && in_folder, |d| d.bg(p.selection))
+            }))
             .children(extra("refresh").then(|| cmd("cb-refresh", L::RotateCw, "Yenile  (F5)", true, cx, |_, w, cx| w.dispatch_action(Box::new(Refresh), cx))))
             .when(!windows_theme, |d| d.children(on("more").then(|| {
                 drop("cb-more", L::Ellipsis, None, "Diğer", in_folder, cx, |_, _| crate::ctx_menu::BarMenu::More)
@@ -4277,7 +4305,9 @@ impl Workspace {
                     .min_h_0()
                     .children(pins_top)
                     .child(col)
-                    .when(explorer_look, |d| d.child(
+                    // the Windows look's scrollbar, only while there is something to scroll (issue 229: it stood there with nothing to
+                    // scroll, a thumb drawn on an empty track)
+                    .when(explorer_look && sidebar_scrollable, |d| d.child(
                         div()
                             .id("sidebar-scrollbar-track")
                             .absolute()
@@ -4292,25 +4322,6 @@ impl Workspace {
                                     cx.notify();
                                 }
                             }))
-                            .when(
-                                !sidebar_scrollable,
-                                |d| {
-                                    d.child(
-                                        div()
-                                            .absolute()
-                                            .top(px(14.))
-                                            .right(if self.sidebar_scroll_hovered { px(6.) } else { px(7.) })
-                                            .w(px(if self.sidebar_scroll_hovered { 8. } else { 6. }))
-                                            .h(relative(0.35))
-                                            .rounded_full()
-                                            .bg(if self.sidebar_scroll_hovered {
-                                                scrollbar_thumb_hover
-                                            } else {
-                                                scrollbar_thumb
-                                            }),
-                                    )
-                                },
-                            )
                             .child(
                                 gpui_kit::component::scroll::Scrollbar::vertical(&sidebar_scroll)
                                     .id(if rail { "sidebar-scrollbar-rail" } else { "sidebar-scrollbar" })
@@ -4639,6 +4650,11 @@ pub fn open_in_ide(dir: PathBuf, ide: String) {
 }
 
 pub(crate) fn drop_files(paths: &ExternalPaths, dest: PathBuf, cx: &mut App) {
+    drop_files_then(paths, dest, cx, |_| {});
+}
+
+/// [`drop_files`], then `after` once the transfer is over (a phone's folder is read again: nothing watches it).
+pub(crate) fn drop_files_then(paths: &ExternalPaths, dest: PathBuf, cx: &mut App, after: impl FnOnce(&mut App) + 'static) {
     let sources: Vec<PathBuf> = paths.paths().to_vec();
     if sources.is_empty() {
         return;
@@ -4653,7 +4669,7 @@ pub(crate) fn drop_files(paths: &ExternalPaths, dest: PathBuf, cx: &mut App) {
     }
     let sources = hold_archiver_drop(sources, &std::env::temp_dir());
     let kind = crate::ops::drop_transfer(&sources, &dest, ctrl, shift);
-    crate::status_center::transfer(cx, kind, sources, dest);
+    crate::status_center::transfer_then(cx, kind, sources, dest, move |_, cx| after(cx));
 }
 
 /// Archivers hand a drop the files they extracted into a folder of their own under TEMP (7-Zip `7zE…`, WinRAR `Rar$DRa…`) and delete
@@ -5110,7 +5126,10 @@ impl Render for Workspace {
         };
         let toolbar = self.render_toolbar(&p, cx);
         // the command bar acts on folder contents: not on Home, Settings, the Recycle Bin…
-        let show_commandbar = matches!(self.active_tab().read(cx).location(), Location::Path(_) | Location::Search { .. } | Location::Library { .. } | Location::Tag(_) | Location::Shell { .. });
+        // (the Windows look keeps it on Home too, greyed out as Explorer's is: it went away and the page jumped up, issue 229)
+        let explorer_look = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
+        let show_commandbar = matches!(self.active_tab().read(cx).location(), Location::Path(_) | Location::Search { .. } | Location::Library { .. } | Location::Tag(_) | Location::Shell { .. })
+            || (explorer_look && matches!(self.active_tab().read(cx).location(), Location::Home));
         let commandbar = (show_commandbar && show_toolbar).then(|| self.render_commandbar(&p, cx).into_any_element());
         let (top_commandbar, content_commandbar) = if windows_theme { (commandbar, None) } else { (None, commandbar) };
         let filter_strip = self.render_filter_bar(&p, window, cx);

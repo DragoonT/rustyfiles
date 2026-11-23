@@ -7,7 +7,8 @@ use std::path::Path;
 
 use rf_core::Entry;
 use windows::Win32::Networking::WinInet::{
-    FTP_TRANSFER_TYPE_BINARY, FtpFindFirstFileW, FtpGetFileW, FtpPutFileW, INTERNET_DEFAULT_FTP_PORT,
+    FTP_TRANSFER_TYPE_BINARY, FtpCreateDirectoryW, FtpDeleteFileW, FtpFindFirstFileW, FtpGetFileW, FtpPutFileW, FtpRemoveDirectoryW,
+    FtpRenameFileW, INTERNET_DEFAULT_FTP_PORT,
     INTERNET_FLAG_NO_CACHE_WRITE, INTERNET_FLAG_PASSIVE, INTERNET_FLAG_RELOAD, INTERNET_OPEN_TYPE_PRECONFIG,
     INTERNET_SERVICE_FTP, InternetCloseHandle, InternetConnectW, InternetFindNextFileW, InternetOpenW,
 };
@@ -127,9 +128,118 @@ fn connect(u: &FtpUrl) -> std::io::Result<(Handle, Handle)> {
 
 /// Lists a remote directory.
 pub fn list(url: &str) -> std::io::Result<Vec<Entry>> {
-    let u = FtpUrl::parse(url).ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "geçersiz FTP adresi"))?;
+    let u = parsed(url)?;
     let (_s, conn) = connect(&u)?;
-    let pattern = wide(if u.path == "/" { "/*".to_string() } else { format!("{}/*", u.path) });
+    list_on(&conn, &u.path)
+}
+
+fn parsed(url: &str) -> std::io::Result<FtpUrl> {
+    FtpUrl::parse(url).ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "geçersiz FTP adresi"))
+}
+
+/// `name` inside the remote directory `dir` (a path on the server).
+fn join(dir: &str, name: &str) -> String {
+    if dir == "/" { format!("/{name}") } else { format!("{dir}/{name}") }
+}
+
+/// The address of `name` inside the directory at `dir_url`, with slashes whatever `dir_url` had (`Path::join` adds backslashes).
+pub fn child_url(dir_url: &str, name: &str) -> String {
+    format!("{}/{name}", dir_url.replace('\\', "/").trim_end_matches('/'))
+}
+
+fn failed(what: &str, e: windows::core::Error) -> std::io::Error {
+    std::io::Error::other(format!("{what}: {}", describe(std::io::Error::from_raw_os_error(e.code().0 & 0xFFFF))))
+}
+
+/// Deletes `url`: a file, or a directory with all it holds (the server's own delete; Windows' FTP folder cannot be asked: its delete
+/// through the shell's engine answers "No such interface supported", issue 223).
+///
+/// Only what the listing said is a directory is emptied: a server that answers a file's listing with its folder's must not have the
+/// file's neighbours deleted.
+pub fn delete(url: &str, is_dir: bool) -> std::io::Result<()> {
+    let u = parsed(url)?;
+    let (_s, conn) = connect(&u)?;
+    delete_on(&conn, &u.path, is_dir, 0)
+}
+
+fn delete_on(conn: &Handle, path: &str, is_dir: bool, depth: u32) -> std::io::Result<()> {
+    let w = wide(path);
+    if !is_dir {
+        return unsafe { FtpDeleteFileW(conn.0, PCWSTR(w.as_ptr())) }.map_err(|e| failed("FTP silme", e));
+    }
+    // emptied first (the listing is read whole before anything is deleted: one search at a time on a connection)
+    if depth > 64 {
+        return Err(std::io::Error::other("FTP silme: klasörler çok derin"));
+    }
+    for e in list_on(conn, path)? {
+        delete_on(conn, &join(path, &e.name), e.is_dir(), depth + 1)?;
+    }
+    unsafe { FtpRemoveDirectoryW(conn.0, PCWSTR(w.as_ptr())) }.map_err(|e| failed("FTP silme", e))
+}
+
+/// Renames `url` to `new_name` in the same directory.
+pub fn rename(url: &str, new_name: &str) -> std::io::Result<()> {
+    let u = parsed(url)?;
+    let (_s, conn) = connect(&u)?;
+    let parent = u.path.rsplit_once('/').map_or("/", |(p, _)| if p.is_empty() { "/" } else { p }).to_string();
+    let (from, to) = (wide(&u.path), wide(join(&parent, new_name)));
+    unsafe { FtpRenameFileW(conn.0, PCWSTR(from.as_ptr()), PCWSTR(to.as_ptr())) }.map_err(|e| failed("FTP yeniden adlandırma", e))
+}
+
+/// Makes the directory `name` inside `dir_url`.
+pub fn make_dir(dir_url: &str, name: &str) -> std::io::Result<()> {
+    let u = parsed(dir_url)?;
+    let (_s, conn) = connect(&u)?;
+    let w = wide(join(&u.path, name));
+    unsafe { FtpCreateDirectoryW(conn.0, PCWSTR(w.as_ptr())) }.map_err(|e| failed("FTP klasör oluşturma", e))
+}
+
+/// Downloads `url` into the local folder `dest_dir` under its own name: a file, or a directory with all it holds. Returns what was made.
+pub fn download_into(url: &str, is_dir: bool, dest_dir: &Path) -> std::io::Result<std::path::PathBuf> {
+    let u = parsed(url)?;
+    let name = u.path.rsplit('/').next().filter(|n| !n.is_empty()).unwrap_or("ftp").to_string();
+    let (_s, conn) = connect(&u)?;
+    let local = dest_dir.join(&name);
+    fetch(&conn, &u.path, is_dir, &local, 0)?;
+    Ok(local)
+}
+
+fn fetch(conn: &Handle, path: &str, is_dir: bool, local: &Path, depth: u32) -> std::io::Result<()> {
+    if !is_dir {
+        let (remote, l) = (wide(path), wide(local));
+        return unsafe { FtpGetFileW(conn.0, PCWSTR(remote.as_ptr()), PCWSTR(l.as_ptr()), false, 0, FTP_TRANSFER_TYPE_BINARY.0 | INTERNET_FLAG_RELOAD, None) }
+            .map_err(|e| failed("FTP indirme", e));
+    }
+    if depth > 64 {
+        return Err(std::io::Error::other("FTP indirme: klasörler çok derin"));
+    }
+    std::fs::create_dir_all(local)?;
+    for e in list_on(conn, path)? {
+        fetch(conn, &join(path, &e.name), e.is_dir(), &local.join(&*e.name), depth + 1)?;
+    }
+    Ok(())
+}
+
+/// Uploads the local file or folder `local` into the remote directory `dir_url` (a folder with all it holds; one that is already
+/// there is written into).
+pub fn upload_tree(local: &Path, dir_url: &str) -> std::io::Result<()> {
+    if !local.is_dir() {
+        return upload(local, dir_url);
+    }
+    let name = local.file_name().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "dosya adı yok"))?.to_string_lossy().into_owned();
+    if let Err(e) = make_dir(dir_url, &name) {
+        // (already there: written into; anything else shows when its files fail)
+        log::debug!("ftp mkdir {name}: {e}");
+    }
+    let inner = child_url(dir_url, &name);
+    for e in std::fs::read_dir(local)? {
+        upload_tree(&e?.path(), &inner)?;
+    }
+    Ok(())
+}
+
+fn list_on(conn: &Handle, path: &str) -> std::io::Result<Vec<Entry>> {
+    let pattern = wide(if path == "/" { "/*".to_string() } else { format!("{path}/*") });
     let mut data = WIN32_FIND_DATAW::default();
     let find = Handle(unsafe {
         FtpFindFirstFileW(conn.0, PCWSTR(pattern.as_ptr()), Some(&mut data), INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE, None)
@@ -189,6 +299,14 @@ pub fn upload(local: &Path, dir_url: &str) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_child_address_has_slashes_whatever_the_folder_had() {
+        assert_eq!(child_url(r"ftp://h:21\DCIM", "a b.jpg"), "ftp://h:21/DCIM/a b.jpg");
+        assert_eq!(child_url("ftp://h/", "x"), "ftp://h/x");
+        assert_eq!(join("/", "x"), "/x");
+        assert_eq!(join("/a", "x"), "/a/x");
+    }
 
     #[test]
     fn parse_urls() {

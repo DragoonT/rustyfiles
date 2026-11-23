@@ -2182,5 +2182,7 @@
  "38ffe584": "Fanerne, adresselinjen og kommandolinjen er tyndere, og indholdet når helt ud til vinduets højre og nederste kant. Ikoner og tekst bevarer deres størrelse.",
  "2560942b": "Vil du fjerne dette element fra de fastgjorte?",
  "431d7079": "Vælg terminal",
- "173a07d0": "Automatisk: Windows Terminal, ellers PowerShell"
+ "173a07d0": "Automatisk: Windows Terminal, ellers PowerShell",
+ "6d29d44c": "Sortér",
+ "e070104e": "Ny"
 }

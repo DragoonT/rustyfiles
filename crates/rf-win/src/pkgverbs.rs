@@ -287,9 +287,21 @@ fn shown(cmd: &IExplorerCommand, array: &IShellItemArray, keep: &mut Vec<IExplor
     Some(Shown { id: keep.len() - 1, title, icon, enabled: state & ECS_DISABLED == 0, sub })
 }
 
+/// Windows Terminal's "Open in Terminal" (its release, Preview and Canary builds): the menu has its own, which opens the terminal
+/// the user chose, so the packaged one is left out (issue 273: the menu had it twice).
+const TERMINAL_HERE: [&str; 3] = ["9f156763-7844-4dc4-b2b1-901f640f5155", "02db545a-3e20-46de-83a5-1329b1e88b6b", "52065414-e077-47ec-a3ac-1cc5455e1b54"];
+
+fn is_terminal_here(clsid: &GUID) -> bool {
+    TERMINAL_HERE.iter().any(|t| GUID::try_from(*t).is_ok_and(|g| g == *clsid))
+}
+
 /// The packaged apps' commands for `items` (the folder itself with `background`), as the menu shows them. On the shell STA.
 pub fn for_items(items: &[PathBuf], background: bool) -> Vec<Shown> {
-    let wanted: Vec<GUID> = declared().into_iter().filter(|d| applies(&d.types, items, background)).map(|d| d.clsid).collect();
+    let wanted: Vec<GUID> = declared()
+        .into_iter()
+        .filter(|d| applies(&d.types, items, background) && !is_terminal_here(&d.clsid))
+        .map(|d| d.clsid)
+        .collect();
     let mut keep = Vec::new();
     let mut out = Vec::new();
     if !wanted.is_empty() && let Ok(array) = item_array(items) {

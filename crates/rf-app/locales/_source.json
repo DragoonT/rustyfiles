@@ -13163,5 +13163,17 @@
   "key": "Otomatik: Windows Terminal, yoksa PowerShell",
   "tr": "Otomatik: Windows Terminal, yoksa PowerShell",
   "en": "Automatic: Windows Terminal, else PowerShell"
+ },
+ {
+  "id": "6d29d44c",
+  "key": "en:Sort",
+  "tr": "Sırala",
+  "en": "Sort"
+ },
+ {
+  "id": "e070104e",
+  "key": "en:New",
+  "tr": "Yeni",
+  "en": "New"
  }
 ]

@@ -191,6 +191,34 @@ impl LookWindow {
             window.focus(&focus, cx);
         }
         let hwnd = hwnd_of(window);
+        // Opened without the keyboard ("focus on open" off), the window is never active, so it never stops being active either and
+        // "close when another window is activated" did nothing (issue 235). Until it has been in front once, the window that was in
+        // front when it opened (the file manager) is watched instead: another one coming forward closes it.
+        if !cx.global::<LookSettings>().look_focus_on_open {
+            let opener = rf_win::window::foreground();
+            cx.spawn_in(window, async move |this, cx| {
+                loop {
+                    cx.background_executor().timer(std::time::Duration::from_millis(250)).await;
+                    let front = rf_win::window::foreground();
+                    if front == hwnd {
+                        // in front once: the activation observer above takes over
+                        return;
+                    }
+                    let gone = front != 0 && front != opener;
+                    let close = this
+                        .update(cx, |this, cx| gone && !this.pinned && cx.global::<LookSettings>().look_close_on_lost_focus)
+                        .unwrap_or(false);
+                    if this.upgrade().is_none() {
+                        return;
+                    }
+                    if close {
+                        let _ = cx.update(|window, _| window.remove_window());
+                        return;
+                    }
+                }
+            })
+            .detach();
+        }
         let title = file_title(&path);
         let mut v = Self {
             path,

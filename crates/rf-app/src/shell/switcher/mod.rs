@@ -143,6 +143,10 @@ pub fn open(req: OpenRequest, cx: &mut App) -> bool {
         rf_win::window::set_dark_mode(hwnd, dark);
         rf_win::switcher::mark_shell_window(hwnd);
         geo::show_at(hwnd, plan.window);
+        // Again: on a monitor whose scale is not the one the window was made at, the first move changes the window's DPI, and the
+        // size Windows suggests for the new DPI (which GPUI takes) is the old one scaled, so the cards were cut off (issue 282:
+        // 125 % and 100 % monitors). The second time the DPI is the monitor's and the size stays as planned.
+        geo::show_at(hwnd, plan.window);
         // (the quiet kind: no tap of the Alt key into the program that is in front)
         rf_win::window::bring_to_front_quietly(hwnd);
         let shown_at = started.elapsed();

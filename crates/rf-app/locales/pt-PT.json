@@ -2182,5 +2182,7 @@
  "38ffe584": "Os separadores, a barra de endereço e a barra de comandos ficam mais finos, e o conteúdo chega aos limites direito e inferior da janela. Os ícones e o texto mantêm o tamanho.",
  "2560942b": "Pretende remover este item da secção de afixados?",
  "431d7079": "Escolher terminal",
- "173a07d0": "Automático: Windows Terminal, caso contrário PowerShell"
+ "173a07d0": "Automático: Windows Terminal, caso contrário PowerShell",
+ "6d29d44c": "Ordenar",
+ "e070104e": "Novo"
 }

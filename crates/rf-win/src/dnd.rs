@@ -20,7 +20,6 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use crate::fileops::Transfer;
-use crate::wide::wide;
 
 pub(crate) struct Pidl(pub(crate) *mut ITEMIDLIST);
 impl Drop for Pidl {
@@ -32,7 +31,7 @@ impl Drop for Pidl {
 }
 
 pub(crate) fn parse(path: &Path) -> anyhow::Result<Pidl> {
-    let w = wide(path);
+    let w = crate::wide::shell_name(path);
     let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
     unsafe { SHParseDisplayName(PCWSTR(w.as_ptr()), None, &mut pidl, 0, None)? };
     Ok(Pidl(pidl))

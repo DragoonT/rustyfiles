@@ -814,7 +814,7 @@
  "e48e04f7": "Kompaktowa nakładka",
  "e59e5590": "Otwórz kompaktową nakładkę",
  "03eecce8": "Wyjdź z kompaktowej nakładki",
- "dadea6f1": "podział panelu",
+ "dadea6f1": "Podział panelu",
  "676f098f": "Ułóż strony",
  "36de2a96": "Jeden pod drugim",
  "c261faa6": "Zamknij aktywny panel",
@@ -2182,5 +2182,7 @@
  "38ffe584": "Karty, pasek adresu i pasek poleceń są cieńsze, a zawartość sięga do prawej i dolnej krawędzi okna. Ikony i tekst zachowują swój rozmiar.",
  "2560942b": "Czy chcesz usunąć ten element z sekcji przypiętych?",
  "431d7079": "Wybierz terminal",
- "173a07d0": "Automatycznie: Windows Terminal, w przeciwnym razie PowerShell"
+ "173a07d0": "Automatycznie: Windows Terminal, w przeciwnym razie PowerShell",
+ "6d29d44c": "Sortuj",
+ "e070104e": "Nowy"
 }

@@ -2182,5 +2182,7 @@
  "38ffe584": "Las pestañas, la barra de direcciones y la barra de comandos son más delgadas, y el contenido llega a los bordes derecho e inferior de la ventana. Los iconos y el texto conservan su tamaño.",
  "2560942b": "¿Quieres quitar este elemento de la sección de anclados?",
  "431d7079": "Elegir terminal",
- "173a07d0": "Automático: Windows Terminal; si no, PowerShell"
+ "173a07d0": "Automático: Windows Terminal; si no, PowerShell",
+ "6d29d44c": "Ordenar",
+ "e070104e": "Nuevo"
 }

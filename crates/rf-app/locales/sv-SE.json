@@ -2182,5 +2182,7 @@
  "38ffe584": "Flikarna, adressfältet och kommandofältet är tunnare, och innehållet når fönstrets högra och nedre kant. Ikoner och text behåller sin storlek.",
  "2560942b": "Vill du ta bort det här objektet från de fästa?",
  "431d7079": "Välj terminal",
- "173a07d0": "Automatiskt: Windows Terminal, annars PowerShell"
+ "173a07d0": "Automatiskt: Windows Terminal, annars PowerShell",
+ "6d29d44c": "Sortera",
+ "e070104e": "Nya"
 }

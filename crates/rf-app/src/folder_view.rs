@@ -557,6 +557,8 @@ pub struct FolderView {
     auto_key: Option<auto_cols::Key>,
     pub(crate) grid_style: GridStyle,
     content_width: Pixels,
+    /// Where the item area starts on screen (the probe's corner): the Column view's band is drawn from there (issue 263).
+    content_origin: Point<Pixels>,
     pub(crate) entries: Vec<Entry>,
     /// Search mode only: parent folder of each entry (aligned with `entries`).
     parents: Vec<Arc<std::path::Path>>,
@@ -633,6 +635,8 @@ pub struct FolderView {
     zoom_acc: f32,
     /// The mouse went down on an item's name (set by the name label, read by the row).
     name_hit: bool,
+    /// The press was on an item's icon (set by the icon before the row hears the press).
+    icon_hit: bool,
     /// Explorer's "click the name of the selected item again": (entry, serial) armed until the
     /// double-click time passes without a second click or a drag.
     slow_click: Option<(u32, u64)>,
@@ -680,6 +684,8 @@ pub struct FolderView {
     adaptive_pending: bool,
     /// The view's first folder has been given its layout (with "sync layout" on, only that first one takes the shared layout).
     layout_seeded: bool,
+    /// The folder the layout was last applied for: Columns stays on only while walking up and down from there (issue 254).
+    layout_dir: Option<PathBuf>,
     /// Requested this frame; started together as one batch.
     size_queue: Vec<PathBuf>,
     size_batches: Vec<(Arc<rf_win::foldersize::SizeBatch>, Vec<PathBuf>)>,
@@ -788,6 +794,7 @@ impl FolderView {
             auto_key: None,
             grid_style: GridStyle::Tiles,
             content_width: px(900.),
+            content_origin: Point::default(),
             entries: Vec::new(),
             sorted_cache: None,
             entries_gen: 0,
@@ -841,6 +848,7 @@ impl FolderView {
             home_press: None,
             zoom_acc: 0.0,
             name_hit: false,
+            icon_hit: false,
             slow_click: None,
             slow_click_serial: 0,
             hover_pick: None,
@@ -870,6 +878,7 @@ impl FolderView {
             folder_sizes: Default::default(),
             adaptive_pending: false,
             layout_seeded: false,
+            layout_dir: None,
             size_queue: Default::default(),
             size_batches: Default::default(),
             size_polling: false,
@@ -1047,6 +1056,7 @@ impl FolderView {
 
     fn render_col_rows(&mut self, range: std::ops::Range<usize>, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let hover_select = cx.global::<crate::settings::Settings>().select_on_hover;
+        let show_ext = cx.global::<crate::settings::Settings>().show_extensions;
         let on_disk = cx.global::<crate::settings::Settings>().folder_size_on_disk;
         let p = Palette::for_window(window);
         let mut out = Vec::with_capacity(range.len());
@@ -1077,7 +1087,7 @@ impl FolderView {
                     .relative()
                     .when(selected, |d| d.bg(p.selection).child(theme::selection_pill(&p)))
                     .when(!selected, |d| d.hover(|s| s.bg(p.hover)))
-                    .child(download_marked(link_marked(
+                    .child(div().flex_shrink_0().on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.icon_hit = true)).child(download_marked(link_marked(
                         faded(match &shell_icon {
                             Some(im) => img(im.clone()).size(px(16.)).flex_shrink_0().into_any_element(),
                             None => Icon::new(icons::icon_for(cat)).size(px(16.)).text_color(theme::kind_color(cat, p.dark)).into_any_element(),
@@ -1085,8 +1095,8 @@ impl FolderView {
                         px(16.),
                         e.link,
                         overlay,
-                    ), self.part_frac(ei)))
-                    .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().when(dim, |d| d.opacity(0.6)).on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true)).child(crate::rtl::display_text(&e.name)))
+                    ), self.part_frac(ei))))
+                    .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().when(dim, |d| d.opacity(0.6)).on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true)).child(crate::rtl::display_text(&row_name(e, show_ext, self.renamed.as_ref()))))
                     .when(is_dir, |d| d.child(Icon::new(L::ChevronRight).size(px(12.)).text_color(p.text_tertiary)))
                     .on_mouse_down(
                         MouseButton::Left,
@@ -1097,6 +1107,7 @@ impl FolderView {
                         MouseButton::Right,
                         cx.listener(move |this, _: &MouseDownEvent, window, cx| this.on_row_right_down(vi, window, cx)),
                     )
+                    .on_mouse_down(MouseButton::Middle, cx.listener(move |this, _: &MouseDownEvent, _, cx| this.middle_open(vi, cx)))
                     .when_some(self.path_of(ei), |d, path| file_drop_target(d, path, is_dir, &p))
                     // (not while a menu is open: the details stood behind the right-click menu, a Discord report)
                     .when(item_tips, |d| d.tooltip(move |w, cx| {
@@ -1118,11 +1129,12 @@ impl FolderView {
     }
 
     fn render_columns(&mut self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        let Some(cur) = self.current_dir() else { return div().into_any_element() };
+        // (a place that is no folder, a tag or search results, is the current column alone: it was an empty view, issue 255)
+        let cur = self.current_dir();
         // Up to two ancestor columns, each highlighting the child on the current path.
         let mut ancestors: Vec<(PathBuf, String)> = Vec::new();
-        let mut child = cur.clone();
-        for _ in 0..2 {
+        let mut child = cur.clone().unwrap_or_default();
+        for _ in 0..usize::from(cur.is_some()) * 2 {
             let Some(parent) = child.parent().filter(|p| !p.as_os_str().is_empty()).map(|p| p.to_path_buf()) else { break };
             ancestors.push((parent.clone(), rf_core::history::display_name(&child)));
             child = parent;
@@ -1135,7 +1147,7 @@ impl FolderView {
         if let Some(n) = &next_dir {
             self.ensure_column(n.clone(), cx);
         }
-        let key = (cur.clone(), next_dir.clone());
+        let key = (cur.clone().unwrap_or_default(), next_dir.clone());
         if self.col_key.as_ref() != Some(&key) {
             self.col_key = Some(key);
             let n_cols = ancestors.len() + 1 + usize::from(next_dir.is_some());
@@ -2403,6 +2415,11 @@ impl FolderView {
                 let l = self.layout_now();
                 crate::layouts::set(std::path::Path::new(SEARCH_LAYOUT), l, cx);
             }
+            // each tag its own, as a folder (issue 254)
+            Location::Tag(id) => {
+                let l = self.layout_now();
+                crate::layouts::set(&tag_layout_key(id), l, cx);
+            }
             _ => {}
         }
     }
@@ -2414,8 +2431,16 @@ impl FolderView {
         self.apply_folder_layout_inner(cx);
         // Columns is a way of walking the tree, not a look of one folder: it stays on from folder to folder (issue 51: going up to
         // a shallow folder switched back to the details layout, the folder's own remembered one, and the arrow keys stopped walking).
-        // Another layout chosen from the menu leaves it, and the remembered layouts are used again from there.
-        if was_columns {
+        // Another layout chosen from the menu leaves it, and the remembered layouts are used again from there. Only while walking:
+        // a jump elsewhere (another drive, a place in the sidebar) gets that folder's own layout, else a folder's chosen layout was
+        // lost on the way back (issue 254).
+        let here = self.location().path().map(Path::to_path_buf);
+        let walking = match (&self.layout_dir, &here) {
+            (Some(was), Some(now)) => was.starts_with(now) || now.starts_with(was),
+            _ => false,
+        };
+        self.layout_dir = here;
+        if was_columns && walking {
             self.view_mode = ViewMode::Columns;
         }
     }
@@ -2433,6 +2458,12 @@ impl FolderView {
         // search results: as the last search was sorted and laid out (else as the folder searched in, the tab's)
         if matches!(self.location(), Location::Search { .. }) {
             if let Some(l) = crate::layouts::get(std::path::Path::new(SEARCH_LAYOUT), cx) {
+                self.apply_layout_values(l, false, cx);
+            }
+            return;
+        }
+        if let Location::Tag(id) = self.location() {
+            if let Some(l) = crate::layouts::get(&tag_layout_key(*id), cx) {
                 self.apply_layout_values(l, false, cx);
             }
             return;
@@ -3002,6 +3033,9 @@ impl FolderView {
             GridStyle::Cards => px(60.),
             GridStyle::List => px(20.),
         };
+        // the picture is asked for at the screen's pixels: at 150 % and more the tile shows more pixels than the size step's own,
+        // and a folder (Windows' own picture of it) came out blurred (issue 253)
+        let thumb_px = thumb_px.max(((f32::from(visual_px) * window.scale_factor() / 16.).ceil() as u32) * 16);
         let show_ext = cx.global::<crate::settings::Settings>().show_extensions;
         let renamed = self.renamed.clone();
         let mut out = Vec::with_capacity(range.len());
@@ -3241,6 +3275,7 @@ impl FolderView {
                 MouseButton::Right,
                 cx.listener(move |this, _: &MouseDownEvent, window, cx| this.on_row_right_down(vi, window, cx)),
             )
+            .on_mouse_down(MouseButton::Middle, cx.listener(move |this, _: &MouseDownEvent, _, cx| this.middle_open(vi, cx)))
             .when_some(self.path_of(ei), |d, path| file_drop_target(d, path, e.is_dir(), &p))
             // (not while a menu is open: the details stood behind the right-click menu, a Discord report)
             .when(item_tips, |d| d.tooltip(move |w, cx| {
@@ -3263,6 +3298,7 @@ impl FolderView {
         rf_win::press_activate::press_on_item();
         // before anything changes: was this the only selected item, in a focused, active list?
         let on_name = std::mem::take(&mut self.name_hit);
+        let on_icon = std::mem::take(&mut self.icon_hit);
         let was_renaming = self.renaming.is_some();
         let had_focus = window.is_window_active() && self.focus.is_focused(window);
         let was_only = self.visible.get(vi).is_some_and(|ei| self.selected.len() == 1 && self.selected.contains(ei));
@@ -3325,7 +3361,8 @@ impl FolderView {
                 on_release = Release::SelectOnly;
             }
         }
-        self.drag_origin = Some(RowPress { origin: ev.position, open_on_release: plain && single && !second, on_release });
+        let band = (matches!(self.view_mode, ViewMode::Details | ViewMode::Columns) && !on_name && !on_icon).then_some(!plain);
+        self.drag_origin = Some(RowPress { origin: ev.position, open_on_release: plain && single && !second, on_release, band });
         // Explorer: a click on the name of the item that was already the only one selected
         // renames it, once the double-click time passes without a second click or a drag
         if plain && !single && ev.click_count == 1 && on_name && was_only && had_focus && !was_renaming {
@@ -3566,6 +3603,15 @@ impl FolderView {
             return;
         }
         let d = ev.position - press.origin;
+        if let Some(add) = press.band.filter(|_| d.x.abs() + d.y.abs() > px(4.)) {
+            let start = self.content_point(press.origin);
+            let base = if add { self.selected.clone() } else { HashSet::new() };
+            self.drag_origin = None;
+            self.slow_click = None;
+            self.marquee = Some(Marquee { start, cur: start, base });
+            self.update_marquee(ev.position, cx);
+            return;
+        }
         if d.x.abs() + d.y.abs() > px(8.) {
             self.drag_origin = None;
             self.slow_click = None;
@@ -3619,7 +3665,18 @@ impl FolderView {
                         }
                     }
                 }
-                ViewMode::Columns => {}
+                ViewMode::Columns => {
+                    // the current column's rows (28 px under 4 px of padding), while the band touches that column (issue 263: it
+                    // was drawn over the first column and selected nothing)
+                    let (pad, h) = (4.0, 28.0);
+                    if y1 >= pad && x1 >= 0.0 && x0 <= f32::from(COL_W) {
+                        let first = ((y0 - pad).max(0.0) / h) as usize;
+                        let last = (((y1 - pad) / h) as usize).min(n - 1);
+                        for vi in first..=last.max(first).min(n - 1) {
+                            sel.insert(self.visible[vi]);
+                        }
+                    }
+                }
                 ViewMode::Grid => {
                     let (pt, pl) = (8.0, 6.0);
                     let cw = f32::from(self.grid_tile_w() + GRID_GAP);
@@ -3681,9 +3738,14 @@ impl FolderView {
 
     fn render_marquee(&self, p: &Palette) -> Option<AnyElement> {
         let m = self.marquee.as_ref()?;
-        let off = self.scroll.0.borrow().base_handle.offset();
-        let x0 = m.start.x.min(m.cur.x) + off.x;
-        let y0 = m.start.y.min(m.cur.y) + off.y;
+        let (off, list_origin) = {
+            let st = self.scroll.0.borrow();
+            (st.base_handle.offset(), st.base_handle.bounds().origin)
+        };
+        // the Column view's list is the current column, right of the others: the band is drawn where that column is (issue 263)
+        let shift = if self.view_mode == ViewMode::Columns { list_origin - self.content_origin } else { Point::default() };
+        let x0 = m.start.x.min(m.cur.x) + off.x + shift.x;
+        let y0 = m.start.y.min(m.cur.y) + off.y + shift.y;
         let w = (m.start.x - m.cur.x).abs();
         let h = (m.start.y - m.cur.y).abs();
         if w < px(3.) && h < px(3.) {
@@ -4077,6 +4139,17 @@ impl FolderView {
             self.reselect = Some(n);
             self.rename_after_load = true;
             self.soft_reload(cx);
+        }
+    }
+
+    /// A middle click on a folder opens it in a new tab, in every view (issue 245: only Details did).
+    fn middle_open(&mut self, vi: usize, cx: &mut Context<Self>) {
+        let Some(&ei) = self.visible.get(vi) else { return };
+        if self.entries[ei as usize].is_dir() {
+            if let Some(p) = self.path_of(ei) {
+                cx.stop_propagation();
+                cx.emit(FolderEvent::OpenInNewTab(Location::Path(p)));
+            }
         }
     }
 
@@ -4811,8 +4884,10 @@ impl FolderView {
                 .relative()
                 .when(selected, |d| d.bg(p.selection).child(theme::selection_pill_joined(&p, sel_above, sel_below)))
                 .when(!selected, |d| d.hover(|s| s.bg(p.hover)))
+                // the focused one of several: an outline laid over the row, not a border of it, which moved the row's content and its
+                // pill a pixel (issue 276)
                 .when(is_cursor && selected && self.selected.len() > 1, |d| {
-                    d.border_1().border_color(p.selection_border)
+                    d.child(div().absolute().inset_0().rounded(theme::RADIUS_SM).border_1().border_color(p.selection_border))
                 })
                 .on_mouse_down(
                     MouseButton::Left,
@@ -4824,17 +4899,7 @@ impl FolderView {
                     cx.listener(move |this, _: &MouseDownEvent, window, cx| this.on_row_right_down(vi, window, cx)),
                 )
                 .when_some(self.path_of(ei), |d, path| file_drop_target(d, path, e.is_dir(), &p))
-                .on_mouse_down(
-                    MouseButton::Middle,
-                    cx.listener(move |this, _: &MouseDownEvent, _, cx| {
-                        let Some(&ei) = this.visible.get(vi) else { return };
-                        if this.entries[ei as usize].is_dir() {
-                            if let Some(p) = this.path_of(ei) {
-                                cx.emit(FolderEvent::OpenInNewTab(Location::Path(p)));
-                            }
-                        }
-                    }),
-                )
+                .on_mouse_down(MouseButton::Middle, cx.listener(move |this, _: &MouseDownEvent, _, cx| this.middle_open(vi, cx)))
                 .child(
                     h_flex()
                         .map(|d| match name_w {
@@ -4875,7 +4940,7 @@ impl FolderView {
                                     ),
                             )
                         })
-                        .child(download_marked(link_marked(
+                        .child(div().flex_shrink_0().on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.icon_hit = true)).child(download_marked(link_marked(
                             faded(match &shell_icon {
                                 Some(im) => img(im.clone()).size(px(16.)).flex_shrink_0().into_any_element(),
                                 None => Icon::new(icons::icon_for(cat))
@@ -4887,7 +4952,7 @@ impl FolderView {
                             px(16.),
                             e.link,
                             overlay,
-                        ), self.part_frac(ei)))
+                        ), self.part_frac(ei))))
                         .child(name_el)
                         // encrypted: an archive member that needs a password, or an EFS file
                         .children((e.attrs & rf_core::attrs::ENCRYPTED != 0).then(|| Icon::new(L::Lock).size(px(12.)).flex_shrink_0().text_color(p.text_secondary)))
@@ -5037,6 +5102,7 @@ impl FolderView {
         let width_probe = canvas(
             move |bounds, window, cx| {
                 let changed = this.update(cx, |v, cx| {
+                    v.content_origin = bounds.origin;
                     let changed = v.content_width != bounds.size.width;
                     if changed {
                         v.content_width = bounds.size.width;
@@ -5166,7 +5232,7 @@ impl FolderView {
                         // (only while the pointer is over the list: every listener hears every move, and the tree's or a tab's
                         // own effect must not be overwritten by the list's)
                         if ev.bounds.contains(&ev.event.position)
-                            && let Some(dir) = this.current_dir()
+                            && let Some(dir) = this.current_dir().or_else(|| this.shell_dest())
                         {
                             show_drop_effect(ev.drag(cx).paths(), &dir);
                         }
@@ -5174,6 +5240,12 @@ impl FolderView {
                     .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
                         if let Some(dir) = this.current_dir() {
                             crate::workspace::drop_files(paths, dir, cx);
+                        } else if let Some(dest) = this.shell_dest() {
+                            // a phone's folder: Windows' engine copies onto the device, then the folder is read again (issue 221)
+                            let view = cx.entity().downgrade();
+                            crate::workspace::drop_files_then(paths, dest, cx, move |cx| {
+                                let _ = view.update(cx, |v, cx| v.refresh(cx));
+                            });
                         }
                     }))
                     .child(body)
@@ -5791,10 +5863,14 @@ fn static_column(
         Some(list) => {
             let n = list.len();
             let pal = *p;
-            uniform_list(id.clone(), n, move |range: std::ops::Range<usize>, _, _| {
+            uniform_list(id.clone(), n, move |range: std::ops::Range<usize>, _, cx: &mut App| {
+                // the same name and icon as the current column's rows: hidden extensions stay hidden (issue 242) and the icons are
+                // the ones the list uses, not the app's own beside the system's (issues 225, 265)
+                let show_ext = cx.global::<crate::settings::Settings>().show_extensions;
                 range
                     .map(|i| {
                         let e = &list[i];
+                        let shell_icon = view.update(cx, |v, cx| v.images.update(cx, |c, cx| c.icon(&dir, e, cx)));
                         let on = highlight.as_deref() == Some(&*e.name);
                         let cat = icons::category(e);
                         let target = dir.join(&*e.name);
@@ -5812,8 +5888,11 @@ fn static_column(
                             .text_sm()
                             .when(on, |d| d.bg(pal.hover).font_weight(FontWeight::MEDIUM))
                             .when(!on, |d| d.hover(|s| s.bg(pal.hover)).text_color(pal.text_secondary))
-                            .child(Icon::new(icons::icon_for(cat)).size(px(16.)).text_color(theme::kind_color(cat, pal.dark)))
-                            .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(crate::rtl::display_text(&e.name)))
+                            .child(match &shell_icon {
+                                Some(im) => img(im.clone()).size(px(16.)).flex_shrink_0().into_any_element(),
+                                None => Icon::new(icons::icon_for(cat)).size(px(16.)).text_color(theme::kind_color(cat, pal.dark)).into_any_element(),
+                            })
+                            .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(crate::rtl::display_text(&shown_name(e, show_ext))))
                             .when(is_dir, |d| d.child(Icon::new(L::ChevronRight).size(px(12.)).text_color(pal.text_tertiary)))
                             // the press is the row's: the list's background under the columns took it as a click on nothing and
                             // cleared the selection, which took this column away before the button came up, and the click was lost
@@ -6262,6 +6341,10 @@ struct RowPress {
     origin: Point<Pixels>,
     open_on_release: bool,
     on_release: Release,
+    /// Pressed beside the item's icon and name (Details and Columns, whose rows are as wide as the list): moved, the press draws a
+    /// selection box instead of dragging the item, as in Explorer (issue 239: a list of long rows had nowhere to start a box from).
+    /// With Ctrl or Shift the box adds to the selection.
+    band: Option<bool>,
 }
 
 /// What the release of a press on an item does when the press did not become a drag.
@@ -6341,6 +6424,10 @@ fn cut_to_width(text: &str, avail: Pixels, width: &dyn Fn(&str) -> Pixels) -> St
 const SHARED_LAYOUT: &str = "<all folders>";
 /// The layouts' key of the one layout all searches share.
 const SEARCH_LAYOUT: &str = "<search results>";
+/// The layouts' key of a tag's layout.
+fn tag_layout_key(id: u32) -> PathBuf {
+    PathBuf::from(format!("<tag {id}>"))
+}
 
 /// How long the pointer rests on an item before "Select on hover" selects it: the system's hover time (Control Panel › Mouse;
 /// 400 ms out of the box), as Explorer's "point to select" waits.

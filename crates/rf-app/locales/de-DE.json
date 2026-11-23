@@ -2182,5 +2182,7 @@
  "38ffe584": "Die Tabs, die Adressleiste und die Befehlsleiste sind schmaler, und der Inhalt reicht bis zum rechten und unteren Fensterrand. Symbole und Text behalten ihre Größe.",
  "2560942b": "Möchten Sie dieses Element aus dem angehefteten Bereich entfernen?",
  "431d7079": "Terminal auswählen",
- "173a07d0": "Automatisch: Windows Terminal, sonst PowerShell"
+ "173a07d0": "Automatisch: Windows Terminal, sonst PowerShell",
+ "6d29d44c": "Sortieren",
+ "e070104e": "Neu"
 }

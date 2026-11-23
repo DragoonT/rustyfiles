@@ -18,7 +18,10 @@ pub fn read_only_notice(cx: &mut gpui_kit::App) {
 /// copy engine (Status Center shows it), then those copies go on the clipboard. The clipboard is
 /// emptied at once so a quick paste cannot paste what was there before, and what the user
 /// copies meanwhile is left alone. Items that are real files go on the clipboard as they are.
-pub fn copy_items(cx: &mut gpui_kit::App, items: Vec<ShellChild>) {
+///
+/// `cut`: the copies go on the clipboard to be moved, and once a paste has moved them all away (within an hour, while nothing else
+/// was copied) the items are deleted from the device: a move off a phone (issue 221: a cut was a copy and the files stayed there).
+pub fn copy_items(cx: &mut gpui_kit::App, items: Vec<ShellChild>, cut: bool) {
     if items.is_empty() {
         return;
     }
@@ -40,11 +43,26 @@ pub fn copy_items(cx: &mut gpui_kit::App, items: Vec<ShellChild>) {
         if rf_win::clipboard::sequence() != seq {
             return Ok(true);
         }
+        let kind = if cut { rf_win::fileops::Transfer::Move } else { rf_win::fileops::Transfer::Copy };
         let (tx, rx) = std::sync::mpsc::channel();
+        let on_clip = real.clone();
         rf_win::sta::run(move |owner| {
-            let _ = tx.send(rf_win::clipboard::set_files(owner, &real, rf_win::fileops::Transfer::Copy));
+            let _ = tx.send(rf_win::clipboard::set_files(owner, &on_clip, kind).map(|()| rf_win::clipboard::sequence()));
         });
-        rx.recv().map_err(|_| anyhow::anyhow!("clipboard"))??;
+        let ours = rx.recv().map_err(|_| anyhow::anyhow!("clipboard"))??;
+        if cut {
+            // only the device's items (real files were put on the clipboard as they are, and a paste moves those itself)
+            let originals: Vec<PathBuf> = items.iter().filter(|c| c.fs_path.is_none()).map(|c| PathBuf::from(&c.parsing)).collect();
+            let copies: Vec<PathBuf> = real.into_iter().filter(|p| !items.iter().any(|c| c.fs_path.as_ref() == Some(p))).collect();
+            if !originals.is_empty() {
+                std::thread::spawn(move || {
+                    delete_once_moved(copies, ours, move || {
+                        rf_win::shell::ensure_com();
+                        rf_win::fileops::delete(&originals, true).map(|_| ())
+                    })
+                });
+            }
+        }
         Ok(true)
     });
 }
@@ -83,6 +101,78 @@ impl crate::folder_view::FolderView {
             }
         })
         .detach();
+    }
+}
+
+/// Ctrl+C / Ctrl+X on items of an FTP server, (address, is a folder): as a phone's, they are downloaded into a fresh temp folder
+/// (by the server's own transfer, Windows' FTP folder cannot be asked for that through its engine) and those copies go on the
+/// clipboard; a cut deletes them from the server once a paste has moved the copies away (issue 223: the clipboard got the `ftp://`
+/// addresses, which no paste can use).
+pub fn copy_ftp(cx: &mut gpui_kit::App, items: Vec<(String, bool)>, cut: bool) {
+    if items.is_empty() {
+        return;
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    rf_win::sta::run(move |owner| {
+        if let Err(e) = rf_win::clipboard::clear(owner) {
+            log::warn!("clipboard: {e:#}");
+        }
+        let _ = tx.send(rf_win::clipboard::sequence());
+    });
+    let names = items.iter().map(|(u, _)| u.rsplit('/').next().unwrap_or_default()).collect::<Vec<_>>().join(", ");
+    let title = format!("{} {}", t!("Cihazdan kopyalanıyor:"), names);
+    crate::status_center::start(cx, title, move |_| {
+        let seq = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap_or(0);
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+        let dest = crate::archive_view::temp_root().join(format!("ftp-{stamp:x}"));
+        std::fs::create_dir_all(&dest)?;
+        let mut real = Vec::new();
+        for (url, is_dir) in &items {
+            real.push(rf_win::ftp::download_into(url, *is_dir, &dest)?);
+        }
+        if rf_win::clipboard::sequence() != seq {
+            return Ok(true);
+        }
+        let kind = if cut { rf_win::fileops::Transfer::Move } else { rf_win::fileops::Transfer::Copy };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let on_clip = real.clone();
+        rf_win::sta::run(move |owner| {
+            let _ = tx.send(rf_win::clipboard::set_files(owner, &on_clip, kind).map(|()| rf_win::clipboard::sequence()));
+        });
+        let ours = rx.recv().map_err(|_| anyhow::anyhow!("clipboard"))??;
+        if cut {
+            std::thread::spawn(move || {
+                delete_once_moved(real, ours, move || {
+                    for (url, is_dir) in &items {
+                        rf_win::ftp::delete(url, *is_dir)?;
+                    }
+                    Ok(())
+                })
+            });
+        }
+        Ok(true)
+    });
+}
+
+/// Waits (up to an hour) for a paste to move the temp `copies` of a cut away, then deletes the originals (`delete_originals`). Gives up
+/// when something that is no files was copied while the copies are still there.
+fn delete_once_moved(copies: Vec<PathBuf>, ours: u32, delete_originals: impl FnOnce() -> anyhow::Result<()>) {
+    if copies.is_empty() {
+        return;
+    }
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(3600);
+    while std::time::Instant::now() < until {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        if copies.iter().all(|p| !p.exists()) {
+            if let Err(e) = delete_originals() {
+                log::warn!("move: deleting the originals: {e:#}");
+            }
+            return;
+        }
+        let seq = rf_win::clipboard::sequence();
+        if seq != ours && copies.iter().all(|p| p.exists()) && !rf_win::clipboard::has_files() {
+            return;
+        }
     }
 }
 

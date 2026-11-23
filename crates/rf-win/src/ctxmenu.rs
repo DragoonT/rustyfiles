@@ -52,7 +52,7 @@ impl Drop for Pidl {
 }
 
 fn parse(path: &Path) -> anyhow::Result<Pidl> {
-    let w = wide(path);
+    let w = crate::wide::shell_name(path);
     let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
     match unsafe { SHParseDisplayName(PCWSTR(w.as_ptr()), None, &mut pidl, 0, None) } {
         Ok(()) => Ok(Pidl(pidl)),

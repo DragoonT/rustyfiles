@@ -848,6 +848,28 @@ fn transfer_inner(
         crate::archive_view::add_into(cx, archive, inner, sources);
         return;
     }
+    // onto an FTP server: the server's own upload, folders with all they hold (Windows' FTP folder cannot be reached through its
+    // engine, issue 223); a move deletes the local items once they are all up
+    if rf_win::ftp::is_ftp(&dest) {
+        let url = dest.to_string_lossy().replace('\\', "/");
+        let title = format!("{}: {} → {}", t!("Kopyalanıyor"), crate::i18n::items(sources.len()), short(&dest));
+        let on_done: Option<OnDone> = after.map(|f| -> OnDone { Box::new(move |_, cx: &mut App| f(Vec::new(), cx)) });
+        start_with(
+            cx,
+            title,
+            move |_| {
+                for s in &sources {
+                    rf_win::ftp::upload_tree(s, &url)?;
+                }
+                if kind == Transfer::Move {
+                    fileops::delete(&sources, false)?;
+                }
+                Ok(true)
+            },
+            on_done,
+        );
+        return;
+    }
     let verb = match kind {
         Transfer::Copy => t!("Kopyalanıyor"),
         Transfer::Move => t!("Taşınıyor"),
@@ -874,7 +896,8 @@ fn transfer_inner(
         t.set_verify(verify);
         t.limit.store(limit, Ordering::Relaxed);
         // our engine (conflicts asked in one list); Windows' engine when it is turned off
-        let r = if fast {
+        // (a phone's folder or an FTP server on either side: only Windows' engine reaches them)
+        let r = if fast && !is_shell_name(&dest) && !sources.iter().any(|s| is_shell_name(s)) {
             rf_win::fastcopy::transfer(kind, &sources, &dest, t.clone())
         } else {
             fileops::transfer_tracked(kind, &sources, &dest, t.clone())
@@ -1186,6 +1209,17 @@ pub fn compress_level(cx: &mut App, sources: Vec<std::path::PathBuf>, dest: std:
             Err(e) => Err(e),
         }
     });
+}
+
+/// A place only Windows' own engine reaches: an item of a shell folder (a phone's, `::{...}`) or of an FTP server.
+fn is_shell_name(p: &std::path::Path) -> bool {
+    p.to_string_lossy().starts_with("::") || rf_win::ftp::is_ftp(p)
+}
+
+/// Items of a shell folder (a phone's) deleted for good by Windows' engine (the device has no recycle bin), then `after`.
+pub fn delete_in_shell(cx: &mut App, paths: Vec<std::path::PathBuf>, after: impl FnOnce(&mut App) + 'static) {
+    let title = format!("{} {}", t!("Kalıcı olarak siliniyor:"), crate::i18n::items(paths.len()));
+    start_with_id(cx, title, move |t| fileops::delete_tracked(&paths, true, t), Some(Box::new(move |_, cx| after(cx))));
 }
 
 pub fn delete(cx: &mut App, paths: Vec<std::path::PathBuf>, permanent: bool) {

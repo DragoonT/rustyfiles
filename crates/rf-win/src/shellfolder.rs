@@ -22,7 +22,6 @@ use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows::core::{Interface, PCWSTR};
 
 use crate::shell::ensure_com;
-use crate::wide::wide;
 
 /// "This PC": its non-file-system children are the devices (phones, cameras).
 pub const THIS_PC: &str = "::{20D04FE0-3AEA-1069-A2D8-08002B30309D}";
@@ -86,7 +85,7 @@ pub(crate) fn bind(parsing: &str) -> anyhow::Result<IShellItem> {
 }
 
 fn by_name(parsing: &str) -> windows::core::Result<IShellItem> {
-    let w = wide(parsing);
+    let w = crate::wide::shell_name(parsing);
     unsafe { SHCreateItemFromParsingName(PCWSTR(w.as_ptr()), None) }
 }
 
@@ -287,7 +286,7 @@ pub(crate) fn is_namespace_name(s: &str) -> bool {
 /// refuses). The caller frees it with `CoTaskMemFree`.
 pub(crate) fn id_list(parsing: &str) -> anyhow::Result<*mut ITEMIDLIST> {
     ensure_com();
-    let w = wide(parsing.trim());
+    let w = crate::wide::shell_name(parsing.trim());
     let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
     match unsafe { SHParseDisplayName(PCWSTR(w.as_ptr()), None, &mut pidl, 0, None) } {
         Ok(()) => Ok(pidl),
