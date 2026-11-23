@@ -4135,13 +4135,34 @@ impl Workspace {
         if !rail && explorer_look {
             head = head.child(div().mx_2().my_2().h(px(1.)).flex_shrink_0().bg(section_divider));
         }
-        // dropping folders on the header pins them
+        // Dropping folders on the header pins them. While files are dragged the header itself says so, in its own place and at its
+        // own height. (It was a row of its own under the pins, which came with the drag and pushed everything below it down:
+        // what one was aiming at moved. Issue 301.)
+        let pin_header = if ext_drag && !rail {
+            div()
+                .px_2()
+                .pt_3()
+                .pb_1()
+                .text_xs()
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(p.accent)
+                .when(explorer_look, |d| d.flex_shrink_0())
+                .child(
+                    h_flex()
+                        .gap_1()
+                        .items_center()
+                        .child(Icon::new(L::Pin).size(px(12.)).flex_shrink_0())
+                        .child(div().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(t!("Sabitlemek için buraya bırakın"))),
+                )
+        } else {
+            header(t!("Sabitlenenler"))
+        };
         head = head.child(
             div()
                 .id("sb-pin-header")
                 .flex_shrink_0()
                 .rounded(theme::RADIUS_SM)
-                .child(header(t!("Sabitlenenler")))
+                .child(pin_header)
                 .drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(drop_bg))
                 .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.pin_dropped(paths, cx))),
         );
@@ -4169,7 +4190,8 @@ impl Workspace {
                     .child(item),
             );
         }
-        if ext_drag {
+        // (the narrow rail has no header to say it in: there the row stays)
+        if ext_drag && rail {
             head = head.child(
                 h_flex()
                     .id("sb-pin-drop")

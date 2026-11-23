@@ -5182,6 +5182,17 @@ impl FolderView {
                             }
                         }),
                     )
+                    // the button let go outside the list (over the toolbar, the tabs, the sidebar): the selection box ends there too.
+                    // It stayed on the screen until the pointer came back over the list (issue 303).
+                    .on_mouse_up_out(
+                        MouseButton::Left,
+                        cx.listener(|this, _: &MouseUpEvent, _, cx| {
+                            this.drag_origin = None;
+                            if this.marquee.take().is_some() {
+                                cx.notify();
+                            }
+                        }),
+                    )
                     .relative()
                     .children(self.render_marquee(p))
                     // Ctrl and the wheel change the size of the items, as in Explorer (issue 62: "make sure that the mouse wheel can
