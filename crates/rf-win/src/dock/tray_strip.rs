@@ -275,8 +275,9 @@ pub fn drop_move(visible: &[usize], icon: usize, in_overflow: bool, target: Drop
 
 // ---------------------------------------------------------------- the overflow panel
 
-/// A cell of the panel and the picture in it, logical px.
-pub const OVF_CELL: f32 = 40.0;
+/// A cell of the panel and the picture in it, logical px. (The cell was 40: 20 px of nothing between two pictures. The user,
+/// 2026-11-23: "tray kutusunda simgeler daha sık olabilir, çok boşluk var aralarında". At 32 the gap is 12.)
+pub const OVF_CELL: f32 = 32.0;
 pub const OVF_ICON: f32 = 20.0;
 /// Space between the panel's edge and its cells.
 pub const OVF_PAD: f32 = 8.0;
@@ -463,8 +464,8 @@ mod ovf_width_tests {
     #[test]
     fn a_panel_as_wide_as_its_island_has_fixed_columns_and_grows_in_height() {
         let limits = OvfLimits::for_work(2560.0, 1392.0).at_least(226.0);
-        // 226 px less the padding holds five 40 px cells
-        let cols = 5;
+        // 226 px less the padding holds six 32 px cells (210 / 32)
+        let cols = 6;
         let mut last_h = 0.0;
         for count in [1usize, 2, 3, 5, 6, 8, 11, 30] {
             let (w, h) = ovf_size_in(count, limits);
@@ -1061,20 +1062,20 @@ mod tests {
 
     #[test]
     fn the_panels_size_follows_its_cells() {
-        assert_eq!(ovf_size(1), (2.0 * 8.0 + 40.0, 2.0 * 8.0 + 40.0));
-        assert_eq!(ovf_size(7), (16.0 + 4.0 * 40.0, 16.0 + 80.0));
+        assert_eq!(ovf_size(1), (2.0 * 8.0 + OVF_CELL, 2.0 * 8.0 + OVF_CELL));
+        assert_eq!(ovf_size(7), (16.0 + 4.0 * OVF_CELL, 16.0 + 2.0 * OVF_CELL));
         let (w, h) = ovf_size(0);
         assert!(w > 100.0 && h > 40.0, "room for the one line that explains");
     }
 
     #[test]
     fn a_cell_of_the_panel_is_found_by_its_place() {
-        assert_eq!(ovf_cell(7, 0), [8.0, 8.0, 40.0, 40.0]);
-        assert_eq!(ovf_cell(7, 4), [8.0, 48.0, 40.0, 40.0], "the second row starts again at the left");
+        assert_eq!(ovf_cell(7, 0), [8.0, 8.0, OVF_CELL, OVF_CELL]);
+        assert_eq!(ovf_cell(7, 4), [8.0, 8.0 + OVF_CELL, OVF_CELL, OVF_CELL], "the second row starts again at the left");
         assert_eq!(ovf_hit(7, 10.0, 10.0), Some(0));
-        assert_eq!(ovf_hit(7, 8.0 + 3.0 * 40.0 + 5.0, 10.0), Some(3));
-        assert_eq!(ovf_hit(7, 10.0, 55.0), Some(4));
-        assert_eq!(ovf_hit(7, 8.0 + 3.0 * 40.0 + 5.0, 55.0), None, "the last row has three cells; this is past the 7th");
+        assert_eq!(ovf_hit(7, 8.0 + 3.0 * OVF_CELL + 5.0, 10.0), Some(3));
+        assert_eq!(ovf_hit(7, 10.0, 8.0 + OVF_CELL + 7.0), Some(4));
+        assert_eq!(ovf_hit(7, 8.0 + 3.0 * OVF_CELL + 5.0, 8.0 + OVF_CELL + 7.0), None, "the last row has three cells; this is past the 7th");
         assert_eq!(ovf_hit(7, 2.0, 2.0), None, "the panel's padding");
         assert_eq!(ovf_hit(0, 10.0, 10.0), None);
     }
@@ -1085,39 +1086,39 @@ mod tests {
         let big = OvfLimits::for_work(2560.0, 1392.0);
         let g1 = ovf_grid(1, big);
         assert_eq!((g1.cols, g1.rows, g1.shown), (1, 1, 1));
-        assert_eq!(ovf_size_in(1, big), (56.0, 56.0));
+        assert_eq!(ovf_size_in(1, big), (16.0 + OVF_CELL, 16.0 + OVF_CELL));
         let g9 = ovf_grid(9, big);
         assert_eq!((g9.cols, g9.rows, g9.shown), (5, 2, 9), "5 and 4, not 6 and 3");
-        assert_eq!(ovf_size_in(9, big), (16.0 + 200.0, 16.0 + 80.0));
+        assert_eq!(ovf_size_in(9, big), (16.0 + 5.0 * OVF_CELL, 16.0 + 2.0 * OVF_CELL));
         let g30 = ovf_grid(30, big);
         assert_eq!((g30.cols, g30.rows, g30.shown), (6, 5, 30));
-        assert_eq!(ovf_size_in(30, big), (16.0 + 240.0, 16.0 + 200.0));
+        assert_eq!(ovf_size_in(30, big), (16.0 + 6.0 * OVF_CELL, 16.0 + 5.0 * OVF_CELL));
         // the cells of 30 icons fill a 6 x 5 grid, none outside the panel
         let (w, h) = ovf_size_in(30, big);
         for i in 0..30 {
             let [x, y, cw, ch] = ovf_cell_in(30, i, big);
             assert!(x >= OVF_PAD && y >= OVF_PAD && x + cw <= w - OVF_PAD && y + ch <= h - OVF_PAD, "cell {i}");
         }
-        assert_eq!(ovf_cell_in(30, 29, big), [8.0 + 5.0 * 40.0, 8.0 + 4.0 * 40.0, 40.0, 40.0]);
+        assert_eq!(ovf_cell_in(30, 29, big), [8.0 + 5.0 * OVF_CELL, 8.0 + 4.0 * OVF_CELL, OVF_CELL, OVF_CELL]);
     }
 
     #[test]
     fn a_small_screen_gets_a_wider_panel_not_a_taller_one() {
-        // a 1366 x 768 laptop at 100 % (work area 1366 x 728): three quarters of the height is 546 px = 13 rows of 40 px
+        // a 1366 x 768 laptop at 100 % (work area 1366 x 728): three quarters of the height is 546 px = 16 rows of 32 px
         let lim = OvfLimits::for_work(1366.0, 728.0);
         let g = ovf_grid(30, lim);
         assert_eq!((g.cols, g.rows, g.shown), (6, 5, 30), "30 still fit in five rows");
-        // 125 % on a 1920 x 1080 screen: work area 1536 x 854 logical, 640 px high: 15 rows
+        // 125 % on a 1920 x 1080 screen: work area 1536 x 854 logical, 640 px high: 19 rows
         let lim125 = OvfLimits::for_work(1536.0, 854.0);
-        assert_eq!(lim125.max_rows(), 15);
+        assert_eq!(lim125.max_rows(), 19);
         // far more icons than rows: wider, never past the rows the height allows
-        let tall = OvfLimits::for_work(1000.0, 400.0); // 300 px: 7 rows
+        let tall = OvfLimits::for_work(1000.0, 400.0); // 300 px: 8 rows
         let g = ovf_grid(40, tall);
         assert_eq!(g.rows, 7);
         assert_eq!(g.cols, 6, "6 columns x 7 rows hold 40");
         assert_eq!(g.shown, 40);
         let g = ovf_grid(100, tall);
-        assert_eq!((g.rows, g.cols, g.shown), (7, 15, 100));
+        assert_eq!((g.rows, g.cols, g.shown), (8, 13, 100));
     }
 
     #[test]

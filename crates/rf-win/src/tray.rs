@@ -282,6 +282,9 @@ fn menu(hwnd: HWND) {
         let _ = GetCursorPos(&mut pt);
         // required so the menu closes when clicking elsewhere
         let _ = SetForegroundWindow(hwnd);
+        // dark or light as the app is, like its other Windows menus (the tray icon's menu was always light: Discord, 2026-11-23,
+        // "when i right click its light, not dark - despite me having darkmode in win11 and same in rustyfiles")
+        crate::menu_theme::apply();
         let id = TrackPopupMenu(m, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN, pt.x, pt.y, Some(0), hwnd, None);
         let _ = DestroyMenu(m);
         match id.0 {
