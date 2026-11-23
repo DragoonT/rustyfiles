@@ -16,7 +16,6 @@
 
 <p align="center">
   <a href="https://github.com/gelenmedya/rustyfiles/releases/latest"><img alt="Última versão" src="https://img.shields.io/github/v/release/gelenmedya/rustyfiles?label=download&labelColor=232326&color=ff6a1a"></a>
-  <a href="https://github.com/gelenmedya/rustyfiles/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/gelenmedya/rustyfiles/total?label=downloads&labelColor=232326&color=3d3d44"></a>
   <img alt="Windows 11, x64 e ARM64" src="https://img.shields.io/badge/Windows_11-x64_%7C_ARM64-3d3d44?labelColor=232326">
   <a href="LICENSE"><img alt="Licença MIT" src="https://img.shields.io/badge/license-MIT-3d3d44?labelColor=232326"></a>
 </p>
