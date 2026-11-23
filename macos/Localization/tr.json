@@ -886,5 +886,6 @@
 "Choose the files to download": "İndirilecek dosyaları seçin",
 "Choose at least one file": "En az bir dosya seçin",
 "Downloading: %@": "İndiriliyor: %@",
-"The download stopped.": "İndirme durdu."
+"The download stopped.": "İndirme durdu.",
+"This item is still being copied. Rename it when the copy is done.": "Bu öğe hâlâ kopyalanıyor. Kopyalama bitince yeniden adlandırın."
 }

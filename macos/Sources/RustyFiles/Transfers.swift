@@ -108,6 +108,23 @@ enum ConflictDialog {
 /// Stop. Same-volume moves are renames; copies on APFS are clones where they can be (as
 /// Finder does them: instant, no extra space). Runs off the main thread.
 final class Transfer: @unchecked Sendable {
+    /// The items being written by a copy or a move right now (their paths): they are not
+    /// renamed meanwhile, or the copy would go on under the old name (Windows issue 297).
+    private static let arrivingLock = NSLock()
+    nonisolated(unsafe) private static var arriving: Set<String> = []
+
+    static func stillArriving(_ url: URL) -> Bool {
+        arrivingLock.lock()
+        defer { arrivingLock.unlock() }
+        return arriving.contains(url.standardizedFileURL.path)
+    }
+
+    private static func arrive(_ url: URL, _ on: Bool) {
+        arrivingLock.lock()
+        if on { arriving.insert(url.standardizedFileURL.path) } else { arriving.remove(url.standardizedFileURL.path) }
+        arrivingLock.unlock()
+    }
+
     enum Kind: Sendable { case copy, move }
 
     let kind: Kind
@@ -244,6 +261,8 @@ final class Transfer: @unchecked Sendable {
                 done += 1
                 report(card)
             } else {
+                Self.arrive(step.target, true)
+                defer { Self.arrive(step.target, false) }
                 try copy(step.source, to: step.target, card: card)
                 if cancelled {
                     try? fm.removeItem(at: step.target)

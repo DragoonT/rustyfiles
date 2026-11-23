@@ -1314,6 +1314,15 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             field.stringValue = display.name(original: original)
             return
         }
+        // still being copied here: the copy would go on under the old name
+        if archive == nil, Transfer.stillArriving(url.appendingPathComponent(original)) {
+            field.stringValue = display.name(original: original)
+            let a = NSAlert()
+            a.messageText = original
+            a.informativeText = String(localized: "This item is still being copied. Rename it when the copy is done.")
+            a.runModal()
+            return
+        }
         if archive != nil {
             let from = memberPath(original)
             editArchive { try $0.rename(from: from, toName: newName) }
