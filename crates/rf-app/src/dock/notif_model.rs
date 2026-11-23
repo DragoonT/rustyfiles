@@ -17,8 +17,12 @@ pub const PAD: f32 = 12.0;
 pub const HEADER_H: f32 = 44.0;
 /// A program's heading in the list.
 pub const GROUP_H: f32 = 32.0;
-/// What a notification is estimated to be tall (a title and up to three lines of text); the list scrolls when the estimate is passed.
-pub const ITEM_H: f32 = 84.0;
+/// What a notification is tall at most: 8 px of padding above and below, the 2 px ring on both sides, the title's line (20), 2 px, and
+/// up to three lines of text (16 each). It was 84, a row of three lines did not fit, and even one notification scrolled (Discord,
+/// 2026-11-23: "even with a single notification I have to scroll").
+pub const ITEM_H: f32 = 92.0;
+/// The space between the header and the list, and between the rows of the list.
+pub const GAP: f32 = 4.0;
 const MIN_H: f32 = 190.0;
 const MAX_H: f32 = 600.0;
 
@@ -41,10 +45,16 @@ pub fn height(c: Content) -> f32 {
         Content::Loading { items: 0 } | Content::Empty => 96.0,
         Content::NoAccess => 120.0,
         // (a guess of two notifications to a program, until the list has come)
-        Content::Loading { items } => (items.div_ceil(2)) as f32 * GROUP_H + items as f32 * ITEM_H,
-        Content::List { groups, items } => groups as f32 * GROUP_H + items as f32 * ITEM_H,
+        Content::Loading { items } => list(items.div_ceil(2), items),
+        Content::List { groups, items } => list(groups, items),
     };
-    (HEADER_H + body + 2.0 * PAD).clamp(MIN_H, MAX_H)
+    (HEADER_H + GAP + body + 2.0 * PAD).clamp(MIN_H, MAX_H)
+}
+
+/// The list's height: the headings, the rows and the gaps between them all.
+fn list(groups: usize, items: usize) -> f32 {
+    let rows = groups + items;
+    groups as f32 * GROUP_H + items as f32 * ITEM_H + rows.saturating_sub(1) as f32 * GAP
 }
 
 // ------------------------------------------------------------------ words
@@ -174,6 +184,8 @@ mod tests {
         // the guess before the first reading is a list of that many
         assert_eq!(h(Content::Loading { items: 4 }), h(Content::List { groups: 2, items: 4 }));
         assert!(h(Content::List { groups: 3, items: 6 }) <= MAX_H);
+        // one notification of three lines fits without scrolling: header, gap, heading, gap, the row, the padding
+        assert!(h(Content::List { groups: 1, items: 1 }) >= HEADER_H + GAP + GROUP_H + GAP + (16.0 + 4.0 + 20.0 + 2.0 + 3.0 * 16.0) + 2.0 * PAD);
     }
 
     #[test]

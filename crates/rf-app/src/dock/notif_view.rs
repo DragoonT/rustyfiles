@@ -423,7 +423,7 @@ impl NotifView {
         let (now, secondary) = (toasts::now_unix(), look.pal.text_secondary().hsla());
         let today = toasts::local_day(now);
         let groups = self.groups.clone();
-        let mut column = v_flex().id("notif-list").w_full().flex_1().min_h_0().gap(px(4.)).overflow_y_scroll().track_scroll(&self.scroll);
+        let mut column = v_flex().id("notif-list").w_full().flex_1().min_h_0().gap(px(notif_model::GAP)).overflow_y_scroll().track_scroll(&self.scroll);
         for g in &groups {
             let name = if g.app.trim().is_empty() { notif_model::unknown_app(words).to_string() } else { g.app.clone() };
             let picture = self.picture(&g.app_id, &name, look, cx);
@@ -556,7 +556,7 @@ impl Render for NotifView {
         };
         self.snapshot = snap;
 
-        let body = v_flex().size_full().p(px(notif_model::PAD)).gap(px(4.)).opacity(frame.opacity).mt(px(frame.drop_px)).child(header).child(content);
+        let body = v_flex().size_full().p(px(notif_model::PAD)).gap(px(notif_model::GAP)).opacity(frame.opacity).mt(px(frame.drop_px)).child(header).child(content);
         div()
             .id("notifications-panel")
             .relative()
