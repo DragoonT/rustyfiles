@@ -44,8 +44,14 @@ fn note_band(band: Option<i32>) -> bool {
 
 /// The band to start the hider with: what the dock said (`Some`, and inside it `None` for "reserves none"), or `None` when it has not
 /// said anything yet.
-fn current_band() -> Option<Option<i32>> {
+pub(super) fn current_band() -> Option<Option<i32>> {
     *BAND.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// The bands of the docks on the other monitors as the host last said (for the work area the host sets itself with no shell:
+/// `shell::live`).
+pub(super) fn other_bands() -> Vec<(String, i32)> {
+    OTHER_BANDS.lock().unwrap_or_else(|p| p.into_inner()).clone()
 }
 
 /// The dock reserves `band` px at the bottom of the primary monitor (device px), or none (`None`: `dock_reserve` is off). Costs a lock

@@ -170,7 +170,7 @@ guard ran, and killing the dock brought the taskbars back in 110 ms. The user: "
 * the dock's own desktop-toolbar registration with Explorer (`dock/band.rs`) is given back and STAYS given back while the edge is ours
   (a second band on top of ours would be a second strip), and registered again when the taskbar is shown again;
 * "the monitor less a band" is one rule for the two owners of the work area (`tbwork::monitor_less_band`; `shellhost::workarea::target`
-  calls it). The keeper for NO Explorer (`shellhost/workarea.rs`, behind `RUSTYFILES_SET_WORKAREA=1`) is unchanged and not merged with
+  calls it). The keeper for NO Explorer (`shellhost/workarea.rs`; on by default since 0.9.9, one per monitor) is not merged with
   this: with no shell window it is the owner, beside Explorer the hide's controller is.
 
 **Where it applies, and where it does not** (`tbwork::plan_edge`, tested). Only a monitor whose taskbar we hid, only a taskbar on the

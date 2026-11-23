@@ -6,20 +6,21 @@
 //! contains the specified rectangle" (documentation) - to the monitor less its own band. That is what [`WorkAreaKeeper`] decides and
 //! [`SystemSetter`] does.
 //!
-//! IT CHANGES A SYSTEM-WIDE SETTING, so there are three locks and each is tested:
+//! IT CHANGES A SYSTEM-WIDE SETTING, so there are two locks and each is tested:
 //!
 //! 1. [`WorkAreaKeeper::apply`] looks at the shell window AGAIN, through [`ShellState`], immediately before it would set anything, and
 //!    does nothing unless nobody owns it ([`Shell::Nobody`]). Explorer owning it, or another shell, is a no-op for every input.
 //! 2. [`SystemSetter::set`] looks again before the call to Windows and refuses unless nobody owns the shell window.
-//! 3. The caller (`rf-app` `shell/live.rs`) only builds a keeper when the environment variable `RUSTYFILES_SET_WORKAREA=1` is set: there
-//!    is no setting for it, and a host that nobody asked changes nothing.
+//!
+//! The caller (`rf-app` `shell/live.rs`) keeps one keeper per monitor and starts nothing beside Explorer; `RUSTYFILES_SET_WORKAREA=0`
+//! forbids it (until 0.9.8 it was the other way round: only with `=1`).
 //!
 //! The value is NOT written to the profile (`SPIF_UPDATEINIFILE` is not used): it lasts until the session ends or something sets it
 //! again, and Explorer resets it by itself when it comes back. When the band is given back while there is still no shell, the work
 //! area that was there before is put back ([`WorkAreaKeeper::apply`] with no thickness).
 //!
-//! THE REAL PATH WAS NOT RUN in the increment that wrote this (the test machine has Explorer; the tests only show the rule [`permitted`] that
-//! [`SystemSetter`] asks before it calls Windows, and the keeper on a fake).
+//! THE REAL PATH was run on the user's PC on 2026-11-23 (two monitors, no Explorer): set once per monitor, put back at the host's stop.
+//! The tests show the rule [`permitted`] that [`SystemSetter`] asks before it calls Windows, and the keeper on a fake.
 
 use super::appcmd::{Shell, shell_now};
 use crate::dock::layout::Rect;

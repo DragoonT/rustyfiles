@@ -136,7 +136,17 @@ fn own_band() -> Option<Rect> {
 
 /// Tells the placement about a band the host took itself (or that it gave it back).
 pub fn set_own_band(band: Option<Rect>) {
-    *OWN_BAND.lock().unwrap_or_else(|p| p.into_inner()) = band;
+    let changed = {
+        let mut g = OWN_BAND.lock().unwrap_or_else(|p| p.into_inner());
+        let changed = *g != band;
+        *g = band;
+        changed
+    };
+    // the islands are placed from it, so they are placed again when it changed. (The work area's own change says so too, but a work
+    // area that an earlier host left as wanted is adopted without any change, and the islands stayed above their band.)
+    if changed {
+        wake_system();
+    }
 }
 
 // ---------------------------------------------------------------- the bottom edge while the taskbar hide is in force
@@ -239,7 +249,7 @@ struct Ctx {
     /// Explorer's taskbar window as it was when it took our registration (see [`announcement_is_restart`]).
     tray_at_registration: Option<TrayId>,
     /// The edge state the app was last told about, so that taking or giving back the edge is announced once.
-    edge_seen: (bool, Option<Rect>),
+    edge_seen: (bool, Option<Rect>, Option<Rect>),
 }
 
 impl Ctx {
@@ -276,7 +286,7 @@ impl DockSystem {
                 ticks: 0,
                 layout_pending: false,
                 tray_at_registration: None,
-                edge_seen: (false, None),
+                edge_seen: (false, None, None),
             });
             run(ctx, tx);
             let _ = end_tx.send(());
@@ -584,8 +594,9 @@ unsafe extern "system" fn wndproc(hwnd: windows::Win32::Foundation::HWND, msg: u
         match msg {
             WM_RESERVE => {
                 apply_reservation(hwnd, ctx);
-                // the host took or gave back the bottom edge: the islands are placed again (from the edge, or from the work area)
-                let edge = (APPBAR_SUPPRESSED.load(Ordering::SeqCst), edge_band());
+                // the host took or gave back the bottom edge (beside Explorer, or by itself with no shell: the own band): the islands are
+                // placed again (from the edge, or from the work area)
+                let edge = (APPBAR_SUPPRESSED.load(Ordering::SeqCst), edge_band(), own_band());
                 if edge != ctx.edge_seen {
                     ctx.edge_seen = edge;
                     ctx.emit(SystemEvent::LayoutChanged);

@@ -978,11 +978,14 @@ pub(super) fn apply_secondary_bands(cx: &mut App) {
         }
     }
     crate::shell::taskbar_hide::other_bands_changed(list, cx);
+    // (with no shell the host keeps these monitors' work areas itself)
+    crate::shell::live::layout_changed(cx);
 }
 
 /// Looks at whether our hide of Explorer's taskbar is in force (the layout of a secondary dock depends on it).
 fn refresh_hide_flag(cx: &mut App) {
-    let force = crate::shell::taskbar_hide::in_force(cx);
+    // (or the host holds the work areas itself, with no shell at all: the same bands, the same placement; see shell::live)
+    let force = crate::shell::taskbar_hide::in_force(cx) || crate::shell::live::holds_edges();
     if let Some(host) = host_mut(cx) {
         host.hide_in_force = force;
     }
@@ -1004,6 +1007,8 @@ fn apply_home_reserve(cx: &mut App) {
     };
     // with Explorer's taskbar hidden by us the host sets the work area itself, from this band (see shell::taskbar_hide)
     crate::shell::taskbar_hide::band_changed(band, cx);
+    // (and with no shell at all: see shell::live)
+    crate::shell::live::layout_changed(cx);
 }
 
 fn on_system_event(ev: SystemEvent, cx: &mut App) {
@@ -1037,7 +1042,7 @@ fn on_system_event(ev: SystemEvent, cx: &mut App) {
             request_layout(cx);
             // the desktop's windows follow the monitors, once they have been quiet (see shell::cover)
             crate::shell::cover::layout_changed(cx);
-            // the work area the host sets itself follows the band's size (only with RUSTYFILES_SET_WORKAREA=1, see shell::live)
+            // the work areas the host sets itself with no shell follow the bands and the monitors (see shell::live)
             crate::shell::live::layout_changed(cx);
         }
         SystemEvent::ThemeChanged => {

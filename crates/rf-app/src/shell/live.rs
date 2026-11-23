@@ -8,16 +8,19 @@
 //! | the dock's band | needs no telling: `rf_win::dock::system` handles `TaskbarCreated` itself (registers the band again, `band.rs`) |
 //! | the desktop cover | places its windows again at once (bottom of the z-order without a shell desktop, directly above it with one) and reads the wallpaper by the route that fits: [`super::cover::shell_changed`] |
 //! | the media and volume keys | [`sync_keys`]: a hidden shell-hook window exists only while nobody owns the shell window |
-//! | the work area | [`sync_work_area`]: only with `RUSTYFILES_SET_WORKAREA=1`, only with no shell, never beside Explorer |
+//! | the work area | [`sync_work_area`]: only with no shell, never beside Explorer; every monitor with a dock gets the monitor less its dock's band, and the islands stand on the screen's bottom edge (`RUSTYFILES_SET_WORKAREA=0` leaves the work area alone) |
 //! | minimized windows | [`sync_minimized`]: with no shell window at all, Windows is told to hide minimized windows (`ARW_HIDE`) as a shell does, instead of drawing them as small title bars at the bottom left; put back when the host ends; `RUSTYFILES_KEEP_MINIMIZED=1` leaves it alone |
 //!
 //! COST. With Explorer running and nothing changing this module does nothing at all: no thread, no window, no timer. A change costs one
 //! worker thread per part for as long as the part's work takes. Switches: the keys follow the shell window by themselves (they act only
-//! where, without them, the keys would be dead); the work area is opt-in by the environment variable above, because it changes a
-//! system-wide setting and there is no Settings row for it.
+//! where, without them, the keys would be dead); the work area follows the shell window the same way (it was opt-in by the variable
+//! until 0.9.8; WHY it is not any more: with Explorer closed, the strip its taskbar had reserved stays in the work area and nobody
+//! answers the dock's own registration, so the dock floated a taskbar's height above the bottom edge with a gap under it. Seen on the
+//! user's PC on 2026-11-23). It is the session's work area, never written to the profile, put back when the host ends, and Explorer
+//! sets its own again when it comes back.
 
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use gpui_kit::App;
 use rf_win::dock::layout::Rect;
@@ -29,12 +32,12 @@ use rf_win::shellhost::workarea::{Done, ShellState, SystemSetter, SystemShell, W
 
 use crate::settings::Settings;
 
-/// The environment variable that lets the host set the work area itself when no shell is running.
+/// The environment variable that keeps the host from setting the work area itself when no shell is running (`0`).
 pub const ENV_WORK_AREA: &str = "RUSTYFILES_SET_WORKAREA";
 
-/// Whether the variable's value asks for it: exactly `1`.
+/// Whether the host may set the work area with no shell: yes, unless the variable's value is exactly `0`.
 pub fn work_area_wanted(value: Option<&str>) -> bool {
-    value.is_some_and(|v| v.trim() == "1")
+    value.is_none_or(|v| v.trim() != "0")
 }
 
 const UNKNOWN: u8 = 255;
@@ -71,7 +74,16 @@ pub fn change_line(before: Option<ShellMode>, now: ShellMode) -> Option<String> 
 }
 
 static HOOK: Mutex<Option<ShellHook>> = Mutex::new(None);
-static WORK: Mutex<Option<WorkAreaKeeper>> = Mutex::new(None);
+/// The keepers of the work areas the host set itself, one per monitor (by its device name).
+static WORK: Mutex<Vec<(String, WorkAreaKeeper)>> = Mutex::new(Vec::new());
+/// A keeper holds a work area now (or is about to): the docks then stand on their monitors' bottom edges, inside the bands the host
+/// told (`dock::host::area_of`).
+static HOLDS: AtomicBool = AtomicBool::new(false);
+
+/// Whether the host itself holds work areas now, with no shell (see [`sync_work_area`]).
+pub fn holds_edges() -> bool {
+    HOLDS.load(Ordering::Relaxed)
+}
 static MINIMIZED: Mutex<Option<MinimizedKeeper>> = Mutex::new(None);
 
 /// The host's start, after its windows exist: brings the parts in line with the mode it started in.
@@ -95,15 +107,15 @@ pub fn on_shell_changed(mode: ShellMode, cx: &mut App) {
     sync_work_area(cx);
 }
 
-/// The dock's layout changed (the band may have to follow). Costs a comparison when the work area is not asked for.
+/// The dock's layout changed, or a dock's band did (the work areas the host keeps follow). Beside Explorer it costs a comparison.
 pub fn layout_changed(cx: &mut App) {
-    if work_area_wanted(std::env::var(ENV_WORK_AREA).ok().as_deref()) {
-        sync_work_area(cx);
-    }
+    sync_work_area(cx);
 }
 
-/// How long [`stop`] waits for the hook to end and the work area to be given back.
-const STOP_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+/// How long [`stop`] waits for the hook to end and the work areas to be given back. Each monitor's work area is one broadcast that
+/// waits for every program's answer: with two monitors 2 s was passed in the live run of 2026-11-23 (the second monitor's was given
+/// back after the warning; a host that had ended sooner would have left it).
+const STOP_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Runs `job` on a thread of its own and waits for it at most `wait`. True: it finished in time. False: it is still running (or the
 /// thread did not start) and the caller goes on; the job is not cut short.
@@ -127,13 +139,17 @@ pub fn stop(cx: &mut App) {
             log::info!("{line}");
         }
         let mut g = WORK.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some(k) = g.as_mut()
-            && k.active()
-            && let Some(m) = rf_win::dock::primary_monitor()
-        {
-            let done = k.apply(&SystemShell, &mut SystemSetter, None, m.rect, m.work);
-            log::info!("work area: on stop {done:?}");
+        if g.iter().any(|(_, k)| k.active()) {
+            let displays = rf_win::dock::monitors::displays();
+            for (name, k) in g.iter_mut().filter(|(_, k)| k.active()) {
+                if let Some(d) = displays.iter().find(|d| d.name == *name) {
+                    let done = k.apply(&SystemShell, &mut SystemSetter, None, d.info.rect, d.info.work);
+                    log::info!("work area of {name}: on stop {done:?}");
+                }
+            }
         }
+        g.clear();
+        HOLDS.store(false, Ordering::Relaxed);
     });
     if !done {
         log::warn!("shell host: the hook and the work area were still being given back after {} s; the host goes on", STOP_WAIT.as_secs());
@@ -179,6 +195,11 @@ fn sync_minimized() {
         if let Some(line) = minimized_sync(&mut g, &SystemShell, &mut SystemMetrics) {
             log::info!("{line}");
         }
+        // (the windows that were minimized before the setting stood are still small title bars: they are hidden too)
+        let moved = minimized::park_shown_bars();
+        if moved > 0 {
+            log::info!("shell host: {moved} minimized window(s) still shown as title bars were hidden");
+        }
     });
     if let Err(e) = spawned {
         log::warn!("shell host: the minimized-windows thread did not start: {e}");
@@ -204,7 +225,8 @@ fn minimized_stop(slot: &mut Option<MinimizedKeeper>, state: &dyn ShellState, ap
     Some(format!("minimized windows: on stop {:?}", k.apply(state, api, false)))
 }
 
-/// The thickness of the dock's band for the work area, device px (`None`: no band wanted).
+/// The thickness of the home dock's band from the settings alone, device px (`None`: no band wanted). Only for the moment before the
+/// dock has said its band itself (`taskbar_hide::current_band`, which knows the thin band and a size fitted to a narrow monitor).
 fn band_thickness(cx: &App) -> Option<i32> {
     let s = cx.try_global::<Settings>()?;
     if !s.dock_reserve {
@@ -215,29 +237,96 @@ fn band_thickness(cx: &App) -> Option<i32> {
     Some(rf_win::dock::layout::reserved_thickness(unit))
 }
 
-/// Sets (or gives back) the work area itself, when it is asked for and nobody owns the shell window. A worker thread: the call
-/// broadcasts the change and may wait for programs that are slow to answer.
+/// One monitor of [`work_plan`]: its device name, its rectangle, its work area now, and the band its dock keeps (device px).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkWant {
+    pub name: String,
+    pub primary: bool,
+    pub monitor: Rect,
+    pub work: Rect,
+    pub band: i32,
+}
+
+/// The monitors whose work area the host keeps while there is no shell, pure. The primary monitor always (the home dock stands on
+/// it): its band is `home`, or nothing when the dock reserves none (`dock_reserve` off; the keeper then leaves the whole monitor
+/// less one pixel, and the islands still stand on the bottom edge). Another monitor only when a dock on it reserves a band (`others`,
+/// by device name). A monitor that is in no list keeps the work area it has.
+pub fn work_plan(displays: &[rf_win::dock::monitors::Display], home: Option<i32>, others: &[(String, i32)]) -> Vec<WorkWant> {
+    displays
+        .iter()
+        .filter_map(|d| {
+            let band = if d.primary { Some(home.unwrap_or(0)) } else { others.iter().find(|(n, _)| *n == d.name).map(|(_, b)| *b) }?;
+            Some(WorkWant { name: d.name.clone(), primary: d.primary, monitor: d.info.rect, work: d.info.work, band })
+        })
+        .collect()
+}
+
+/// Sets (or gives back) the work areas itself, when nobody owns the shell window. A worker thread: the call broadcasts the change and
+/// may wait for programs that are slow to answer. Beside Explorer with nothing of ours in force it returns at once, with no thread.
 fn sync_work_area(cx: &App) {
     if !work_area_wanted(std::env::var(ENV_WORK_AREA).ok().as_deref()) {
         return;
     }
-    let thickness = band_thickness(cx);
+    if current() != Some(ShellMode::Shell) && !holds_edges() {
+        return;
+    }
+    let home = super::taskbar_hide::current_band().unwrap_or_else(|| band_thickness(cx));
+    let others = super::taskbar_hide::other_bands();
     let spawned = std::thread::Builder::new().name("rf-workarea-sync".into()).spawn(move || {
-        let Some(m) = rf_win::dock::primary_monitor() else { return };
         let mut g = WORK.lock().unwrap_or_else(|p| p.into_inner());
-        let k = g.get_or_insert_with(WorkAreaKeeper::new);
-        // the band is told to the dock's placement BEFORE the work area shrinks, so that the islands are not worked out from the
-        // shrunken area (they float inside the band)
-        if let Some(t) = thickness {
-            rf_win::dock::system::set_own_band(Some(Rect { top: m.rect.bottom - t, ..m.rect }));
+        // (the monitors are looked at with the lock held: a thread that looked before waiting for the one ahead of it had the work
+        // area from before that one's change and set the same rectangle again; seen in the first live run, two and three times)
+        let displays = rf_win::dock::monitors::displays();
+        // (a list with no primary monitor is the system not being able to list them for a moment: nothing is decided from it)
+        if !rf_win::dock::monitors::usable(&displays) {
+            return;
         }
-        match k.apply(&SystemShell, &mut SystemSetter, thickness, m.rect, m.work) {
-            Done::Nothing => {
-                if !k.active() {
-                    rf_win::dock::system::set_own_band(None);
+        // A shell window has an owner (Explorer came back): the work areas are its own again. Every keeper forgets what it did (that
+        // is what `apply` does for a shell that is there) and the islands are placed from the work area as beside Explorer.
+        if shell_now() != Shell::Nobody {
+            for (name, k) in g.iter_mut() {
+                if let Some(d) = displays.iter().find(|d| d.name == *name) {
+                    let _ = k.apply(&SystemShell, &mut SystemSetter, None, d.info.rect, d.info.work);
                 }
             }
-            done => log::info!("work area: {done:?}"),
+            g.clear();
+            HOLDS.store(false, Ordering::Relaxed);
+            rf_win::dock::system::set_own_band(None);
+            return;
+        }
+        let plan = work_plan(&displays, home, &others);
+        // a monitor that left the plan (its dock went, or reserves nothing now) gets back what it had; one that is gone is forgotten
+        for (name, k) in g.iter_mut() {
+            if k.active()
+                && !plan.iter().any(|w| w.name == *name)
+                && let Some(d) = displays.iter().find(|d| d.name == *name)
+            {
+                let done = k.apply(&SystemShell, &mut SystemSetter, None, d.info.rect, d.info.work);
+                log::info!("work area of {name}: {done:?}");
+            }
+        }
+        g.retain(|(name, _)| plan.iter().any(|w| w.name == *name));
+        // The bands are told to the docks' placement BEFORE the work areas shrink, so that the islands are not worked out from the
+        // shrunken area (they float inside the band): the home dock's as its own band, the others' by the flag the host reads.
+        if let Some(w) = plan.iter().find(|w| w.primary) {
+            rf_win::dock::system::set_own_band(Some(Rect { top: w.monitor.bottom - w.band.max(1), ..w.monitor }));
+        }
+        HOLDS.store(!plan.is_empty(), Ordering::Relaxed);
+        for w in &plan {
+            if !g.iter().any(|(n, _)| *n == w.name) {
+                g.push((w.name.clone(), WorkAreaKeeper::new()));
+            }
+            let Some((_, k)) = g.iter_mut().find(|(n, _)| *n == w.name) else { continue };
+            match k.apply(&SystemShell, &mut SystemSetter, Some(w.band), w.monitor, w.work) {
+                Done::Nothing => {}
+                done => log::info!("work area of {}: {done:?}", w.name),
+            }
+        }
+        // (what is really held: a call Windows refused, or a shell that came in between, leaves nothing)
+        HOLDS.store(g.iter().any(|(_, k)| k.active()), Ordering::Relaxed);
+        let home_held = plan.iter().find(|w| w.primary).is_some_and(|w| g.iter().any(|(n, k)| *n == w.name && k.active()));
+        if !home_held {
+            rf_win::dock::system::set_own_band(None);
         }
     });
     if let Err(e) = spawned {
@@ -250,13 +339,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_work_area_is_asked_for_by_a_one_only() {
-        assert!(!work_area_wanted(None));
-        assert!(!work_area_wanted(Some("")));
-        assert!(!work_area_wanted(Some("0")));
-        assert!(!work_area_wanted(Some("true")));
+    fn the_work_area_is_kept_unless_a_zero_forbids_it() {
+        assert!(work_area_wanted(None));
+        assert!(work_area_wanted(Some("")));
         assert!(work_area_wanted(Some("1")));
-        assert!(work_area_wanted(Some(" 1 ")));
+        assert!(work_area_wanted(Some("true")));
+        assert!(!work_area_wanted(Some("0")));
+        assert!(!work_area_wanted(Some(" 0 ")));
+    }
+
+    fn display(name: &str, primary: bool, rect: Rect, work: Rect) -> rf_win::dock::monitors::Display {
+        rf_win::dock::monitors::Display { name: name.into(), info: rf_win::dock::MonitorInfo { handle: 1, rect, work, dpi: 96 }, primary }
+    }
+
+    #[test]
+    fn every_monitor_with_a_dock_band_is_kept_and_the_primary_always() {
+        // the user's desk on 2026-11-23: Explorer closed, its taskbar's 48 px still out of both work areas
+        let (m1, m2) = (Rect::new(0, 0, 2560, 1440), Rect::new(2560, -618, 4000, 1942));
+        let d = [display("A", true, m1, Rect { bottom: 1392, ..m1 }), display("B", false, m2, Rect { bottom: 1894, ..m2 })];
+        let plan = work_plan(&d, Some(78), &[("B".into(), 78)]);
+        assert_eq!(plan.len(), 2);
+        assert_eq!((plan[0].name.as_str(), plan[0].primary, plan[0].band, plan[0].work.bottom), ("A", true, 78, 1392));
+        assert_eq!((plan[1].name.as_str(), plan[1].primary, plan[1].band), ("B", false, 78));
+        // a second monitor whose dock reserves nothing (or that has no dock) is left as it is
+        assert_eq!(work_plan(&d, Some(78), &[]).iter().map(|w| w.name.as_str()).collect::<Vec<_>>(), ["A"]);
+        // the home dock reserves nothing: the primary is still kept (band 0), so the islands stand on the bottom edge
+        assert_eq!(work_plan(&d, None, &[]).iter().map(|w| (w.name.as_str(), w.band)).collect::<Vec<_>>(), [("A", 0)]);
     }
 
     #[test]
@@ -353,15 +461,17 @@ mod tests {
         init(ShellMode::Beside);
     }
 
-    /// The only place a work area is set by this host is `sync_work_area`, behind the environment variable, and the real setter is made
-    /// nowhere else in the app.
+    /// The only place a work area is set by this host is `sync_work_area` (and given back in `stop`): the variable can forbid it, a
+    /// shell that is there stops it before any thread starts, and the real setter is made nowhere else in the app.
     #[test]
-    fn the_real_work_area_setter_is_reached_only_from_here_and_only_behind_the_variable() {
+    fn the_real_work_area_setter_is_reached_only_from_here_and_only_with_no_shell() {
         let here = include_str!("live.rs");
         let code = &here[..here.find("#[cfg(test)]").unwrap()];
-        assert_eq!(code.matches("SystemSetter").count(), 3, "the import and the two uses, in stop and in sync_work_area");
+        assert_eq!(code.matches("SystemSetter").count(), 5, "the import, the use in stop and the three in sync_work_area");
         let sync = &code[code.find("fn sync_work_area").unwrap()..];
         assert!(sync[..200].contains("work_area_wanted"), "the variable is checked first");
+        let (mode, thread) = (sync.find("current() != Some(ShellMode::Shell)").unwrap(), sync.find("thread::Builder").unwrap());
+        assert!(mode < thread, "beside Explorer nothing starts");
         for other in [include_str!("mod.rs"), include_str!("cover.rs"), include_str!("../dock/host.rs"), include_str!("../lib.rs")] {
             assert!(!other.contains("SystemSetter"), "another file reaches the real setter");
         }

@@ -223,10 +223,75 @@ impl MetricsApi for SystemMetrics {
     }
 }
 
+/// Where Windows keeps a hidden minimized window.
+const PARKED: i32 = -32000;
+
+/// Whether a window is one of the small title bars: minimized, visible, and its bar still on the desktop (a hidden one is at
+/// [`PARKED`]; anything left of -30000 counts as hidden).
+pub fn is_shown_bar(iconic: bool, visible: bool, left: i32, top: i32) -> bool {
+    iconic && visible && left > -30000 && top > -30000
+}
+
+/// Moves the minimized windows that are still drawn as small title bars to where Windows keeps hidden ones. WHY: `ARW_HIDE` only
+/// decides where a window goes when it is minimized; the ones minimized before it was set (Explorer just closed, or no host was
+/// running for a moment) stayed as bars at the bottom left of the screen (the user, 2026-11-23: "sol altta küçük pencereler var").
+/// Only with no shell window and only while the metrics hide minimized windows: the same two looks the keeper takes. A window stays
+/// minimized and is restored as ever; only the place of its bar changes, to (-32000, -32000), where Windows itself puts every window
+/// minimized while the setting stands. The bar is moved with `SetWindowPos`. TRIED on the user's PC on 2026-11-23, on four bars:
+/// `SetWindowPlacement` with `WPF_SETMINPOSITION` at that place does NOT do it (Windows brings the place back onto the screen, and the
+/// four bars went from the bottom left to the top left corner); `SetWindowPos` moved each one off the screen and left it minimized.
+/// A window whose program does not answer is skipped. Returns how many are off the screen afterwards. Call it off the interface thread.
+pub fn park_shown_bars() -> usize {
+    use windows::Win32::Foundation::{HWND, LPARAM, RECT};
+    use windows::core::BOOL;
+    use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowRect, IsHungAppWindow, IsIconic, IsWindowVisible, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos};
+    if !permitted(shell_now(), Write::Hide) || !SystemMetrics.get().is_some_and(|m| m.hidden()) {
+        return 0;
+    }
+    unsafe extern "system" fn each(h: HWND, l: LPARAM) -> BOOL {
+        unsafe {
+            let mut r = RECT::default();
+            if GetWindowRect(h, &mut r).is_ok() && is_shown_bar(IsIconic(h).as_bool(), IsWindowVisible(h).as_bool(), r.left, r.top) && !IsHungAppWindow(h).as_bool() {
+                (*(l.0 as *mut Vec<isize>)).push(h.0 as isize);
+            }
+        }
+        BOOL(1)
+    }
+    let mut bars: Vec<isize> = Vec::new();
+    // SAFETY: `bars` outlives the call.
+    unsafe {
+        let _ = EnumWindows(Some(each), LPARAM(&mut bars as *mut Vec<isize> as isize));
+    }
+    let mut moved = 0;
+    for h in bars {
+        let h = HWND(h as *mut _);
+        // SAFETY: a window handle that may be gone by now; the calls then fail and nothing happens. (Looked at again: it may have
+        // been restored since the list was made, and a restored window must not be moved.)
+        unsafe {
+            if IsIconic(h).as_bool() && SetWindowPos(h, None, PARKED, PARKED, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE).is_ok() {
+                let mut r = RECT::default();
+                if GetWindowRect(h, &mut r).is_ok() && !is_shown_bar(true, true, r.left, r.top) {
+                    moved += 1;
+                }
+            }
+        }
+    }
+    moved
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::cell::Cell;
+
+    #[test]
+    fn only_a_minimized_window_whose_bar_is_on_the_desktop_is_a_shown_bar() {
+        assert!(is_shown_bar(true, true, 0, 1400));
+        assert!(is_shown_bar(true, true, 2560, -200), "on a monitor above or beside the primary one");
+        assert!(!is_shown_bar(true, true, -32000, -32000), "already hidden");
+        assert!(!is_shown_bar(false, true, 100, 100), "not minimized");
+        assert!(!is_shown_bar(true, false, 100, 100), "not visible");
+    }
 
     struct State(Cell<Shell>);
     impl ShellState for State {
