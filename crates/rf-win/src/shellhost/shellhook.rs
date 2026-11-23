@@ -34,6 +34,63 @@ struct State {
     message: u32,
 }
 
+/// `HSHELL_GETMINRECT` (winuser.h): "a window is being minimized or maximized. The system needs the coordinates of the minimized
+/// rectangle for the window." `lParam` points to a `SHELLHOOKINFO` (the window and a rectangle to fill in).
+pub const HSHELL_GETMINRECT: usize = 5;
+
+/// Where each window goes when it is minimized: the place of its app's icon, per island (`island` is whatever its owner tells
+/// them apart by; each monitor's dock has one). Screen coordinates, device px: (window, [left, top, right, bottom]).
+///
+/// WHY: with no Explorer the minimize animation flies to wherever the shell says the window's button is. Once this host hid the
+/// minimized windows (the task manager window below), nobody answered that question any more and Windows minimized with no
+/// animation at all (the user, 2026-11-24: "küçültme animasyonu çalışmıyor").
+static MIN_TARGETS: std::sync::Mutex<Vec<(u32, Vec<(isize, [i32; 4])>)>> = std::sync::Mutex::new(Vec::new());
+
+/// The island `island` says where its windows' icons are now (an empty list: it has none, or it is gone).
+pub fn set_min_targets(island: u32, targets: Vec<(isize, [i32; 4])>) {
+    let mut all = MIN_TARGETS.lock().unwrap_or_else(|p| p.into_inner());
+    all.retain(|(i, _)| *i != island);
+    if !targets.is_empty() {
+        all.push((island, targets));
+    }
+}
+
+/// The icon a window minimizes to: of the islands that show it, the one for which `on_windows_monitor` holds (the island on the
+/// monitor the window is on), else the first. `None`: no island shows this window.
+pub fn min_target(all: &[(u32, Vec<(isize, [i32; 4])>)], hwnd: isize, on_windows_monitor: &dyn Fn(&[i32; 4]) -> bool) -> Option<[i32; 4]> {
+    let mut found = all.iter().filter_map(|(_, list)| list.iter().find(|(h, _)| *h == hwnd).map(|(_, r)| *r));
+    let first = found.next()?;
+    if on_windows_monitor(&first) {
+        return Some(first);
+    }
+    Some(found.find(|r| on_windows_monitor(r)).unwrap_or(first))
+}
+
+/// Answers `HSHELL_GETMINRECT`: fills the rectangle in and says so. `false`: not a window of ours to place (Windows does as it
+/// would alone).
+unsafe fn answer_min_rect(lp: isize) -> bool {
+    use windows::Win32::Foundation::{POINT, RECT};
+    use windows::Win32::Graphics::Gdi::{MONITOR_DEFAULTTONEAREST, MonitorFromPoint, MonitorFromWindow};
+    use windows::Win32::UI::WindowsAndMessaging::SHELLHOOKINFO;
+    if lp == 0 {
+        return false;
+    }
+    unsafe {
+        let info = &mut *(lp as *mut SHELLHOOKINFO);
+        let mon = MonitorFromWindow(info.hwnd, MONITOR_DEFAULTTONEAREST);
+        let same = |r: &[i32; 4]| MonitorFromPoint(POINT { x: (r[0] + r[2]) / 2, y: (r[1] + r[3]) / 2 }, MONITOR_DEFAULTTONEAREST) == mon;
+        let all = MIN_TARGETS.lock().unwrap_or_else(|p| p.into_inner());
+        match min_target(&all, info.hwnd.0 as isize, &same) {
+            Some(r) => {
+                info.rc = RECT { left: r[0], top: r[1], right: r[2], bottom: r[3] };
+                log::info!("shell hook: window {:#x} minimizes to {r:?}", info.hwnd.0 as isize);
+                true
+            }
+            None => false,
+        }
+    }
+}
+
 /// The hook window and its threads. Dropping it stops them.
 pub struct ShellHook {
     hwnd: isize,
@@ -210,9 +267,33 @@ unsafe extern "system" fn wndproc(hwnd: windows::Win32::Foundation::HWND, msg: u
                 if wp.0 == HSHELL_APPCOMMAND {
                     let _ = (*ptr).tx.send(appcmd::command_of_lparam(lp.0));
                 }
+                if wp.0 == HSHELL_GETMINRECT && answer_min_rect(lp.0) {
+                    return LRESULT(1);
+                }
                 LRESULT(0)
             }
             _ => DefWindowProcW(hwnd, msg, wp, lp),
         }
+    }
+}
+
+#[cfg(test)]
+mod min_target_tests {
+    use super::min_target;
+
+    #[test]
+    fn a_window_minimizes_to_its_icon_on_its_own_monitor() {
+        let home = [900, 1366, 960, 1448];
+        let second = [2900, 1868, 2960, 1950];
+        let all = vec![(0u32, vec![(11isize, home), (12, [960, 1366, 1020, 1448])]), (1u32, vec![(11isize, second)])];
+        let on_second = |r: &[i32; 4]| r[0] >= 2560;
+        let on_home = |r: &[i32; 4]| r[0] < 2560;
+        assert_eq!(min_target(&all, 11, &on_home), Some(home));
+        assert_eq!(min_target(&all, 11, &on_second), Some(second));
+        // shown by one island only: that one, wherever the window is
+        assert_eq!(min_target(&all, 12, &on_second), Some([960, 1366, 1020, 1448]));
+        // a window no island shows is not ours to place
+        assert_eq!(min_target(&all, 99, &on_home), None);
+        assert_eq!(min_target(&[], 11, &on_home), None);
     }
 }

@@ -157,6 +157,8 @@ pub struct MiddleIsland {
     /// Counts the showings of a level: the timer that ends one ends only its own.
     vol_serial: u64,
     rest_items: Vec<(f32, f32)>,
+    /// What the minimize targets were last told for (see `tell_min_targets`): the glass's place and the unit; `None` asks for a telling.
+    min_told: Option<(i32, i32, i32, u32)>,
     /// The glass and the icons' boxes as they were drawn last (dock units, the window's coordinates): what a right click is told
     /// "empty glass" or "an icon" by.
     last_glass: [f32; 4],
@@ -257,6 +259,7 @@ impl MiddleIsland {
             vol_rest: (String::new(), 0.0),
             vol_serial: 0,
             rest_items: Vec::new(),
+            min_told: None,
             last_glass: [0.0; 4],
             last_icons: Vec::new(),
             feedback: feedback::Feedback::default(),
@@ -370,6 +373,8 @@ impl MiddleIsland {
         // the slides after a drop and a press stay as they are; apps that came or went change the indices they go by
         let same_shape = items.len() == self.items.len() && items.iter().zip(&self.items).all(|(a, b)| item_name(a) == item_name(b));
         self.items = items;
+        // (other windows, or the same ones under other icons)
+        self.min_told = None;
         if !same_shape {
             // (an icon in the hand is put down where it was)
             if self.drag.take().is_some() {
@@ -625,6 +630,26 @@ impl MiddleIsland {
             Some(set) => Some(set.pick(logical_px * host::env_on(self.mon, cx).scale).clone()),
             None => self.icons.get(key),
         }
+    }
+
+    /// Tells the shell hook where each window of this island's apps goes when it is minimized: its app's icon at rest, on the screen
+    /// (`rf_win::shellhost::shellhook::set_min_targets`: with no Explorer, Windows asks the shell for that place and animates the
+    /// window to it). Called on every frame, it does work only when the windows, the layout at rest or the glass's place changed.
+    fn tell_min_targets(&mut self, cx: &App) {
+        let Some(glass) = host::visible_glass_rect_on(self.mon, Kind::Middle, cx) else { return };
+        let unit = host::env_on(self.mon, cx).unit();
+        let now = (glass.left, glass.top, glass.bottom, unit.to_bits());
+        if self.min_told == Some(now) {
+            return;
+        }
+        self.min_told = Some(now);
+        let mut targets = Vec::new();
+        for (item, &(x, w)) in self.items.iter().zip(&self.rest_items) {
+            let DockItem::App(a) = item else { continue };
+            let (left, right) = min_target_span(glass.left, x, w, unit);
+            targets.extend(a.windows.iter().map(|&h| (h, [left, glass.top, right, glass.bottom])));
+        }
+        rf_win::shellhost::shellhook::set_min_targets(self.mon.0, targets);
     }
 
     /// The centre of item `ix` at rest, device px in screen coordinates: the rest glass's left edge plus the rest layout's distance from it.
@@ -1063,6 +1088,11 @@ fn screen_center_x(glass_left: i32, x: f32, w: f32, unit: f32) -> f32 {
     glass_left as f32 + (x + w / 2.0) * unit
 }
 
+/// The left and right edge on the screen (device px) of an item that stands `x` from the glass's left edge and is `w` wide at rest.
+fn min_target_span(glass_left: i32, x: f32, w: f32, unit: f32) -> (i32, i32) {
+    ((glass_left as f32 + x * unit).round() as i32, (glass_left as f32 + (x + w) * unit).round() as i32)
+}
+
 /// Whether a pointer move over the dock is worth a frame: never with the magnification off; always when the bell starts or is still
 /// moving; otherwise only when the pointer moved by `MIN_MOVE` (logical px) or more.
 fn move_needs_frame(strength: magnify::Strength, entering: bool, delta: f32, settled: bool) -> bool {
@@ -1191,7 +1221,11 @@ impl Render for MiddleIsland {
         let labels = cx.try_global::<crate::settings::Settings>().is_some_and(|s| s.dock_labels);
         let baseline = BASELINE + if labels { LABEL_H } else { 0.0 };
         let pic = super::thin::picture(&frame, &self.slots, inset.margins, baseline, &sq);
+        if self.rest_items != rest {
+            self.min_told = None;
+        }
         self.rest_items.clone_from(&rest);
+        self.tell_min_targets(cx);
         // (what a drag measures the pointer against)
         self.last_slots.clone_from(&pic.items);
         // what a right click is judged by: the glass and the icons as they are drawn in this frame
@@ -1614,6 +1648,17 @@ mod tests {
         assert!(move_needs_frame(Full, false, 3.0, true));
         assert!(!move_needs_frame(Full, false, MIN_MOVE - 0.01, true));
         assert!(!move_needs_frame(Full, false, 0.0, true));
+    }
+
+    #[test]
+    fn a_minimize_target_is_the_icon_at_rest_on_the_screen() {
+        // an icon 48 wide that stands 100 from the glass's left edge, glass at 811 on the screen
+        use super::min_target_span;
+        assert_eq!(min_target_span(811, 100.0, 48.0, 1.0), (911, 959));
+        // at 150 % every logical px is one and a half device px
+        assert_eq!(min_target_span(811, 100.0, 48.0, 1.5), (961, 1033));
+        let (l, r) = min_target_span(2811, 0.0, 48.0, 1.25);
+        assert_eq!((l, r - l), (2811, 60));
     }
 
     #[test]
