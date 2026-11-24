@@ -369,6 +369,106 @@ pub enum Arrival {
     Home,
 }
 
+/// The spring a standing panel's glass changes its size on: the time the change is felt to take and how far it swings past its end
+/// (the numbers of the control centre's details, `cc_model::UNFOLD_MS`, so the right island's panels move alike).
+pub const RESIZE_MS: f32 = 380.0;
+pub const RESIZE_BOUNCE: f32 = 0.25;
+/// How far past its place an edge that started at rest can swing, as a part of its way (the spring's first swing is 2.8 % with this
+/// bounce; a little over, so the window always holds it).
+const RESIZE_SWING: f32 = 0.04;
+
+/// The grown glass on its way from one size to another WHILE THE PANEL STANDS (its content got shorter or taller: a notification
+/// went, "clear all" emptied the list, a new one arrived). Each edge moves on the same spring from where it was to where it now
+/// belongs, so an edge the two sizes share (the island's row, the anchored side) does not move at all, and a change that comes while
+/// the glass is still moving starts from where the glass is and as fast as it moves.
+///
+/// WHY: the window was simply placed again with its new size, so the box jumped (the user: "kutunun küçülmesi spring olmalı,
+/// büyümesi filan"). Pure: the time is the caller's, in ms.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Resize {
+    /// How far each edge (left, top, right, bottom) was from its place when this began (device px), and how fast it moved (px per ms).
+    off: [f32; 4],
+    vel: [f32; 4],
+    started_ms: u64,
+    settle_ms: u32,
+}
+
+fn edges(r: FRect) -> [f32; 4] {
+    [r[0], r[1], r[0] + r[2], r[1] + r[3]]
+}
+
+fn edges_of(r: Rect) -> [f32; 4] {
+    [r.left as f32, r.top as f32, r.right as f32, r.bottom as f32]
+}
+
+impl Resize {
+    fn spring() -> super::spring::Spring {
+        super::spring::Spring::new(RESIZE_MS, RESIZE_BOUNCE)
+    }
+
+    /// From the glass as it is now (`glass`: x, y, w, h) with its edges moving at `vel`, to the rectangle `to`.
+    pub fn start(glass: FRect, vel: [f32; 4], to: Rect, now_ms: u64) -> Resize {
+        let (from, to) = (edges(glass), edges_of(to));
+        let off = [from[0] - to[0], from[1] - to[1], from[2] - to[2], from[3] - to[3]];
+        let vel = vel.map(|v| if v.is_finite() { v } else { 0.0 });
+        let settle = (0..4).map(|i| Self::spring().settle_ms(off[i], vel[i], 0.4)).fold(0.0f32, f32::max).ceil().min(3_000.0) as u32;
+        Resize { off, vel, started_ms: now_ms, settle_ms: settle }
+    }
+
+    /// The glass at `now_ms` on its way to `to` (x, y, w, h; never thinner than nothing) and how fast its edges move.
+    pub fn glass(&self, to: Rect, now_ms: u64) -> (FRect, [f32; 4]) {
+        let to = edges_of(to);
+        if self.done(now_ms) {
+            return ([to[0], to[1], to[2] - to[0], to[3] - to[1]], [0.0; 4]);
+        }
+        let t = now_ms.saturating_sub(self.started_ms) as f32;
+        let (mut e, mut v) = ([0.0f32; 4], [0.0f32; 4]);
+        for i in 0..4 {
+            // (an edge that is in its place and at rest stays exactly there)
+            if self.off[i] != 0.0 || self.vel[i] != 0.0 {
+                let (ei, vi) = Self::spring().at(self.off[i], self.vel[i], t);
+                (e[i], v[i]) = (to[i] + ei, vi);
+            } else {
+                e[i] = to[i];
+            }
+        }
+        ([e[0], e[1], (e[2] - e[0]).max(0.0), (e[3] - e[1]).max(0.0)], v)
+    }
+
+    /// It has arrived.
+    pub fn done(&self, now_ms: u64) -> bool {
+        now_ms.saturating_sub(self.started_ms) >= u64::from(self.settle_ms)
+    }
+
+    pub fn remaining_ms(&self, now_ms: u64) -> u32 {
+        u64::from(self.settle_ms).saturating_sub(now_ms.saturating_sub(self.started_ms)) as u32
+    }
+
+    /// The rectangle the panel's WINDOW has while this is under way (device px, rounded out): it holds the glass where it starts,
+    /// where it ends, and the little an edge swings past its end. A glass that grows gets its bigger window at once and grows inside
+    /// it; one that shrinks keeps the bigger window until it has arrived.
+    pub fn window(glass: FRect, to: Rect) -> Rect {
+        let (from, to_e) = (edges(glass), edges_of(to));
+        let mut lo = [0.0f32; 4];
+        let mut hi = [0.0f32; 4];
+        for i in 0..4 {
+            // an edge runs from where it is to its place and at most `RESIZE_SWING` of that way beyond
+            let past = to_e[i] - (from[i] - to_e[i]) * RESIZE_SWING;
+            lo[i] = from[i].min(to_e[i]).min(past);
+            hi[i] = from[i].max(to_e[i]).max(past);
+        }
+        Rect::new(lo[0].floor() as i32, lo[1].floor() as i32, hi[2].ceil() as i32, hi[3].ceil() as i32)
+    }
+}
+
+/// A glass kept inside its window (a swing that would leave it, after a change in mid flight, is cut at the window's edge).
+pub fn glass_in(glass: FRect, window: Rect) -> FRect {
+    let (g, w) = (edges(glass), edges_of(window));
+    let (l, t) = (g[0].clamp(w[0], w[2]), g[1].clamp(w[1], w[3]));
+    let (r, b) = (g[2].clamp(l, w[2]), g[3].clamp(t, w[3]));
+    [l, t, r - l, b - t]
+}
+
 /// The life of one growth: its phase, its clock and whether it animates. Every decision of the host about WHEN is one of these methods,
 /// so that it can be tested without a window.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -489,6 +589,73 @@ impl Run {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A panel of the right island: 380 wide, its bottom right corner where the island's is.
+    fn glass_of(height: i32) -> Rect {
+        Rect::new(1500, 1300 - height, 1880, 1300)
+    }
+
+    fn fr(r: Rect) -> FRect {
+        [r.left as f32, r.top as f32, r.width() as f32, r.height() as f32]
+    }
+
+    #[test]
+    fn a_standing_glass_goes_to_its_new_size_on_a_spring_and_its_anchored_edges_never_move() {
+        let (tall, short) = (glass_of(600), glass_of(200));
+        let r = Resize::start(fr(tall), [0.0; 4], short, 1_000);
+        assert_eq!(r.glass(short, 1_000).0, fr(tall), "it starts where the glass is");
+        let mut swung_past = false;
+        let mut last_top = 700.0f32;
+        for ms in (0..=u64::from(r.settle_ms)).step_by(4) {
+            let (g, _) = r.glass(short, 1_000 + ms);
+            // the left, the right and the bottom are shared by both sizes: exactly where they were, at every moment
+            assert_eq!((g[0], g[0] + g[2], g[1] + g[3]), (1500.0, 1880.0, 1300.0), "at {ms} ms");
+            swung_past |= g[1] > 1100.0;
+            last_top = g[1];
+        }
+        assert!(swung_past, "a spring: it goes a little past its place before it rests");
+        assert!((last_top - 1100.0).abs() < 0.5, "and rests in its place ({last_top})");
+        assert!(r.done(1_000 + u64::from(r.settle_ms)) && !r.done(1_000 + u64::from(r.settle_ms) / 2));
+        assert_eq!(r.glass(short, 99_000), (fr(short), [0.0; 4]), "arrived: exactly the new size, at rest");
+        assert!(r.settle_ms > 200 && r.settle_ms < 1_500, "{} ms", r.settle_ms);
+    }
+
+    #[test]
+    fn the_window_holds_the_glass_all_the_way_whether_it_grows_or_shrinks() {
+        let (tall, short) = (glass_of(600), glass_of(200));
+        for (from, to) in [(tall, short), (short, tall)] {
+            let window = Resize::window(fr(from), to);
+            // (wider than neither, and it ends at the island's bottom edge)
+            assert_eq!((window.left, window.right, window.bottom), (1500, 1880, 1300));
+            let r = Resize::start(fr(from), [0.0; 4], to, 0);
+            for ms in (0..=u64::from(r.settle_ms)).step_by(3) {
+                let (g, _) = r.glass(to, ms);
+                assert!(g[1] >= window.top as f32, "at {ms} ms the glass's top {} is above the window's {}", g[1], window.top);
+                assert_eq!(glass_in(g, window), g, "nothing of it is outside the window");
+            }
+        }
+        // growing: the window is a little taller than the grown glass (the swing), never smaller
+        let window = Resize::window(fr(short), tall);
+        assert!(window.top < tall.top && tall.top - window.top <= 20, "{window:?}");
+        // shrinking: it keeps the taller rectangle
+        assert_eq!(Resize::window(fr(tall), short).top, tall.top);
+    }
+
+    #[test]
+    fn a_change_in_mid_flight_starts_from_where_the_glass_is_and_as_fast_as_it_moves() {
+        let (tall, short, middle) = (glass_of(600), glass_of(200), glass_of(400));
+        let first = Resize::start(fr(tall), [0.0; 4], short, 0);
+        let (at, vel) = first.glass(short, 120);
+        assert!(vel[1] > 0.0, "the top is on its way down");
+        let second = Resize::start(at, vel, middle, 120);
+        let (again, vel2) = second.glass(middle, 120);
+        assert_eq!(again, at, "no jump");
+        assert!((vel2[1] - vel[1]).abs() < 1e-3, "no halt");
+        assert_eq!(second.glass(middle, 60_000).0, fr(middle));
+        // a glass pushed past its window by such a change is cut at the window's edge
+        let cut = glass_in([1500.0, 650.0, 380.0, 650.0], tall);
+        assert_eq!(cut, fr(tall));
+    }
     use crate::dock::hit;
     use crate::dock::layout::{self, Widths};
     use crate::dock::panel::{self, GAP};

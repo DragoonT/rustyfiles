@@ -119,11 +119,13 @@ pub fn dot_visible(access: Access, count: usize) -> bool {
 
 /// `RUSTYFILES_TOASTS_FAKE` makes the reader answer with a MADE-UP state instead of asking Windows, so the panel can be tried (and its
 /// removing, which changes a list) without touching the user's real notifications: `many` (a list of invented notifications that the
-/// x and "clear all" really remove, in memory), `empty`, `denied`, `notasked`. Nothing is read from Windows and nothing is changed there
-/// in this mode. Off unless the variable is set.
+/// x and "clear all" really remove, in memory), `arriving` (the same list, but it begins with one notification and another arrives at
+/// every poll, so the panel can be watched growing), `empty`, `denied`, `notasked`. Nothing is read from Windows and nothing is
+/// changed there in this mode. Off unless the variable is set.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fake {
     Many,
+    Arriving,
     Empty,
     Denied,
     NotAsked,
@@ -132,6 +134,7 @@ pub enum Fake {
 pub fn parse_fake(v: &str) -> Option<Fake> {
     match v.trim().to_ascii_lowercase().as_str() {
         "many" => Some(Fake::Many),
+        "arriving" => Some(Fake::Arriving),
         "empty" => Some(Fake::Empty),
         "denied" => Some(Fake::Denied),
         "notasked" => Some(Fake::NotAsked),
@@ -150,7 +153,7 @@ pub const REMOVE_ENV: &str = "RUSTYFILES_TOASTS_REMOVE";
 /// nothing to remove), and on the real list unless the variable says no.
 pub fn removal_enabled(fake: Option<Fake>, env: Option<&str>) -> bool {
     match fake {
-        Some(Fake::Many) => true,
+        Some(Fake::Many | Fake::Arriving) => true,
         Some(_) => false,
         None => !env.is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "false" | "no" | "off")),
     }
@@ -562,6 +565,7 @@ mod tests {
     #[test]
     fn the_made_up_list_is_a_real_test_of_the_panel_and_is_off_unless_asked_for() {
         assert_eq!(parse_fake("many"), Some(Fake::Many));
+        assert_eq!(parse_fake("arriving"), Some(Fake::Arriving));
         assert_eq!(parse_fake(" Denied "), Some(Fake::Denied));
         assert_eq!(parse_fake("notasked"), Some(Fake::NotAsked));
         assert_eq!(parse_fake("empty"), Some(Fake::Empty));

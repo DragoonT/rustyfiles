@@ -92,7 +92,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui_kit::*;
-use rf_win::dock::grow::{self, Again, Arrival, Corner, FRect, Frame, Phase, Run, Shrink, Spec, Stays};
+use rf_win::dock::grow::{self, Again, Arrival, Corner, FRect, Frame, Phase, Resize, Run, Shrink, Spec, Stays};
 use rf_win::dock::grow_panels;
 use rf_win::dock::hit;
 use rf_win::dock::island;
@@ -184,6 +184,19 @@ struct Grow {
     sent: Option<(FRect, f32)>,
     arm: Option<Task<()>>,
     deadline: Option<Task<()>>,
+    /// The panel window's rectangle (device px, screen coordinates): the grown rectangle, and while the standing glass changes its
+    /// size ([`Resize`]) the rectangle that holds it all the way. The glass's shape and the view's lengths are counted from its corner.
+    window: Rect,
+    /// The standing glass on its way to a new size (`spec.grown` is where it is going), and the task that ends it.
+    resize: Option<Resize>,
+    resize_end: Option<Task<()>>,
+}
+
+/// Whether a panel's glass goes to a new size on a spring while it stands. The notifications' does (its list gets shorter and longer
+/// under the user's eyes); the control centre moves its own parts on springs inside a window that is placed at once, and the others
+/// do not change their size.
+fn resizes_on_a_spring(id: PanelId) -> bool {
+    id == super::panel::NOTIFICATIONS
 }
 
 #[derive(Default)]
@@ -250,19 +263,30 @@ impl Push {
 
 impl Grow {
     fn frame(&self, now: u64) -> Frame {
-        self.spec.at(self.run.s_at(now))
+        let mut f = self.spec.at(self.run.s_at(now));
+        // (the standing glass on its way to a new size: the motion's own frame is the grown glass, which is where it is going)
+        if let Some(r) = &self.resize {
+            f.rect = grow::glass_in(r.glass(self.spec.grown, now).0, self.window);
+            f.radius = f.radius.min(f.rect[2].min(f.rect[3]) / 2.0).max(0.0);
+        }
+        f
+    }
+
+    /// A frame's glass in the panel window's own coordinates: x, y, w, h.
+    fn in_window(&self, f: &Frame) -> FRect {
+        [f.rect[0] - self.window.left as f32, f.rect[1] - self.window.top as f32, f.rect[2], f.rect[3]]
     }
 
     /// The frame as a thing to send, or `None` when it is the one already sent.
     fn plan_send(&mut self, f: &Frame) -> Option<Push> {
-        let shape = self.spec.in_window(f);
+        let shape = self.in_window(f);
         if self.sent == Some((shape, f.radius)) {
             return None;
         }
         let area = |s: &FRect| s[2] * s[3];
         let growing = self.sent.is_none_or(|(old, _)| area(&shape) >= area(&old));
         self.sent = Some((shape, f.radius));
-        let parts = hit::parts(shape, f.radius, &[], self.spec.grown.width(), self.spec.grown.height());
+        let parts = hit::parts(shape, f.radius, &[], self.window.width(), self.window.height());
         Some(Push { hwnd: self.hwnd, dark: self.dark, parts, shape, radius: f.radius, growing })
     }
 }
@@ -354,17 +378,47 @@ pub fn prepare(p: Prep, cx: &mut App) -> Option<Rect> {
     {
         // already there (the second look after the view has opened, or the button pressed again during a closing): the rectangles may
         // have moved, the clock is kept
+        let was = g.spec.grown;
+        // (the glass as it is drawn now, and how fast its edges move, before anything changes)
+        let glass_now = g.frame(now).rect;
+        let vel_now = g.resize.map_or([0.0; 4], |r| r.glass(was, now).1);
+        let standing = g.run.phase == Phase::Running && !g.run.is_closing() && !g.run.moving(now);
         g.spec = spec;
         g.extra = extra;
         g.content = content;
         g.head = head;
         g.dark = p.dark;
         g.sent = None;
+        // A standing panel whose size changed: the glass goes there on a spring, in a window that holds it all the way (see `Resize`).
+        // The same size asked again while it is under way (the island's layout looked at again) changes nothing.
+        let mut resize_for = None;
+        if animate && standing && resizes_on_a_spring(p.id) {
+            if grown != was {
+                let r = Resize::start(glass_now, vel_now, grown, now);
+                g.window = Resize::window(glass_now, grown);
+                g.resize = Some(r);
+                resize_for = Some(r.remaining_ms(now));
+                log::info!("dock: grow resize: {}x{} -> {}x{} px on a spring, {} ms", was.width(), was.height(), grown.width(), grown.height(), r.remaining_ms(now));
+            } else if g.resize.is_none() {
+                g.window = grown;
+            }
+        } else {
+            g.resize = None;
+            g.resize_end = None;
+            g.window = grown;
+        }
+        let window = g.window;
         if let Again::TurnedBack { from, remaining_ms } = g.run.reopen(now, animate) {
             log::info!("dock: grow start: turned back to opening from s={from:.2}, {remaining_ms} ms to go");
             schedule_deadline(remaining_ms, cx);
         }
-        return Some(grown);
+        if let Some(ms) = resize_for {
+            schedule_resize_end(ms, cx);
+            // (deferred: this runs inside the panel view's own update, when its list has changed, and a view cannot be updated while
+            // it is being updated; the first try of this in a test dock ended in exactly that panic)
+            cx.defer(nudge_views);
+        }
+        return Some(window);
     }
     // (a growth of another panel that was left behind gives the island its glass back first)
     release(cx);
@@ -389,8 +443,41 @@ pub fn prepare(p: Prep, cx: &mut App) -> Option<Rect> {
         sent: None,
         arm: None,
         deadline: None,
+        window: grown,
+        resize: None,
+        resize_end: None,
     })));
     Some(grown)
+}
+
+/// One timer per change of size: when the spring has come to rest (and a little over) the glass is the new size, and the window, which
+/// held both sizes meanwhile, is placed again as the grown rectangle alone. Whether or not a view drew the frames in between.
+fn schedule_resize_end(remaining_ms: u32, cx: &mut App) {
+    let task = cx.spawn(async move |cx| {
+        cx.background_executor().timer(Duration::from_millis(u64::from(remaining_ms) + DEADLINE_SLACK_MS)).await;
+        cx.update(end_resize);
+    });
+    if let Some(g) = grow_mut(cx) {
+        g.resize_end = Some(task);
+    }
+}
+
+fn end_resize(cx: &mut App) {
+    let now = backdrop::now_ms();
+    let Some(g) = grow_mut(cx) else { return };
+    let Some(r) = g.resize else { return };
+    if !r.done(now) {
+        // (a change in mid flight started a new spring: wait for that one)
+        schedule_resize_end(r.remaining_ms(now), cx);
+        return;
+    }
+    g.resize = None;
+    g.resize_end = None;
+    g.sent = None;
+    let id = g.id;
+    // (the window is placed as the grown rectangle: `panel.rs` asks `prepare` again, which now has nothing under way)
+    cx.defer(move |cx| super::panel::place_again(id, cx));
+    nudge_views(cx);
 }
 
 /// Whether this panel is on its way back into its island right now: the button pressed now is a REVERSAL of the motion (the panel keeps
@@ -625,6 +712,9 @@ pub fn begin_close(cx: &mut App) -> Option<u32> {
         }
         Shrink::Shrinking { from, remaining_ms } => {
             log::info!("dock: grow start: closing from s={from:.2}, {remaining_ms} ms{}", if g.run.animate { "" } else { " (animations off)" });
+            // (a change of size that was under way is over: the glass goes home from the size it was going to; the window stays as it is)
+            g.resize = None;
+            g.resize_end = None;
             g.began = Instant::now();
             g.frames = 0;
             schedule_deadline(remaining_ms, cx);
@@ -713,8 +803,9 @@ pub fn view_frame(id: PanelId, cx: &mut App) -> Option<ViewFrame> {
     let now = backdrop::now_ms();
     let g = grow_mut(cx).filter(|g| g.id == id)?;
     let f = g.frame(now);
-    let moving = g.run.moving(now);
-    if moving {
+    let resizing = g.resize.is_some();
+    let moving = g.run.moving(now) || resizing;
+    if g.run.moving(now) {
         g.frames += 1;
     }
     let running = g.run.phase == Phase::Running;
@@ -723,8 +814,28 @@ pub fn view_frame(id: PanelId, cx: &mut App) -> Option<ViewFrame> {
         g.plain_frames += 1;
     }
     let scale = g.scale.max(0.1);
-    let origin = (g.spec.grown.left as f32, g.spec.grown.top as f32);
+    let origin = (g.window.left as f32, g.window.top as f32);
     let logical = |r: FRect| [(r[0] - origin.0) / scale, (r[1] - origin.1) / scale, r[2] / scale, r[3] / scale];
+    // The panel's own rectangle. While the glass goes to a new size its content goes with the glass: the edges of the rectangle that
+    // are the glass's edges are where the glass's are at this frame, so the header stays at the glass's top all the way.
+    let mut area = [g.content.left as f32, g.content.top as f32, g.content.width() as f32, g.content.height() as f32];
+    if resizing {
+        let to = g.spec.grown;
+        let (d_left, d_top, d_right) = (f.rect[0] - to.left as f32, f.rect[1] - to.top as f32, f.rect[0] + f.rect[2] - to.right as f32);
+        if g.content.left == to.left {
+            area[0] += d_left;
+            area[2] -= d_left;
+        }
+        if g.content.right == to.right {
+            area[2] += d_right;
+        }
+        if g.content.top == to.top {
+            area[1] += d_top;
+            area[3] -= d_top;
+        }
+        area[2] = area[2].max(0.0);
+        area[3] = area[3].max(0.0);
+    }
     let vf = ViewFrame {
         content: if running { f.content } else { 0.0 },
         field_alpha: if running { 1.0 } else { 0.0 },
@@ -734,8 +845,8 @@ pub fn view_frame(id: PanelId, cx: &mut App) -> Option<ViewFrame> {
         wash_alpha: wash.alpha,
         plain: wash.plain,
         extra_bottom: g.extra as f32 / scale,
-        area: logical([g.content.left as f32, g.content.top as f32, g.content.width() as f32, g.content.height() as f32]),
-        line_y: Some((g.spec.island.top - g.spec.grown.top) as f32 / scale),
+        area: logical(area),
+        line_y: Some((g.spec.island.top - g.window.top) as f32 / scale),
         layout: g.head,
         moving,
     };
@@ -751,7 +862,7 @@ pub fn view_frame(id: PanelId, cx: &mut App) -> Option<ViewFrame> {
 pub fn shape_for_attach(id: PanelId, cx: &App) -> Option<(FRect, f32)> {
     let g = grow_ref(cx).filter(|g| g.id == id)?;
     let f = g.frame(backdrop::now_ms());
-    Some((g.spec.in_window(&f), f.radius))
+    Some((g.in_window(&f), f.radius))
 }
 
 /// The glass's rectangle on the screen now (device px, rounded out): what a click is "on the panel" for. `None` when the panel does not grow.
@@ -877,6 +988,9 @@ mod tests {
             sent: None,
             arm: None,
             deadline: None,
+            window: spec.grown,
+            resize: None,
+            resize_end: None,
         }
     }
 

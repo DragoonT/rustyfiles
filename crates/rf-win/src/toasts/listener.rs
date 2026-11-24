@@ -59,7 +59,12 @@ pub fn watch(poll: Duration, callback: impl Fn(&Snapshot) + Send + 'static) -> W
         let fake = fake_from_env();
         // (in the made-up mode Windows is not asked at all, so there is no listener to remove anything from)
         let listener = if fake.is_some() { None } else { UserNotificationListener::Current().ok() };
-        let mut fake_list = (fake == Some(Fake::Many)).then(|| fake_toasts(now_unix()));
+        let mut fake_list = matches!(fake, Some(Fake::Many | Fake::Arriving)).then(|| fake_toasts(now_unix()));
+        // (the made-up list that grows: it begins with its first notification, the others arrive one at each poll)
+        let mut to_arrive: Vec<Toast> = match (&mut fake_list, fake) {
+            (Some(list), Some(Fake::Arriving)) => list.split_off(1),
+            _ => Vec::new(),
+        };
         let mut refused = false;
         // (removing is off in the real mode unless asked for: nobody has seen Windows obey it for a program without identity)
         let removal_on = removal_enabled(fake, std::env::var(REMOVE_ENV).ok().as_deref());
@@ -78,7 +83,14 @@ pub fn watch(poll: Duration, callback: impl Fn(&Snapshot) + Send + 'static) -> W
             // what Windows did with a click without waiting for the next turn.
             match rx.recv_timeout(poll) {
                 Ok(Msg::Quit) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-                Ok(Msg::Read) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Ok(Msg::Read) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    if let Some(list) = fake_list.as_mut()
+                        && !to_arrive.is_empty()
+                    {
+                        list.push(to_arrive.remove(0));
+                    }
+                }
                 Ok(Msg::Remove(id)) if removal_on => {
                     if let Some(list) = fake_list.as_mut() {
                         removal.asked([id]);
@@ -133,7 +145,7 @@ pub fn watch(poll: Duration, callback: impl Fn(&Snapshot) + Send + 'static) -> W
 /// The made-up reading of `RUSTYFILES_TOASTS_FAKE`.
 fn fake_snapshot(f: Fake, list: &[Toast]) -> Snapshot {
     match f {
-        Fake::Many => Snapshot { access: Access::Granted, toasts: list.to_vec(), remove_refused: false },
+        Fake::Many | Fake::Arriving => Snapshot { access: Access::Granted, toasts: list.to_vec(), remove_refused: false },
         Fake::Empty => Snapshot::empty(Access::Granted),
         Fake::Denied => Snapshot::empty(Access::Denied),
         Fake::NotAsked => Snapshot::empty(Access::NotAsked),

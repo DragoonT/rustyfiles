@@ -18,6 +18,11 @@
 //! NO FLICKER. A poll that finds the same list (`rf_win::toasts::diff` is empty) redraws nothing; one that finds a different list
 //! keeps the keyboard cursor on its notification (`rf_win::toasts::keep_cursor`) and the scroll where it was.
 //!
+//! WHAT MOVES. A notification that is removed slides to the side and fades before Windows is asked to remove it; with "Tümünü
+//! temizle" they go one after the other (`notif_model::leave_delay`). The panel then has less to show and its glass goes to the new
+//! size on a spring (`rf_win::dock::grow::Resize`, in `grow_host.rs`), as it does when a notification arrives. With animations off
+//! (the app's setting, or Windows') both happen at once, as before.
+//!
 //! THE KEYBOARD. Up and Down walk the notifications, Enter starts the program of the one under the cursor, Delete removes it (when
 //! removing is offered), Escape closes, Tab visits the buttons.
 
@@ -86,6 +91,16 @@ pub struct NotifView {
     pm: String,
     /// The height last given to the window (logical px).
     reported: f32,
+    /// The notifications on their way out, each with the moment its own leaving starts (see `leave`). One stays here, out of sight,
+    /// until Windows' list no longer has it.
+    leaving: Vec<(u32, Instant)>,
+}
+
+/// What is removed when a leaving has been shown.
+#[derive(Clone, Copy)]
+enum Gone {
+    One(u32),
+    All,
 }
 
 impl NotifView {
@@ -112,6 +127,7 @@ impl NotifView {
             am: "AM".into(),
             pm: "PM".into(),
             reported: 0.0,
+            leaving: Vec::new(),
         }
     }
 
@@ -212,6 +228,7 @@ impl NotifView {
         self.groups = Vec::new();
         self.order = Vec::new();
         self.cursor = None;
+        self.leaving.clear();
         // (the programs' pictures are small and kept, but not for ever)
         self.icons.retain(|k| k.starts_with("n:"));
         notif_state::panel_open(false, cx);
@@ -255,6 +272,8 @@ impl NotifView {
         let order = toasts::draw_order(&snap.toasts, &groups);
         self.cursor = toasts::keep_cursor(&self.order, self.cursor, &order);
         notif_state::told_by_panel(snap.access, snap.toasts.len(), cx);
+        // (a notification that left and is no longer listed is done with)
+        self.leaving.retain(|(id, _)| snap.toasts.iter().any(|t| t.id == *id));
         self.groups = groups;
         self.order = order;
         self.snapshot = Some(snap);
@@ -273,6 +292,10 @@ impl NotifView {
         if !self.live_now() {
             return;
         }
+        // (one that is on its way out is not there to be clicked)
+        if self.is_leaving(id) {
+            return;
+        }
         let Some(t) = self.snapshot.as_ref().and_then(|s| s.toasts.iter().find(|t| t.id == id)) else { return };
         if t.app_id.trim().is_empty() {
             return;
@@ -289,16 +312,71 @@ impl NotifView {
         cx.defer(|cx| super::panel::close(CloseCause::Chosen, cx));
     }
 
-    fn remove(&mut self, id: u32) {
-        if self.live_now() && self.can_remove() && let Some(l) = &self.live {
-            l.remove(id);
+    fn remove(&mut self, id: u32, cx: &mut Context<Self>) {
+        if self.live_now() && self.can_remove() && !self.is_leaving(id) {
+            self.leave(vec![id], Gone::One(id), cx);
         }
     }
 
-    fn clear_all(&mut self) {
-        if self.live_now() && self.can_remove() && let Some(l) = &self.live {
-            l.clear();
+    fn clear_all(&mut self, cx: &mut Context<Self>) {
+        if self.live_now() && self.can_remove() {
+            // (in the order they are drawn: from the top down)
+            let ids: Vec<u32> = self.order.iter().copied().filter(|id| !self.is_leaving(*id)).collect();
+            self.leave(ids, Gone::All, cx);
         }
+    }
+
+    fn is_leaving(&self, id: u32) -> bool {
+        self.leaving.iter().any(|(l, _)| *l == id)
+    }
+
+    /// `ids` leave, one after the other, and when the last has gone Windows is asked to remove them (`what`). A notification Windows
+    /// keeps all the same (it refused, or the call failed) is shown again after `LEAVE_HOLD_MS`. With animations off the removal is
+    /// asked for at once and nothing moves.
+    fn leave(&mut self, ids: Vec<u32>, what: Gone, cx: &mut Context<Self>) {
+        let ask = move |me: &Self| {
+            if let Some(l) = &me.live {
+                match what {
+                    Gone::One(id) => l.remove(id),
+                    Gone::All => l.clear(),
+                }
+            }
+        };
+        if !crate::settings::animations() || ids.is_empty() {
+            ask(self);
+            return;
+        }
+        let (now, n) = (Instant::now(), ids.len());
+        for (i, id) in ids.iter().enumerate() {
+            self.leaving.push((*id, now + Duration::from_millis(u64::from(notif_model::leave_delay(i, n)))));
+        }
+        let total = Duration::from_millis(u64::from(notif_model::leave_total(n)));
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(total).await;
+            if this.update(cx, |me, _| if me.shown { ask(me) }).is_err() {
+                return;
+            }
+            cx.background_executor().timer(Duration::from_millis(u64::from(notif_model::LEAVE_HOLD_MS))).await;
+            // (still listed: it was not removed, so it is shown again)
+            let _ = this.update(cx, |me, cx| {
+                let before = me.leaving.len();
+                me.leaving.retain(|(id, _)| !ids.contains(id));
+                if me.leaving.len() != before {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// How a notification is drawn at this moment: its opacity and how far it has slid (whole and in its place unless it is leaving),
+    /// and whether its leaving is still moving.
+    fn leave_state(&self, id: u32, now: Instant) -> (f32, f32, bool) {
+        let Some((_, start)) = self.leaving.iter().find(|(l, _)| *l == id) else { return (1.0, 0.0, false) };
+        let since = if now >= *start { now.duration_since(*start).as_millis() as i64 } else { -(start.duration_since(now).as_millis() as i64) };
+        let (alpha, slide) = notif_model::leave_frame(since);
+        (alpha, slide, since < i64::from(notif_model::LEAVE_MS))
     }
 
     fn open_privacy(&mut self, cx: &mut Context<Self>) {
@@ -381,14 +459,17 @@ impl NotifView {
             .on_click(cx.listener(move |this, _, _, cx| {
                 // (the click is the x's: the row under it must not start the program)
                 cx.stop_propagation();
-                this.remove(id);
+                this.remove(id, cx);
             }));
         let body = toasts::body_lines(&t.body);
+        let (alpha, slide, _) = self.leave_state(id, Instant::now());
         h_flex()
             .id(("notif", id as usize))
             .group("notif-row")
             .w_full()
             .flex_shrink_0()
+            // (on its way out: it slides to the side and fades)
+            .when(alpha < 1.0 || slide > 0.0, |d| d.relative().left(px(slide)).opacity(alpha))
             .px(px(10.))
             .py(px(8.))
             .gap(px(8.))
@@ -424,13 +505,17 @@ impl NotifView {
         let today = toasts::local_day(now);
         let groups = self.groups.clone();
         let mut column = v_flex().id("notif-list").w_full().flex_1().min_h_0().gap(px(notif_model::GAP)).overflow_y_scroll().track_scroll(&self.scroll);
+        let at = Instant::now();
         for g in &groups {
             let name = if g.app.trim().is_empty() { notif_model::unknown_app(words).to_string() } else { g.app.clone() };
             let picture = self.picture(&g.app_id, &name, look, cx);
+            // (a program's heading goes with the last of its notifications)
+            let heading = g.items.iter().map(|&i| self.leave_state(snap.toasts[i].id, at).0).fold(0.0f32, f32::max);
             column = column.child(
                 h_flex()
                     .h(px(GROUP_H))
                     .flex_shrink_0()
+                    .when(heading < 1.0, |d| d.opacity(heading))
                     .px(px(6.))
                     .gap(px(8.))
                     .items_center()
@@ -471,7 +556,7 @@ impl NotifView {
                         .hover(move |s| s.bg(hover))
                         .active(move |s| s.bg(pressed))
                         .child(t!("Tümünü temizle"))
-                        .on_click(cx.listener(|this, _, _, _| this.clear_all())),
+                        .on_click(cx.listener(|this, _, _, cx| this.clear_all(cx))),
                 )
             })
             .into_any_element()
@@ -539,7 +624,9 @@ impl Render for NotifView {
             (_, Some(_)) | (None, None) => geo::Frame { opacity: 1.0, drop_px: 0.0, done: true },
             (Some((t, opening)), None) => geo::frame(t.elapsed().as_millis() as u32, opening, crate::settings::animations()),
         };
-        if !frame.done || grown.is_some_and(|g| g.moving) {
+        let now = Instant::now();
+        let leaving = self.leaving.iter().any(|(id, _)| self.leave_state(*id, now).2);
+        if !frame.done || grown.is_some_and(|g| g.moving) || leaving {
             window.request_animation_frame();
         }
 
@@ -593,7 +680,7 @@ impl Render for NotifView {
                 "delete" | "backspace" => {
                     if let Some(id) = this.cursor {
                         cx.stop_propagation();
-                        this.remove(id);
+                        this.remove(id, cx);
                     }
                 }
                 _ => {}

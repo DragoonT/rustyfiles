@@ -26,6 +26,44 @@ pub const GAP: f32 = 4.0;
 const MIN_H: f32 = 190.0;
 const MAX_H: f32 = 600.0;
 
+// ------------------------------------------------------------------ a notification leaving
+
+/// How long one notification takes to leave (it slides to the side and fades), ms.
+pub const LEAVE_MS: u32 = 220;
+/// With "clear all" they leave one after the other, this long apart (ms)...
+pub const LEAVE_APART_MS: u32 = 55;
+/// ...but the last one starts no later than this after the first, however many there are (forty notifications do not take two seconds).
+pub const LEAVE_SPREAD_MS: u32 = 440;
+/// How far a leaving notification slides, logical px.
+pub const LEAVE_SLIDE: f32 = 72.0;
+/// How long the panel keeps a notification out of sight after asking Windows to remove it. Windows answers within a poll; one that is
+/// still listed after this was refused, and is shown again.
+pub const LEAVE_HOLD_MS: u32 = 1500;
+
+/// When notification `i` of `n` that leave together starts to go, ms after the first.
+///
+/// WHY (the user): "temizleye basınca da bildirimler bir bir animasyonla gitsin". They all vanished in the same frame, the moment
+/// Windows had removed them.
+pub fn leave_delay(i: usize, n: usize) -> u32 {
+    if n <= 1 {
+        return 0;
+    }
+    let apart = (LEAVE_SPREAD_MS / (n as u32 - 1)).min(LEAVE_APART_MS);
+    apart * i as u32
+}
+
+/// How long the whole leaving of `n` takes, ms: when the last one has gone.
+pub fn leave_total(n: usize) -> u32 {
+    if n == 0 { 0 } else { leave_delay(n - 1, n) + LEAVE_MS }
+}
+
+/// A leaving notification `since_ms` after its own start: how opaque it is and how far it has slid (logical px). It picks up speed
+/// as it goes (it is let go, not pushed); before its start it stands as it was, after `LEAVE_MS` it is gone.
+pub fn leave_frame(since_ms: i64) -> (f32, f32) {
+    let t = (since_ms as f32 / LEAVE_MS as f32).clamp(0.0, 1.0);
+    (1.0 - t * t, LEAVE_SLIDE * t * t * t)
+}
+
 /// What the panel shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Content {
@@ -123,6 +161,32 @@ pub fn child_index(groups: &[Group], toasts: &[Toast], id: u32) -> Option<usize>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notifications_leave_one_after_the_other_and_many_of_them_do_not_take_longer() {
+        use super::{LEAVE_APART_MS, LEAVE_MS, LEAVE_SLIDE, LEAVE_SPREAD_MS, leave_delay, leave_frame, leave_total};
+        // one: at once
+        assert_eq!((leave_delay(0, 1), leave_total(1)), (0, LEAVE_MS));
+        // a few: each a fixed time after the one before
+        assert_eq!([leave_delay(0, 4), leave_delay(1, 4), leave_delay(3, 4)], [0, LEAVE_APART_MS, 3 * LEAVE_APART_MS]);
+        // many: closer together, so the last starts within the spread
+        assert!(leave_delay(39, 40) <= LEAVE_SPREAD_MS && leave_delay(39, 40) > LEAVE_SPREAD_MS - 40, "{}", leave_delay(39, 40));
+        assert!(leave_delay(1, 40) > 0 && leave_delay(1, 40) < LEAVE_APART_MS);
+        assert!(leave_total(40) <= LEAVE_SPREAD_MS + LEAVE_MS);
+        assert_eq!(leave_total(0), 0);
+        // one notification: whole and in its place until its turn, gone and slid away at the end, and never the other way round
+        assert_eq!(leave_frame(-30), (1.0, 0.0));
+        assert_eq!(leave_frame(0), (1.0, 0.0));
+        assert_eq!(leave_frame(i64::from(LEAVE_MS)), (0.0, LEAVE_SLIDE));
+        assert_eq!(leave_frame(9_000), (0.0, LEAVE_SLIDE));
+        let mut last = (1.0f32, 0.0f32);
+        for ms in (0..=i64::from(LEAVE_MS)).step_by(10) {
+            let f = leave_frame(ms);
+            assert!(f.0 <= last.0 && f.1 >= last.1, "at {ms} ms");
+            last = f;
+        }
+    }
+
     use rf_win::toasts::group;
 
     fn tr_tr(s: &'static str) -> &'static str {

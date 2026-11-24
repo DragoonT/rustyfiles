@@ -28,6 +28,9 @@ pub enum Command {
     Reload,
     /// The size slider moved or was let go.
     Size(rf_win::dock::size_live::Msg),
+    /// A test run only (a dock started with `RUSTYFILES_TOASTS_FAKE`, whose notifications are made up): open or close the bell's
+    /// panel. The bell itself follows the real pointer and buttons, so a script cannot press it.
+    ToggleNotifications,
     /// "ping", the hello of a second `--dock` launch, or anything unknown: nothing to do.
     Nothing,
 }
@@ -36,6 +39,7 @@ pub fn parse_command(line: &str) -> Command {
     match line.trim() {
         "stop" => Command::Stop,
         "reload" => Command::Reload,
+        "notifications" if rf_win::toasts::fake_from_env().is_some() => Command::ToggleNotifications,
         other => rf_win::dock::size_live::parse_message(other).map_or(Command::Nothing, Command::Size),
     }
 }

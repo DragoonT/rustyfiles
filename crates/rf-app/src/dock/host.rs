@@ -2007,6 +2007,7 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
                         break;
                     }
                     Command::Reload => cx.update(reload),
+                    Command::ToggleNotifications => cx.update(|cx| super::panel::toggle_notifications_on(MonId::HOME, cx)),
                     Command::Size(m) => cx.update(|cx| on_size_message(m, cx)),
                     Command::Nothing => {}
                 }

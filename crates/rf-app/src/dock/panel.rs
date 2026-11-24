@@ -666,6 +666,11 @@ pub fn layout_applied(cx: &mut App) {
     cx.defer(move |cx| refit(id, None, cx));
 }
 
+/// The open panel's window is placed again with the size it has (its glass has finished going to a new size: `grow_host::end_resize`).
+pub fn place_again(id: PanelId, cx: &mut App) {
+    refit(id, None, cx);
+}
+
 /// Places the open panel again: with the size it asks for now (`size`, or the hooks' own when `None`) and the island's glass as it is
 /// now. A panel that grows out of its island keeps growing: its glass is worked out again and the window follows it.
 fn refit(id: PanelId, size: Option<(f32, f32)>, cx: &mut App) {
