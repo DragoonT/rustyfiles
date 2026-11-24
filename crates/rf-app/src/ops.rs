@@ -1156,7 +1156,7 @@ fn drag_ftp_items_out(items: Vec<(String, bool)>) {
                 return;
             }
         };
-        rf_win::sta::run(move |owner| {
+        rf_win::sta::run_drag(move |owner| {
             if let Err(e) = rf_win::dnd::drag_out_copy_only(owner, ui_thread, &real) {
                 log::warn!("drag: {e:#}");
             }
@@ -1227,7 +1227,7 @@ pub(crate) fn drag_archive_items_out(items: Vec<PathBuf>) {
                 return;
             }
         };
-        rf_win::sta::run(move |owner| {
+        rf_win::sta::run_drag(move |owner| {
             if let Err(e) = rf_win::dnd::drag_out_copy_only(owner, ui_thread, &real) {
                 log::warn!("drag: {e:#}");
             }
@@ -1245,7 +1245,7 @@ pub(crate) fn drag_paths_out(items: Vec<PathBuf>) {
         unsafe {
             let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
         }
-        rf_win::sta::run(move |owner| {
+        rf_win::sta::run_drag(move |owner| {
             if let Err(e) = rf_win::dnd::drag_out(owner, ui_thread, &items) {
                 log::warn!("drag: {e:#}");
             }

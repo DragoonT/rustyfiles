@@ -337,7 +337,7 @@ impl DesktopView {
         unsafe {
             let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
         }
-        rf_win::sta::run(move |owner| {
+        rf_win::sta::run_drag(move |owner| {
             if let Err(e) = rf_win::dnd::drag_out(owner, ui_thread, &paths) {
                 log::warn!("desktop drag out: {e:#}");
             }

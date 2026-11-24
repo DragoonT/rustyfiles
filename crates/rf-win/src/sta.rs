@@ -29,6 +29,8 @@ thread_local! {
 }
 
 static THREAD: OnceLock<ShellThread> = OnceLock::new();
+/// The thread of [`run_drag`]: a second one of the same kind, for drags only.
+static DRAG_THREAD: OnceLock<ShellThread> = OnceLock::new();
 const WM_RUN: u32 = WM_APP + 1;
 
 thread_local! {
@@ -50,7 +52,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
 }
 
 fn drain(hwnd: HWND) {
-    let Some(t) = THREAD.get() else { return };
+    // (both threads share this window procedure: the window says whose queue it is)
+    let Some(t) = [THREAD.get(), DRAG_THREAD.get()].into_iter().flatten().find(|t| t.hwnd == hwnd.0 as isize) else { return };
     loop {
         let job = t.queue.lock().pop_front();
         match job {
@@ -60,12 +63,12 @@ fn drain(hwnd: HWND) {
     }
 }
 
-fn start() -> ShellThread {
+fn start(name: &str, shell_thread: bool) -> ShellThread {
     let (tx, rx) = std::sync::mpsc::channel::<isize>();
     std::thread::Builder::new()
-        .name("rf-shell-sta".into())
+        .name(name.into())
         .spawn(move || unsafe {
-            ON_SHELL_THREAD.with(|c| c.set(true));
+            ON_SHELL_THREAD.with(|c| c.set(shell_thread));
             let _ = OleInitialize(None);
             let hinst = GetModuleHandleW(None).unwrap_or_default();
             let class = w!("rustyfiles.ShellOwner");
@@ -105,8 +108,23 @@ fn start() -> ShellThread {
 
 /// Runs `f` on the shell STA thread. `f` receives the hidden owner window.
 pub fn run(f: impl FnOnce(HWND) + Send + 'static) {
-    let t = THREAD.get_or_init(start);
-    t.queue.lock().push_back(Box::new(f));
+    post(THREAD.get_or_init(|| start("rf-shell-sta", true)), Box::new(f));
+}
+
+/// Runs `f` on the drag thread: a thread like the shell thread (OLE, a message pump, a hidden owner window that `f` receives) that
+/// does nothing but drags out of our windows.
+///
+/// WHY: a drag used to be one more job in the shell thread's queue, behind whatever that thread was doing: building a context menu,
+/// reading a file's properties for a column (a slow handler may take seconds), a preview. While it waited the press had already
+/// selected the item and nothing else happened, and when its turn came the button was often up again, so no drag began at all
+/// (a Discord report, 2026-11-24: "I cannot drag an item out of the app to another app. It only gets highlighted"). A drag is a
+/// gesture the hand is in the middle of: it must begin at once, whatever else the shell is asked.
+pub fn run_drag(f: impl FnOnce(HWND) + Send + 'static) {
+    post(DRAG_THREAD.get_or_init(|| start("rf-drag-sta", false)), Box::new(f));
+}
+
+fn post(t: &ShellThread, job: Job) {
+    t.queue.lock().push_back(job);
     unsafe {
         let _ = PostMessageW(Some(HWND(t.hwnd as *mut _)), WM_RUN, WPARAM(0), LPARAM(0));
     }
@@ -146,6 +164,31 @@ mod tests {
         assert_eq!(super::call(Duration::from_secs(10), || 6 * 7), Some(42));
         let nested = super::call(Duration::from_secs(10), || super::call(Duration::from_secs(10), || "inner"));
         assert_eq!(nested, Some(Some("inner")));
+    }
+
+    #[test]
+    fn a_drag_does_not_wait_for_the_work_of_the_shell_thread() {
+        // the shell thread is busy for a long while (a slow property handler, a menu being built)
+        super::run(|_| std::thread::sleep(Duration::from_millis(1500)));
+        let (tx, rx) = std::sync::mpsc::channel();
+        super::run_drag(move |owner| {
+            let (mut kind, mut qualifier) = Default::default();
+            let apartment = unsafe { windows::Win32::System::Com::CoGetApartmentType(&mut kind, &mut qualifier) }.map(|()| kind);
+            let name = std::thread::current().name().map(str::to_string);
+            let _ = tx.send((owner.0 as isize, apartment, name));
+        });
+        let (owner, apartment, name) = rx.recv_timeout(Duration::from_millis(700)).expect("the drag's job ran while the shell thread was busy");
+        assert_ne!(owner, 0, "it has an owner window of its own");
+        // (a single-threaded apartment, as OLE's drag needs)
+        assert_eq!(apartment.ok(), Some(windows::Win32::System::Com::APTTYPE_STA));
+        assert_eq!(name.as_deref(), Some("rf-drag-sta"));
+        // a second job finds the same thread, and a job of the shell thread still runs on its own
+        let (tx, rx) = std::sync::mpsc::channel();
+        super::run_drag(move |_| {
+            let _ = tx.send(std::thread::current().name().map(str::to_string));
+        });
+        assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap().as_deref(), Some("rf-drag-sta"));
+        assert_eq!(super::call(Duration::from_secs(10), || std::thread::current().name().map(str::to_string)), Some(Some("rf-shell-sta".to_string())));
     }
 
     #[test]

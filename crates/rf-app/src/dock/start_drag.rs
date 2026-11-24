@@ -703,7 +703,7 @@ impl StartView {
         }
         // (the pointer is read on the shell thread the moment the loop ends: it is where the drop was)
         let (tx, rx) = futures::channel::oneshot::channel::<(Result<u32, String>, Option<(i32, i32)>)>();
-        rf_win::sta::run(move |owner| {
+        rf_win::sta::run_drag(move |owner| {
             let done = rf_win::dnd::drag_out_copy_only(owner, ui_thread, &files).map(|effect| effect.0).map_err(|e| format!("{e:#}"));
             let _ = tx.send((done, geo::cursor()));
         });

@@ -49,7 +49,7 @@ pub fn data_object(items: &[PathBuf]) -> anyhow::Result<IDataObject> {
     Ok(unsafe { SHCreateDataObject(Some(folder.0), Some(&children), None)? })
 }
 
-/// Runs a modal OLE drag on the calling thread (must be the shell STA thread — see `sta::run`).
+/// Runs a modal OLE drag on the calling thread (must be the drag thread, see `sta::run_drag`).
 /// `ui_thread` is the id of the thread that owns the window where the drag started; its input
 /// state is attached so this thread can take mouse capture while the button is still down.
 pub fn drag_out(owner: HWND, ui_thread: u32, items: &[PathBuf]) -> anyhow::Result<DROPEFFECT> {
