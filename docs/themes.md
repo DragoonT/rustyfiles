@@ -44,6 +44,9 @@ The keys: `window_bg`, `titlebar_bg`, `sidebar_bg`, `content_bg`, `card_bg`, `ba
 With Mica or HyperGlass as the background material, the backgrounds stay partly see-through;
 choose Settings › Appearance › Background material › Solid to see a theme's backgrounds as they are.
 
+A ready example: [`docs/themes/Solarized`](themes/Solarized/theme.toml) holds Solarized Dark and Light. Copy the
+`Solarized` folder into the themes folder and pick it.
+
 ## Icons: `icons\`
 
 Pictures in `.svg`, `.png` or `.ico`, named for what they stand for:
