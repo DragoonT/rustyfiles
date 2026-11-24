@@ -143,7 +143,7 @@ impl FolderView {
                     }
                 };
                 let open_with = with_own_programs(&me, own, open_with);
-                let more = with_packaged(packaged, more);
+                let more = with_packaged(packaged, more, cx.global::<crate::settings::Settings>().menu.prefer_classic_commands);
                 let inline = !cx.global::<crate::settings::Settings>().menu.shell_submenu;
                 if let Some(m) = menu_weak.upgrade() {
                     m.update(cx, |m, cx| {
@@ -1156,18 +1156,89 @@ fn packaged_items(cmds: Vec<Packaged>) -> Vec<Item> {
 
 /// "Show more options" with the packaged apps' commands first, as Windows 11's own menu shows them (issue 107: "Edit with
 /// Notepad++", NanaZip, Terminal, ...), then the classic menu's items. They are there also when the classic part failed.
-fn with_packaged(packaged: Vec<Packaged>, rest: Pending) -> Pending {
+///
+/// A program may register the same command in both menus (NanaZip: "NanaZip" twice, one under the other). It is listed once: the new
+/// menu's entry unless `prefer_classic` (the setting), then the classic one.
+fn with_packaged(packaged: Vec<Packaged>, rest: Pending, prefer_classic: bool) -> Pending {
     if packaged.is_empty() {
         return rest;
     }
     let mut items = packaged_items(packaged);
-    if let Pending::Ready(r) = &rest
-        && !r.is_empty()
-    {
-        items.push(Item::Separator);
-        items.extend(r.iter().cloned());
+    let mut classic: Vec<Item> = match &rest {
+        Pending::Ready(r) => r.to_vec(),
+        _ => Vec::new(),
+    };
+    let (keep_new, keep_classic) = twins(&items.iter().map(item_title).collect::<Vec<_>>(), &classic.iter().map(item_title).collect::<Vec<_>>(), prefer_classic);
+    let mut k = keep_new.into_iter();
+    items.retain(|_| k.next().unwrap_or(true));
+    let mut k = keep_classic.into_iter();
+    classic.retain(|_| k.next().unwrap_or(true));
+    let classic = tidy_separators(classic);
+    if !classic.is_empty() {
+        if !items.is_empty() {
+            items.push(Item::Separator);
+        }
+        items.extend(classic);
     }
     Pending::Ready(Rc::new(items))
+}
+
+/// A row's name, `None` for a separator.
+fn item_title(it: &Item) -> Option<String> {
+    match it {
+        Item::Action { label, .. } | Item::Sub { label, .. } => Some(label.to_string()),
+        Item::Separator => None,
+    }
+}
+
+/// Which rows of the new menu's commands and of the classic menu's stay when both name the same command (compared without access
+/// keys, case, and a trailing ellipsis): one of each pair goes, the classic one unless `prefer_classic`. Rows without a twin and
+/// separators always stay.
+fn twins(new: &[Option<String>], classic: &[Option<String>], prefer_classic: bool) -> (Vec<bool>, Vec<bool>) {
+    let plain = |s: &String| s.replace('&', "").trim().trim_end_matches("...").trim_end_matches('…').trim().to_lowercase();
+    let n: Vec<Option<String>> = new.iter().map(|t| t.as_ref().map(plain).filter(|t| !t.is_empty())).collect();
+    let c: Vec<Option<String>> = classic.iter().map(|t| t.as_ref().map(plain).filter(|t| !t.is_empty())).collect();
+    let in_c = |t: &Option<String>| t.is_some() && c.contains(t);
+    let in_n = |t: &Option<String>| t.is_some() && n.contains(t);
+    (n.iter().map(|t| !(prefer_classic && in_c(t))).collect(), c.iter().map(|t| prefer_classic || !in_n(t)).collect())
+}
+
+/// No separator first, last, or after another one (rows were taken out between them).
+fn tidy_separators(items: Vec<Item>) -> Vec<Item> {
+    let mut out: Vec<Item> = Vec::with_capacity(items.len());
+    for it in items {
+        if matches!(it, Item::Separator) && out.last().is_none_or(|l| matches!(l, Item::Separator)) {
+            continue;
+        }
+        out.push(it);
+    }
+    if matches!(out.last(), Some(Item::Separator)) {
+        out.pop();
+    }
+    out
+}
+
+#[cfg(test)]
+mod twin_tests {
+    use super::twins;
+
+    fn t(names: &[&str]) -> Vec<Option<String>> {
+        names.iter().map(|n| (!n.is_empty()).then(|| n.to_string())).collect()
+    }
+
+    #[test]
+    fn a_command_in_both_menus_is_listed_once() {
+        let new = t(&["NanaZip", "Edit with Notepad++"]);
+        let classic = t(&["&NanaZip", "", "Git Sync...", "TortoiseGit"]);
+        // by default the new menu's entry stays, as in Windows' own first menu
+        assert_eq!(twins(&new, &classic, false), (vec![true, true], vec![false, true, true, true]));
+        // the setting keeps the classic one
+        assert_eq!(twins(&new, &classic, true), (vec![false, true], vec![true, true, true, true]));
+        // names that only look alike are two commands
+        assert_eq!(twins(&t(&["Open"]), &t(&["Open with Code"]), false), (vec![true], vec![true]));
+        // an ellipsis and the case are not a difference; separators never count as twins
+        assert_eq!(twins(&t(&["Share…", ""]), &t(&["share...", ""]), false), (vec![true, true], vec![false, true]));
+    }
 }
 
 /// An entry of the SendTo folder with its icon (read on the shell's worker thread).

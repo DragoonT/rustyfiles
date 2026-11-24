@@ -309,6 +309,10 @@ pub struct MenuPrefs {
     pub send_to: bool,
     /// Shell extensions under "Show more options" (off = listed at the bottom of the menu).
     pub shell_submenu: bool,
+    /// A program that puts the same command into Windows 11's new menu and into the classic one (NanaZip does) is listed once: with
+    /// this on the classic entry is the one kept, else the new one, as Windows' own first menu shows it. A user on Discord,
+    /// 2026-11-24: "Only one item should be present, and we need a switch to select the preference (classic vs. modern)".
+    pub prefer_classic_commands: bool,
 }
 
 impl Default for MenuPrefs {
@@ -325,6 +329,7 @@ impl Default for MenuPrefs {
             terminal: true,
             send_to: true,
             shell_submenu: true,
+            prefer_classic_commands: false,
         }
     }
 }

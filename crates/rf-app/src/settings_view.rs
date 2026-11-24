@@ -1021,6 +1021,13 @@ fn general(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         Some(t!("Kapalıyken diğer uygulamaların öğeleri menünün sonunda listelenir.")),
         sw("shell-sub", p, s.menu.shell_submenu, |s, v| s.menu.shell_submenu = v),
     ));
+    v.push(card(
+        p,
+        L::ListFilter,
+        t!("Aynı komut iki menüde de varsa klasik olanı göster"),
+        Some(t!("Bazı uygulamalar (NanaZip gibi) komutlarını hem Windows 11'in yeni menüsüne hem klasik menüye ekler; menüde yalnızca biri gösterilir. Kapalıyken yeni menüdeki, açıkken klasik menüdeki kalır.")),
+        sw("classic-cmds", p, s.menu.prefer_classic_commands, |s, v| s.menu.prefer_classic_commands = v),
+    ));
 
     v.push(section(p, t!("Kaydırma")));
     v.push(card(p, L::ChevronsUpDown, t!("Akıcı kaydırma"), None, sw("smooth", p, s.smooth_scroll, |s, v| s.smooth_scroll = v)));

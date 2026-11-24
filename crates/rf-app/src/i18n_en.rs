@@ -50,6 +50,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Geri dönüşüm kutusu", "Recycle Bin"),
     ("Adres çubuğuna git", "Focus address bar"),
     ("Ara", "Search"),
+    ("Aynı komut iki menüde de varsa klasik olanı göster", "When a command is in both menus, show the classic one"),
+    ("Bazı uygulamalar (NanaZip gibi) komutlarını hem Windows 11'in yeni menüsüne hem klasik menüye ekler; menüde yalnızca biri gösterilir. Kapalıyken yeni menüdeki, açıkken klasik menüdeki kalır.", "Some programs (NanaZip, for one) add their commands to Windows 11's new menu and to the classic one; the menu lists only one of them. Off keeps the new menu's, on keeps the classic one."),
     ("Ada ya da *.pdf gibi bir kalıba göre arayın; Enter alt klasörlere de bakar", "Search by name or a pattern like *.pdf; Enter looks in subfolders too"),
     ("Gizli öğeleri göster/gizle", "Show/hide hidden items"),
     ("Detay görünümü", "Details view"),
