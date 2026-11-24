@@ -17,6 +17,8 @@ final class MillerColumn: NSScrollView {
     var onOpenFolder: ((URL) -> Void)?
     /// A file clicked: its folder, with it selected.
     var onPick: ((URL) -> Void)?
+    /// A middle click on a folder: a new tab (issue 325).
+    var onOpenInNewTab: ((URL) -> Void)?
     /// A right click on an item: its menu (folder_view.rs, issue 183).
     var onMenu: ((URL, Bool) -> NSMenu?)?
     var icon: ((FileItem, String) -> NSImage)?
@@ -146,6 +148,13 @@ final class MillerRows: HoverView {
     override func mouseUp(with event: NSEvent) {
         guard let i = index(at: convert(event.locationInWindow, from: nil)) else { return }
         column?.clicked(i, double: event.clickCount >= 2)
+    }
+
+    override func otherMouseUp(with event: NSEvent) {
+        guard event.buttonNumber == 2, let column, let i = index(at: convert(event.locationInWindow, from: nil)), let dir = column.dir, let item = column.item(i),
+            item.isDir, !item.name.hasSuffix(".app")
+        else { return }
+        column.onOpenInNewTab?(dir.appendingPathComponent(item.name))
     }
 
     /// A right click in another column opens that item's menu.

@@ -23,20 +23,25 @@ enum TileMetrics {
     static let padY: CGFloat = 8
 }
 
-/// Thumbnails from Quick Look, made off the main thread and kept for the session. A file
-/// Quick Look can't picture keeps its icon.
+/// Thumbnails from Quick Look, made off the main thread. They are kept up to 256 MB, the
+/// least recently made going first (issue 324: kept for the whole session, a long one of
+/// picture folders ran into tens of GB). A file Quick Look can't picture keeps its icon.
 @MainActor
 final class ThumbnailCache {
     static let shared = ThumbnailCache()
-    private var images: [String: NSImage] = [:]
+    private let images: NSCache<NSString, NSImage> = {
+        let c = NSCache<NSString, NSImage>()
+        c.totalCostLimit = 256 << 20
+        return c
+    }()
     private var failed: Set<String> = []
     private var pending: [String: [(NSImage) -> Void]] = [:]
 
-    func cached(_ path: String) -> NSImage? { images[path] }
+    func cached(_ path: String) -> NSImage? { images.object(forKey: path as NSString) }
 
     /// Calls `done` with the thumbnail when there is one (not at all when there is none).
     func request(_ path: String, scale: CGFloat, done: @escaping (NSImage) -> Void) {
-        if let image = images[path] { return done(image) }
+        if let image = cached(path) { return done(image) }
         guard !failed.contains(path) else { return }
         if pending[path] != nil {
             pending[path]?.append(done)
@@ -55,7 +60,7 @@ final class ThumbnailCache {
                     return
                 }
                 let image = NSImage(cgImage: cg, size: NSSize(width: CGFloat(cg.width) / scale, height: CGFloat(cg.height) / scale))
-                ThumbnailCache.shared.images[path] = image
+                ThumbnailCache.shared.images.setObject(image, forKey: path as NSString, cost: cg.bytesPerRow * cg.height)
                 waiting.forEach { $0(image) }
             }
         }
@@ -63,14 +68,15 @@ final class ThumbnailCache {
 
     /// Forgets every thumbnail (Advanced › Cache › Clear).
     func clear() {
-        images = [:]
+        images.removeAllObjects()
         failed = []
     }
 
     /// Forgets a folder's thumbnails (its files changed).
     func forget(under dir: String) {
         let prefix = dir.hasSuffix("/") ? dir : dir + "/"
-        images = images.filter { !$0.key.hasPrefix(prefix) }
+        // (NSCache can't be walked: the folder's own pictures are dropped by name)
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? [] { images.removeObject(forKey: (prefix + name) as NSString) }
         failed = failed.filter { !$0.hasPrefix(prefix) }
     }
 }
@@ -214,6 +220,10 @@ final class TileCollectionView: NSCollectionView, NSServicesMenuRequestor {
     weak var list: FileListController?
 
     override func magnify(with event: NSEvent) { list?.pinched(event) }
+    override func otherMouseUp(with event: NSEvent) {
+        guard event.buttonNumber == 2, let list, let at = indexPathForItem(at: convert(event.locationInWindow, from: nil)) else { return super.otherMouseUp(with: event) }
+        list.middleClicked(row: list.gridRow(at))
+    }
 
     // Settings › Select on hover, in the grid too: resting on a tile for half a second selects it
     private var hoverTimer: Timer?

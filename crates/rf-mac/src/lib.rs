@@ -257,21 +257,43 @@ pub fn format_date(ms: i64) -> String {
 
 /// Total size in bytes of the files under `path` ("Calculate size"). Links are not followed
 /// and unreadable folders count as empty. Blocks on the disk: call it off the main thread.
+/// How big a folder is: its files' sizes, or what they take on the disk (`on_disk`: allocated
+/// blocks). The walk stays on the folder's own disk and does not follow links, so a folder
+/// that holds other volumes (/Volumes, a Time Machine disk) or a network share is not walked
+/// through them (issue 324: the root of Macintosh HD took every core and tens of GB). It runs
+/// on a small pool of its own: a size never takes every core. Blocks: off the main thread.
 #[uniffi::export]
-pub fn folder_size(path: String) -> u64 {
-    fn walk(dir: &Path) -> u64 {
+pub fn folder_size_with(path: String, on_disk: bool) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    use std::sync::OnceLock;
+    static POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
+    let pool = POOL.get_or_init(|| rayon::ThreadPoolBuilder::new().num_threads(2).thread_name(|i| format!("rf-size-{i}")).build().expect("size pool"));
+    fn walk(dir: &Path, dev: u64, on_disk: bool) -> u64 {
         let Ok(rd) = fs::read_dir(dir) else { return 0 };
         let entries: Vec<_> = rd.filter_map(Result::ok).collect();
         entries
             .par_iter()
-            .map(|e| match e.file_type() {
-                Ok(t) if t.is_dir() => walk(&e.path()),
-                Ok(t) if t.is_file() => e.metadata().map_or(0, |m| m.len()),
-                _ => 0,
+            .map(|e| {
+                let Ok(m) = fs::symlink_metadata(e.path()) else { return 0 };
+                if m.is_dir() {
+                    if m.dev() == dev { walk(&e.path(), dev, on_disk) } else { 0 }
+                } else if m.is_file() {
+                    if on_disk { m.blocks() * 512 } else { m.len() }
+                } else {
+                    0
+                }
             })
             .sum()
     }
-    walk(Path::new(&path))
+    let root = Path::new(&path);
+    let Ok(m) = fs::metadata(root) else { return 0 };
+    pool.install(|| walk(root, m.dev(), on_disk))
+}
+
+/// A folder's size in bytes (see `folder_size_with`).
+#[uniffi::export]
+pub fn folder_size(path: String) -> u64 {
+    folder_size_with(path, false)
 }
 
 #[uniffi::export]
@@ -301,6 +323,23 @@ pub(crate) fn is_system_file(name: &str) -> bool {
         ".PKInstallSandboxManager", ".PKInstallSandboxManager-SystemSoftware", ".file", ".hotfiles.btree", ".vol",
     ];
     NAMES.contains(&name) || name.starts_with("._")
+}
+
+#[cfg(test)]
+mod folder_size_tests {
+    #[test]
+    fn a_size_counts_files_and_stays_out_of_links() {
+        let d = std::env::temp_dir().join(format!("rf-mac-size-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("a/b")).unwrap();
+        std::fs::write(d.join("a/one"), vec![0u8; 1000]).unwrap();
+        std::fs::write(d.join("a/b/two"), vec![0u8; 500]).unwrap();
+        // a link back to the top is not walked (it would never end)
+        std::os::unix::fs::symlink(&d, d.join("a/b/loop")).unwrap();
+        assert_eq!(super::folder_size(d.display().to_string()), 1500);
+        assert!(super::folder_size_with(d.display().to_string(), true) >= 1500);
+        let _ = std::fs::remove_dir_all(&d);
+    }
 }
 
 #[cfg(test)]

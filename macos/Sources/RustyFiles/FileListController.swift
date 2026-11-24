@@ -243,6 +243,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             col.onOpenFolder = { [weak self] u in self?.onOpenFolder?(u) }
             col.onPick = { [weak self] u in self?.onReveal?(u) }
             col.onMenu = { [weak self] u, isDir in self?.sideColumnMenu(u, isDir: isDir) }
+            col.onOpenInNewTab = { [weak self] u in self?.onOpenInNewTab?(u) }
             card.addSubview(col)
         }
         shelfPane.isHidden = true
@@ -1504,6 +1505,17 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     /// new things in.
     var isGathered: Bool { url.map { !$0.isFileURL } ?? false }
     var onOpenInNewTab: ((URL) -> Void)?
+
+    /// A middle click on an item: a folder (or an archive or smart folder shown as one) opens in
+    /// a new tab, as Cmd-click's "Open in new tab" does (issue 325).
+    func middleClicked(row: Int) {
+        guard let folder, row >= 0, let item = folder.item(row: UInt32(row)), let p = folder.childPath(row: UInt32(row)) else { return }
+        let u = URL(fileURLWithPath: p)
+        if SmartFolder.isSmartFolder(u) { onOpenInNewTab?(SmartFolder.url(u)); return }
+        if (item.isDir && !display.isPackage(item)) || (archive == nil && AppSettings.archivesAsFolders && isArchive(path: p)) {
+            onOpenInNewTab?(u)
+        }
+    }
     var onOpenInNewWindow: ((URL) -> Void)?
     var onRefresh: (() -> Void)?
 
@@ -1970,7 +1982,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
                     cell.text = formatSize(bytes: size)
                 } else if Self.sizing.contains(Self.sizeKey(path)) {
                     cell.text = String(localized: "Calculating…")
-                } else if AppSettings.autoFolderSizes {
+                } else if AppSettings.autoFolderSizes, !showsVolumeRoot {
                     // Files › Calculate folder sizes: asked for as soon as the row shows
                     cell.text = String(localized: "Calculating…")
                     DispatchQueue.main.async { [weak self] in self?.calculateSize(path) }
@@ -2017,15 +2029,18 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     }
 
     /// What a folder takes on the disk (allocated blocks, clones and sparse files as they are).
+    /// What a folder takes on the disk (allocated blocks), on its own disk only (rf-mac).
     nonisolated private static func sizeOnDisk(_ path: String) -> UInt64 {
-        let keys: [URLResourceKey] = [.totalFileAllocatedSizeKey, .isDirectoryKey]
-        guard let walker = FileManager.default.enumerator(at: URL(fileURLWithPath: path), includingPropertiesForKeys: keys, options: [], errorHandler: { _, _ in true })
-        else { return 0 }
-        var total: UInt64 = 0
-        for case let u as URL in walker {
-            total += UInt64((try? u.resourceValues(forKeys: Set(keys)).totalFileAllocatedSize) ?? 0)
-        }
-        return total
+        folderSizeWith(path: path, onDisk: true)
+    }
+
+    /// The folder shown is a disk's top (/, a USB stick's root): there the folders' sizes add
+    /// up to the whole disk, so they are not worked out by themselves, only on "Calculate size"
+    /// (issue 324: the root of Macintosh HD kept every core busy).
+    var showsVolumeRoot: Bool {
+        guard let url, url.isFileURL else { return false }
+        if url.path == "/" { return true }
+        return (try? url.resourceValues(forKeys: [.isVolumeKey]).isVolume) ?? false
     }
 
     private func reloadSize(of path: String) {

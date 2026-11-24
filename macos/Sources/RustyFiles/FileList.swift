@@ -490,6 +490,10 @@ final class FileTableView: NSTableView, NSServicesMenuRequestor {
     weak var list: FileListController?
 
     override func magnify(with event: NSEvent) { list?.pinched(event) }
+    override func otherMouseUp(with event: NSEvent) {
+        guard event.buttonNumber == 2 else { return super.otherMouseUp(with: event) }
+        list?.middleClicked(row: row(at: convert(event.locationInWindow, from: nil)))
+    }
     override func scrollWheel(with event: NSEvent) {
         if list?.commandScrolled(event) != true { super.scrollWheel(with: event) }
     }

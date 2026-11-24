@@ -405,6 +405,12 @@ final class SidebarListView: HoverView {
         }
     }
 
+    /// A middle click on a place opens it in a new tab (issue 325).
+    override func otherMouseUp(with event: NSEvent) {
+        guard event.buttonNumber == 2, let i = index(at: convert(event.locationInWindow, from: nil)), let url = items[i].url else { return }
+        owner?.onOpenInNewTab?(url)
+    }
+
     override func mouseUp(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
         guard let i = index(at: p) else { return }
