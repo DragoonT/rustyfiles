@@ -290,7 +290,7 @@ pub struct Tracker {
     /// (source, result) for every item the shell finished: the new copy/moved location, or the
     /// item's path inside the Recycle Bin for deletes. Used to build undo records.
     pub results: std::sync::Mutex<Vec<(PathBuf, PathBuf)>>,
-    /// Our engine waits while this is set (the shell engine can't pause).
+    /// The work waits while this is set: our engine in its own loops, the shell's engine in its progress sink (`Sink::check`).
     pub paused: Arc<AtomicBool>,
     /// Copy speed limit in bytes per second; 0 = none (our engine only).
     pub limit: std::sync::atomic::AtomicU64,
@@ -350,6 +350,13 @@ struct Sink {
 impl Sink {
     fn check(&self) -> windows_core::Result<()> {
         self.life.signal();
+        // "Pause": the shell's engine has no pause of its own, but it calls its sink on the thread that does the work, before and
+        // after every item and for its progress, so waiting here holds it. WHY (issue 322): the card's Pause button did nothing
+        // for the copies this engine makes (to and from network shares and other places that are no plain disk path, and a paste
+        // into the items' own folder): the card said "Paused" and the copy went on.
+        while self.tracker.paused.load(Ordering::Relaxed) && !self.tracker.cancel.load(Ordering::Relaxed) {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
         if self.tracker.cancel.load(Ordering::Relaxed) { Err(E_ABORT.into()) } else { Ok(()) }
     }
     fn record(&self, hr: HRESULT, src: Ref<IShellItem>, created: Ref<IShellItem>) {
@@ -480,6 +487,27 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn a_paused_copy_of_the_shells_engine_waits_until_it_is_resumed() {
+        if guard::not_run_without_shell("fileops::tests::a_paused_copy_of_the_shells_engine_waits_until_it_is_resumed") {
+            return;
+        }
+        let d = scratch("pause");
+        std::fs::write(d.join("a.txt"), b"x").unwrap();
+        std::fs::create_dir_all(d.join("dst")).unwrap();
+        let t = Arc::new(Tracker::new(Box::new(|_, _, _| {}), Arc::new(AtomicBool::new(false))));
+        t.paused.store(true, Ordering::Relaxed);
+        let (t2, d2) = (t.clone(), d.clone());
+        let work = std::thread::spawn(move || transfer_tracked(Transfer::Copy, &[d2.join("a.txt")], &d2.join("dst"), t2));
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        assert!(!d.join("dst").join("a.txt").exists(), "nothing is copied while paused");
+        assert!(!work.is_finished(), "the copy waits");
+        t.paused.store(false, Ordering::Relaxed);
+        assert!(work.join().unwrap().unwrap());
+        assert!(d.join("dst").join("a.txt").exists());
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
