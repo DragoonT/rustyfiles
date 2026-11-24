@@ -719,6 +719,11 @@ pub struct FolderView {
     /// Windows' own menu (Shift and a right click) is open over this list: the items' details cards are held back, as they are
     /// under our own menu (issue 310: the card of the item under the pointer stood behind that menu).
     pub(crate) native_menu: bool,
+    /// The pointer has left the window and has not come back: the items' details cards are held back. WHY: the toolkit puts a
+    /// tooltip away at the next mouse move it hears, and once the pointer is over another program's window it hears none, so the
+    /// card of the last item stayed on the screen, over that program, until the pointer came back (the user: "fare başka pencereye
+    /// gidince orada takılı kalabiliyor"). A card whose delay was still running when the pointer left came up afterwards, the same way.
+    pointer_away: bool,
     /// Rubber-band selection in list-content coordinates.
     marquee: Option<Marquee>,
     /// Where the selection box reaches now (window px, inside the list's area) and how far the pointer is past the area's top
@@ -884,6 +889,7 @@ impl FolderView {
             _rename_sub: None,
             drag_origin: None,
             native_menu: false,
+            pointer_away: false,
             marquee: None,
             marquee_at: Point::default(),
             marquee_over: 0.,
@@ -1095,7 +1101,7 @@ impl FolderView {
             let tip_entry = e.clone();
             let tip_path = self.path_of(ei);
             let tip_folder_size = tip_path.as_ref().and_then(|path| self.known_folder_size(path, on_disk));
-            let item_tips = !crate::fluent_menu::is_open(cx) && !self.native_menu && cx.global::<crate::settings::Settings>().item_hover_details;
+            let item_tips = !crate::fluent_menu::is_open(cx) && !self.native_menu && !self.pointer_away && cx.global::<crate::settings::Settings>().item_hover_details;
             // the rename box, as in the Details rows (issue 319: the columns drew none, so F2 seemed to do nothing while the keys
             // went to a box that was not on the screen)
             let rename_input = self.renaming.as_ref().filter(|(i, _)| *i == ei).map(|(_, inp)| inp.clone());
@@ -3329,7 +3335,7 @@ impl FolderView {
         let tip_path = self.path_of(ei);
         let on_disk = cx.global::<crate::settings::Settings>().folder_size_on_disk;
         let tip_folder_size = tip_path.as_ref().and_then(|path| self.known_folder_size(path, on_disk));
-        let item_tips = !crate::fluent_menu::is_open(cx) && !self.native_menu && cx.global::<crate::settings::Settings>().item_hover_details;
+        let item_tips = !crate::fluent_menu::is_open(cx) && !self.native_menu && !self.pointer_away && cx.global::<crate::settings::Settings>().item_hover_details;
         let cell = base
             .id(("cell", vi))
             .w(tile_w)
@@ -4879,7 +4885,7 @@ impl FolderView {
             let tip_entry = e.clone();
             let tip_path = self.path_of(ei);
             let tip_folder_size = tip_path.as_ref().and_then(|path| self.known_folder_size(path, on_disk));
-            let item_tips = !crate::fluent_menu::is_open(cx) && !self.native_menu && cx.global::<crate::settings::Settings>().item_hover_details;
+            let item_tips = !crate::fluent_menu::is_open(cx) && !self.native_menu && !self.pointer_away && cx.global::<crate::settings::Settings>().item_hover_details;
             let selected = self.selected.contains(&ei);
             // (the rows next to it that are selected too: the pill joins them)
             let sel_above = selected && vi > 0 && self.visible.get(vi - 1).is_some_and(|e| self.selected.contains(e));
@@ -5395,6 +5401,10 @@ impl FolderView {
                                         return;
                                     }
                                     let _ = view.update(cx, |v, cx| {
+                                        // (the pointer is in the window again: the items' details cards may show)
+                                        if std::mem::take(&mut v.pointer_away) {
+                                            cx.notify();
+                                        }
                                         if v.marquee.is_none() {
                                             return;
                                         }
@@ -5403,6 +5413,16 @@ impl FolderView {
                                         } else {
                                             // (the button came up where nothing told us)
                                             v.marquee = None;
+                                            cx.notify();
+                                        }
+                                    });
+                                });
+                                // The pointer left the window: the items' details cards are put away (`pointer_away`).
+                                let view = me.clone();
+                                window.on_mouse_event(move |_: &MouseExitEvent, _, _, cx| {
+                                    let _ = view.update(cx, |v, cx| {
+                                        if !v.pointer_away {
+                                            v.pointer_away = true;
                                             cx.notify();
                                         }
                                     });
