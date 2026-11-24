@@ -53,6 +53,8 @@ pub struct Preview {
     /// Our own audio / video player for the current target (Media Foundation, in the host
     /// window): created on the first Play, never by just selecting a file.
     player: Option<PlayerUi>,
+    /// The file whose playback was last stopped part way, where (seconds) and its length: Play on it goes on from there (`left_at`).
+    resume: Option<(PathBuf, f64, f64)>,
     /// The last thumbnail shown, and when the target last changed: while the next file's
     /// thumbnail loads, the previous one stays up briefly instead of flashing the type icon.
     last_thumb: Option<std::sync::Arc<RenderImage>>,
@@ -80,7 +82,19 @@ struct PlayerUi {
     state: Option<rf_win::preview_host::MediaState>,
     /// The seek bar's bounds (window coordinates), for click-to-seek.
     bar: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
+    /// Where the first play starts (the place this file was left at), until it has been used.
+    resume_at: Option<f64>,
     _poll: Option<Task<()>>,
+}
+
+/// The place a file that stopped at `position` of `duration` seconds is taken up again, `None` when it starts over: one that had
+/// hardly begun, and one that was at its end.
+///
+/// WHY (issue 326): the pane has one player, and it stops whenever the pane shows something else. Switching to another tab, or
+/// clicking another file, threw the place in a long recording away: back on the file, Play began at 0:00.
+fn left_at(position: f64, duration: f64) -> Option<f64> {
+    const EDGE: f64 = 2.0;
+    (duration > 0.0 && position >= EDGE && position < duration - EDGE).then_some(position)
 }
 
 /// A closing window (or tab) must not leave audio playing: the app can stay in the tray.
@@ -128,6 +142,7 @@ impl Preview {
             extra: None,
             _extra_task: None,
             player: None,
+            resume: None,
             last_thumb: None,
             archive_copy: None,
             _archive_task: None,
@@ -329,9 +344,19 @@ impl Preview {
 
     /// Stops our player (and hides its video).
     fn stop_player(&mut self) {
-        if self.player.take().is_some_and(|p| p.started) {
-            rf_win::sta::run(|_| rf_win::preview_host::hide());
+        let Some(pl) = self.player.take() else { return };
+        if !pl.started {
+            return;
         }
+        // (remembered for the one file that played last; a file played to its end starts over)
+        if let Some(st) = pl.state {
+            match left_at(st.position, st.duration) {
+                Some(at) => self.resume = Some((pl.path, at, st.duration)),
+                None if self.resume.as_ref().is_some_and(|r| r.0 == pl.path) => self.resume = None,
+                None => {}
+            }
+        }
+        rf_win::sta::run(|_| rf_win::preview_host::hide());
     }
 
     /// Audio / video with no Windows preview handler: our own player.
@@ -362,14 +387,16 @@ impl Preview {
     fn player_toggle(&mut self, video: bool, window: &mut Window, cx: &mut Context<Self>) {
         let Some((path, _)) = self.target.clone() else { return };
         let Some(owner) = Self::owner(window) else { return };
-        let pl = self.player.get_or_insert_with(|| PlayerUi { path: path.clone(), started: false, rect: None, state: None, bar: Default::default(), _poll: None });
+        let resume_at = self.resume.as_ref().filter(|r| r.0 == path).map(|r| r.1);
+        let pl = self.player.get_or_insert_with(|| PlayerUi { path: path.clone(), started: false, rect: None, state: None, bar: Default::default(), resume_at, _poll: None });
         let playing = pl.state.is_some_and(|s| s.playing);
         if playing {
             rf_win::sta::run(|_| rf_win::preview_host::media_pause());
         } else if !video {
             // audio: no window to show
             pl.started = true;
-            rf_win::sta::run(move |_| rf_win::preview_host::media_play(owner, &path, None));
+            let from = pl.resume_at.take();
+            rf_win::sta::run(move |_| rf_win::preview_host::media_play_from(owner, &path, None, from));
         } else if pl.started {
             let rect = pl.rect.map(|r| windows::Win32::Foundation::RECT { left: r[0], top: r[1], right: r[2], bottom: r[3] });
             rf_win::sta::run(move |_| rf_win::preview_host::media_play(owner, &path, rect));
@@ -423,10 +450,11 @@ impl Preview {
         }
         let first = pl.rect.is_none();
         pl.rect = Some(r);
+        let from = pl.resume_at.take().filter(|_| first);
         let rect = windows::Win32::Foundation::RECT { left: r[0], top: r[1], right: r[2], bottom: r[3] };
         rf_win::sta::run(move |_| {
             if first {
-                rf_win::preview_host::media_play(owner, &path, Some(rect));
+                rf_win::preview_host::media_play_from(owner, &path, Some(rect), from);
             } else {
                 rf_win::preview_host::media_reposition(rect);
             }
@@ -435,7 +463,12 @@ impl Preview {
 
     /// Play / pause, a seek bar and the time, under the visual.
     fn render_player_bar(&self, p: &Palette, video: bool, cx: &mut Context<Self>) -> AnyElement {
-        let st = self.player.as_ref().and_then(|pl| pl.state);
+        // (before Play is pressed on a file that was left part way: the bar and the time stand where it will go on)
+        let left = || {
+            let (path, at, len) = self.resume.as_ref()?;
+            self.target.as_ref().is_some_and(|(t, _)| t == path).then_some(rf_win::preview_host::MediaState { playing: false, position: *at, duration: *len })
+        };
+        let st = self.player.as_ref().and_then(|pl| pl.state).or_else(left);
         let playing = st.is_some_and(|s| s.playing);
         let (pos, dur) = st.map_or((0.0, 0.0), |s| (s.position, s.duration));
         let frac = if dur > 0.0 { (pos / dur).clamp(0.0, 1.0) as f32 } else { 0.0 };
@@ -1082,9 +1115,18 @@ fn group(n: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::item_property_rows;
+    use super::{item_property_rows, left_at};
     use rf_core::{Entry, EntryKind};
     use std::path::Path;
+
+    #[test]
+    fn a_file_stopped_part_way_goes_on_from_there_and_one_at_either_end_starts_over() {
+        assert_eq!(left_at(95.5, 240.0), Some(95.5));
+        assert_eq!(left_at(1.0, 240.0), None, "it had hardly begun");
+        assert_eq!(left_at(239.0, 240.0), None, "it was at its end");
+        assert_eq!(left_at(240.0, 240.0), None);
+        assert_eq!(left_at(30.0, 0.0), None, "a length that is not known yet");
+    }
 
     #[test]
     fn folder_properties_include_size_only_when_already_known() {
