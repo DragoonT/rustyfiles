@@ -891,5 +891,8 @@
 "Shortcut that opens rustyfiles from any app": "Пряк път, който отваря rustyfiles от всяко приложение",
 "Like Win+E on Windows: a new window at Home, whatever app is in front.": "Като Win+E в Windows: нов прозорец в Начало, каквото и приложение да е отворено отпред.",
 "Open disks when they're connected": "Отваряй дисковете, когато са свързани",
-"A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB флашка, карта или образ на диск се отварят в раздел, както във Finder."
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB флашка, карта или образ на диск се отварят в раздел, както във Finder.",
+"Resume": "Продължи",
+"Pause": "Пауза",
+"Paused": "На пауза"
 }

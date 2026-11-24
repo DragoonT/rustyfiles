@@ -891,5 +891,8 @@
 "Shortcut that opens rustyfiles from any app": "קיצור דרך שפותח את rustyfiles מכל אפליקציה",
 "Like Win+E on Windows: a new window at Home, whatever app is in front.": "כמו Win+E ב-Windows: חלון חדש בדף הבית, לא משנה איזו אפליקציה פתוחה לפניו.",
 "Open disks when they're connected": "לפתוח דיסקים כשהם מחוברים",
-"A USB stick, a card or a disk image opens in a tab, as Finder does.": "דיסק USB, כרטיס או קובץ תמונת דיסק נפתחים בכרטיסייה, כמו ב-Finder."
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "דיסק USB, כרטיס או קובץ תמונת דיסק נפתחים בכרטיסייה, כמו ב-Finder.",
+"Resume": "המשך",
+"Pause": "השהה",
+"Paused": "מושהה"
 }

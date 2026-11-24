@@ -891,5 +891,8 @@
 "Shortcut that opens rustyfiles from any app": "Gyorsbillentyű, amellyel bármely alkalmazásból megnyitható a rustyfiles",
 "Like Win+E on Windows: a new window at Home, whatever app is in front.": "Mint a Win+E a Windowsban: új ablak a Kezdőlapon, bármelyik alkalmazás legyen is elöl.",
 "Open disks when they're connected": "Lemezek megnyitása csatlakoztatáskor",
-"A USB stick, a card or a disk image opens in a tab, as Finder does.": "Az USB-meghajtó, a kártya vagy a lemezkép a Finderhez hasonlóan egy lapon nyílik meg."
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "Az USB-meghajtó, a kártya vagy a lemezkép a Finderhez hasonlóan egy lapon nyílik meg.",
+"Resume": "Folytatás",
+"Pause": "Szünet",
+"Paused": "Szüneteltetve"
 }

@@ -891,5 +891,8 @@
 "Shortcut that opens rustyfiles from any app": "Īsceļš, kas atver rustyfiles no jebkuras lietotnes",
 "Like Win+E on Windows: a new window at Home, whatever app is in front.": "Kā Win+E operētājsistēmā Windows: jauns logs Mājās, lai kura lietotne būtu priekšplānā.",
 "Open disks when they're connected": "Atvērt diskus, kad tie tiek pievienoti",
-"A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB zibatmiņa, karte vai diska attēls atveras cilnē, tāpat kā Finder."
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB zibatmiņa, karte vai diska attēls atveras cilnē, tāpat kā Finder.",
+"Resume": "Turpināt",
+"Pause": "Pauzēt",
+"Paused": "Pauzēts"
 }

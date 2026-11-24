@@ -131,6 +131,13 @@ final class Transfer: @unchecked Sendable {
     let sources: [URL]
     let dest: URL
     private let lock = NSLock()
+    private var _paused = false
+    /// Card › Pause: the copy waits at its next step until resumed (issue 322).
+    var paused: Bool {
+        get { lock.withLock { _paused } }
+        set { lock.withLock { _paused = newValue } }
+    }
+
     private var _cancelled = false
     var cancelled: Bool {
         get { lock.withLock { _cancelled } }
@@ -165,6 +172,7 @@ final class Transfer: @unchecked Sendable {
             ? String(localized: "Copying \(what) to \(dest.lastPathComponent)")
             : String(localized: "Moving \(what) to \(dest.lastPathComponent)")
         let card = StatusCenter.shared.add(title: title, folder: dest) { [weak self] in self?.cancelled = true }
+        card.pause = { [weak self] on in self?.paused = on }
         // Settings › Advanced › Copying, read once for the whole run
         limit = Double(AppSettings.copyLimit) * 1_000_000
         verify = AppSettings.verifyCopies
@@ -250,6 +258,7 @@ final class Transfer: @unchecked Sendable {
         var undo: [FileOp] = []
         var replaced: [URL] = []
         for step in steps {
+            waitWhilePaused()
             if cancelled { break }
             if step.replace {
                 // what is replaced goes to the Trash, so the undo can bring it back
@@ -307,7 +316,16 @@ final class Transfer: @unchecked Sendable {
     private var began = Date()
     private var copied: UInt64 = 0
 
+    /// While paused, the copy waits here (the speed limit's clock waits with it).
+    private func waitWhilePaused() {
+        guard paused else { return }
+        let from = Date()
+        while paused && !cancelled { usleep(100_000) }
+        began = began.addingTimeInterval(Date().timeIntervalSince(from))
+    }
+
     fileprivate func progressed(_ bytes: UInt64) -> Bool {
+        waitWhilePaused()
         if bytes >= fileDone {
             done += bytes - fileDone
             copied += bytes - fileDone

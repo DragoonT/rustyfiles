@@ -891,5 +891,8 @@
 "Shortcut that opens rustyfiles from any app": "Shortcut na nagbubukas sa rustyfiles mula sa kahit anong app",
 "Like Win+E on Windows: a new window at Home, whatever app is in front.": "Katulad ng Win+E sa Windows: bagong window sa Home, anuman ang app na nasa harap.",
 "Open disks when they're connected": "Buksan ang mga disk kapag nakakonekta ang mga ito",
-"A USB stick, a card or a disk image opens in a tab, as Finder does.": "Ang USB stick, card, o disk image ay bubukas sa isang tab, gaya ng ginagawa ng Finder."
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "Ang USB stick, card, o disk image ay bubukas sa isang tab, gaya ng ginagawa ng Finder.",
+"Resume": "Ipagpatuloy",
+"Pause": "I-pause",
+"Paused": "Naka-pause"
 }

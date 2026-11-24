@@ -891,5 +891,8 @@
 "Shortcut that opens rustyfiles from any app": "Pikanäppäin, joka avaa rustyfilesin mistä tahansa sovelluksesta",
 "Like Win+E on Windows: a new window at Home, whatever app is in front.": "Kuten Win+E Windowsissa: uusi ikkuna Kotiin riippumatta siitä, mikä sovellus on edessä.",
 "Open disks when they're connected": "Avaa levyt, kun ne liitetään",
-"A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB-muisti, kortti tai levykuva avautuu välilehdelle, kuten Finderissa."
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB-muisti, kortti tai levykuva avautuu välilehdelle, kuten Finderissa.",
+"Resume": "Jatka",
+"Pause": "Keskeytä",
+"Paused": "Keskeytetty"
 }

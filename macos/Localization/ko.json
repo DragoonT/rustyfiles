@@ -891,5 +891,8 @@
 "Shortcut that opens rustyfiles from any app": "어떤 앱에서든 rustyfiles를 여는 단축키",
 "Like Win+E on Windows: a new window at Home, whatever app is in front.": "Windows의 Win+E처럼, 맨 앞의 앱과 관계없이 홈에 새 창을 엽니다.",
 "Open disks when they're connected": "디스크가 연결되면 열기",
-"A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB 메모리, 카드, 디스크 이미지는 Finder처럼 탭에서 열립니다."
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB 메모리, 카드, 디스크 이미지는 Finder처럼 탭에서 열립니다.",
+"Resume": "계속",
+"Pause": "일시 중지",
+"Paused": "일시 중지됨"
 }

@@ -891,5 +891,8 @@
 "Shortcut that opens rustyfiles from any app": "Snelkoppeling die rustyfiles opent vanuit elke app",
 "Like Win+E on Windows: a new window at Home, whatever app is in front.": "Zoals Win+E op Windows: een nieuw venster op Start, welke app er ook vooraan staat.",
 "Open disks when they're connected": "Schijven openen wanneer ze worden aangesloten",
-"A USB stick, a card or a disk image opens in a tab, as Finder does.": "Een USB-stick, kaart of schijfimage opent zich in een tabblad, zoals in de Finder."
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "Een USB-stick, kaart of schijfimage opent zich in een tabblad, zoals in de Finder.",
+"Resume": "Hervatten",
+"Pause": "Onderbreken",
+"Paused": "Gepauzeerd"
 }

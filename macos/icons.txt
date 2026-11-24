@@ -135,3 +135,5 @@ save
 file-plus
 flask-conical
 puzzle
+pause
+play

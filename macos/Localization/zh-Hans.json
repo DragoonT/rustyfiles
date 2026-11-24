@@ -891,5 +891,8 @@
 "Shortcut that opens rustyfiles from any app": "在任何应用中打开 rustyfiles 的快捷键",
 "Like Win+E on Windows: a new window at Home, whatever app is in front.": "类似 Windows 上的 Win+E：无论前台是哪个应用，都在“主页”打开一个新窗口。",
 "Open disks when they're connected": "磁盘连接后自动打开",
-"A USB stick, a card or a disk image opens in a tab, as Finder does.": "U 盘、存储卡或磁盘映像会像 Finder 一样在标签页中打开。"
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "U 盘、存储卡或磁盘映像会像 Finder 一样在标签页中打开。",
+"Resume": "继续",
+"Pause": "暂停",
+"Paused": "已暂停"
 }

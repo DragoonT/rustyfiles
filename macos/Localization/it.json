@@ -891,5 +891,8 @@
 "Shortcut that opens rustyfiles from any app": "Scorciatoia che apre rustyfiles da qualsiasi app",
 "Like Win+E on Windows: a new window at Home, whatever app is in front.": "Come Win+E su Windows: una nuova finestra in Home, qualunque sia l’app in primo piano.",
 "Open disks when they're connected": "Apri i dischi quando vengono collegati",
-"A USB stick, a card or a disk image opens in a tab, as Finder does.": "Una chiavetta USB, una scheda o un’immagine disco si apre in una scheda, come fa il Finder."
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "Una chiavetta USB, una scheda o un’immagine disco si apre in una scheda, come fa il Finder.",
+"Resume": "Riprendi",
+"Pause": "Pausa",
+"Paused": "In pausa"
 }

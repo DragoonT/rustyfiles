@@ -891,5 +891,8 @@
 "Shortcut that opens rustyfiles from any app": "Snarvei som åpner rustyfiles fra hvilken som helst app",
 "Like Win+E on Windows: a new window at Home, whatever app is in front.": "Som Win+E på Windows: et nytt vindu på Hjem, uansett hvilken app som er foran.",
 "Open disks when they're connected": "Åpne disker når de kobles til",
-"A USB stick, a card or a disk image opens in a tab, as Finder does.": "En USB-pinne, et kort eller en diskavbildning åpnes i en fane, slik Finder gjør."
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "En USB-pinne, et kort eller en diskavbildning åpnes i en fane, slik Finder gjør.",
+"Resume": "Fortsett",
+"Pause": "Pause",
+"Paused": "Satt på pause"
 }

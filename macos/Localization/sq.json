@@ -891,5 +891,8 @@
 "Shortcut that opens rustyfiles from any app": "Shkurtore që hap rustyfiles nga çdo aplikacion",
 "Like Win+E on Windows: a new window at Home, whatever app is in front.": "Si Win+E në Windows: një dritare e re te Shtëpi, çfarëdo aplikacioni që të jetë në plan të parë.",
 "Open disks when they're connected": "Hap diskat kur lidhen",
-"A USB stick, a card or a disk image opens in a tab, as Finder does.": "Një USB, kartë ose imazh disku hapet në një skedë, ashtu si në Finder."
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "Një USB, kartë ose imazh disku hapet në një skedë, ashtu si në Finder.",
+"Resume": "Vazhdo",
+"Pause": "Pauzë",
+"Paused": "Në pauzë"
 }

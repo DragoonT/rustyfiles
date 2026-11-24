@@ -891,5 +891,8 @@
 "Shortcut that opens rustyfiles from any app": "Kortpad wat rustyfiles vanuit enige program oopmaak",
 "Like Win+E on Windows: a new window at Home, whatever app is in front.": "Soos Win+E op Windows: ’n nuwe venster by Tuis, wat ook al die voorste program is.",
 "Open disks when they're connected": "Maak skywe oop wanneer hulle gekoppel word",
-"A USB stick, a card or a disk image opens in a tab, as Finder does.": "’n USB-stokkie, ’n kaart of ’n skyfbeeld maak in ’n oortjie oop, soos Finder doen."
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "’n USB-stokkie, ’n kaart of ’n skyfbeeld maak in ’n oortjie oop, soos Finder doen.",
+"Resume": "Hervat",
+"Pause": "Onderbreek",
+"Paused": "Gepouseer"
 }

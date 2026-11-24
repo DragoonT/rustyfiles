@@ -73,9 +73,21 @@ enum SelfTest {
                         check(fm.fileExists(atPath: inbox.appendingPathComponent("note.txt").path), "organizer left the text file")
                         um.undo()
                         check(fm.fileExists(atPath: inbox.appendingPathComponent("one.jpg").path), "undo puts the pictures back")
-                        try? fm.removeItem(at: root)
-                        print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
-                        exit(failures == 0 ? 0 : 1)
+                        // 10. a paused copy writes nothing until it is resumed (issue 322)
+                        let c = root.appendingPathComponent("c")
+                        try? fm.createDirectory(at: c, withIntermediateDirectories: true)
+                        let paused = Transfer(.copy, [a.appendingPathComponent("big.bin")], into: c)
+                        paused.paused = true
+                        paused.start(window: nil) { made in
+                            check(made.count == 1 && fm.fileExists(atPath: c.appendingPathComponent("big.bin").path), "a resumed copy finishes")
+                            try? fm.removeItem(at: root)
+                            print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
+                            exit(failures == 0 ? 0 : 1)
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                            check(!fm.fileExists(atPath: c.appendingPathComponent("big.bin").path), "a paused copy writes nothing")
+                            paused.paused = false
+                        }
                     }
                 }
             }

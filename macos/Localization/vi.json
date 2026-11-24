@@ -891,5 +891,8 @@
 "Shortcut that opens rustyfiles from any app": "Phím tắt mở rustyfiles từ bất kỳ ứng dụng nào",
 "Like Win+E on Windows: a new window at Home, whatever app is in front.": "Giống Win+E trên Windows: một cửa sổ mới tại Trang chủ, bất kể ứng dụng nào đang ở phía trước.",
 "Open disks when they're connected": "Mở ổ đĩa khi được kết nối",
-"A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB, thẻ nhớ hoặc tệp ảnh đĩa sẽ mở trong một thẻ, giống Finder."
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB, thẻ nhớ hoặc tệp ảnh đĩa sẽ mở trong một thẻ, giống Finder.",
+"Resume": "Tiếp tục",
+"Pause": "Tạm dừng",
+"Paused": "Đã tạm dừng"
 }

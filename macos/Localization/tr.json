@@ -892,5 +892,8 @@
 "Shortcut that opens rustyfiles from any app": "Her uygulamadan rustyfiles'ı açan kısayol",
 "Like Win+E on Windows: a new window at Home, whatever app is in front.": "Windows'taki Win+E gibi: önde hangi uygulama olursa olsun Ana sayfada yeni bir pencere.",
 "Open disks when they're connected": "Takılan diskleri aç",
-"A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB bellek, kart ya da disk görüntüsü Finder'daki gibi bir sekmede açılır."
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB bellek, kart ya da disk görüntüsü Finder'daki gibi bir sekmede açılır.",
+"Pause": "Duraklat",
+"Paused": "Duraklatıldı",
+"Resume": "Devam et"
 }

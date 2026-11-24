@@ -891,5 +891,8 @@
 "Shortcut that opens rustyfiles from any app": "どのアプリからでも rustyfiles を開くショートカット",
 "Like Win+E on Windows: a new window at Home, whatever app is in front.": "Windows の Win+E のように、手前のアプリに関係なくホームで新しいウィンドウを開きます。",
 "Open disks when they're connected": "ディスクは接続されたときに開く",
-"A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB メモリ、カード、ディスクイメージは、Finder と同じようにタブで開きます。"
+"A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB メモリ、カード、ディスクイメージは、Finder と同じようにタブで開きます。",
+"Resume": "再開",
+"Pause": "一時停止",
+"Paused": "一時停止中"
 }

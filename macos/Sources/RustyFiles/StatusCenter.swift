@@ -24,6 +24,9 @@ final class StatusCenter {
         private(set) var total: UInt64 = 0
         private(set) var state: State = .running
         let cancel: (() -> Void)?
+        /// Pauses (true) or resumes the work; nil: it can't be paused.
+        var pause: ((Bool) -> Void)?
+        private(set) var isPaused = false
         let started = Date()
         private(set) var ended: Date?
         /// Bytes a second, smoothed so the number does not jump about.
@@ -37,6 +40,16 @@ final class StatusCenter {
             self.title = title
             self.folder = folder
             self.cancel = cancel
+        }
+
+        @MainActor func setPaused(_ on: Bool) {
+            guard state == .running, isPaused != on, let pause else { return }
+            isPaused = on
+            pause(on)
+            // the speed starts again from here
+            lastSample = nil
+            speed = 0
+            StatusCenter.shared.changed()
         }
 
         @MainActor func update(done: UInt64, total: UInt64) {
@@ -203,13 +216,23 @@ final class StatusCenterView: FlippedView {
 final class StatusCardView: HoverView {
     let card: StatusCenter.Card
     private let button = IconButton(icon: "x", size: NSSize(width: 28, height: 28), iconSize: 14)
+    /// Pause and resume, for work that can wait (copies and moves, issue 322).
+    private let pauseButton = IconButton(icon: "pause", size: NSSize(width: 28, height: 28), iconSize: 14)
 
     init(_ card: StatusCenter.Card) {
         self.card = card
         super.init(frame: .zero)
         button.tint = { $0.textSecondary }
         button.action = { [weak self] _ in self?.act() }
+        pauseButton.tint = { $0.textSecondary }
+        pauseButton.action = { [weak self] _ in
+            guard let self else { return }
+            self.card.setPaused(!self.card.isPaused)
+            self.needsLayout = true
+            self.needsDisplay = true
+        }
         addSubview(button)
+        addSubview(pauseButton)
     }
 
     @available(*, unavailable)
@@ -226,6 +249,10 @@ final class StatusCardView: HoverView {
     override func layout() {
         super.layout()
         button.frame = NSRect(x: bounds.width - 8 - 28, y: (bounds.height - 28) / 2, width: 28, height: 28)
+        pauseButton.frame = button.frame.offsetBy(dx: -30, dy: 0)
+        pauseButton.isHidden = card.state != .running || card.pause == nil
+        pauseButton.icon = card.isPaused ? "play" : "pause"
+        pauseButton.toolTip = card.isPaused ? String(localized: "Resume") : String(localized: "Pause")
         switch card.state {
         case .running:
             button.icon = "x"
@@ -246,7 +273,7 @@ final class StatusCardView: HoverView {
         path.fill()
         p.border.setStroke()
         path.stroke()
-        let textW = bounds.width - 12 - 44
+        let textW = bounds.width - 12 - (card.state == .running && card.pause != nil ? 74 : 44)
         Draw.text(card.title, in: NSRect(x: 12, y: 8, width: textW, height: 20), font: Metrics.textSm, color: p.text)
         var first = "", second = ""
         var color = p.textSecondary
@@ -264,6 +291,7 @@ final class StatusCardView: HoverView {
                 if !speed.isEmpty { parts.append(speed) }
                 if let left = card.remaining { parts.append(String(localized: "about \(StatusCenter.duration(left)) left")) }
                 second = parts.joined(separator: " · ")
+                if card.isPaused { second = String(localized: "Paused") }
             } else {
                 first = String(localized: "Waiting for the other device…")
             }
