@@ -650,8 +650,10 @@ pub struct FolderView {
     /// a clipped copy of the whole row, so the pointer is over one copy of a tile at a time and a hover style lit only that slice's
     /// strip of it, issue 157). The tile's fill follows this instead.
     grid_hover: Option<(usize, u32)>,
-    /// Serial of the last click on a file in a column right of the list's (`pick_in_column`); a later click cancels a pending one.
-    static_pick: u64,
+    /// The last click on an item in a column beside the list's own (`pick_in_column`), for the second click of a double click.
+    col_pick: Option<ColPick>,
+    /// The scroll position of the column a click was made in, for the list that takes that column's place (`pick_in_column`).
+    col_carry: Option<Pixels>,
     /// What the first click of a possible double click was made on (`completes_double`).
     first_click: Option<FirstClick>,
     /// Counts the listings shown (every `load`): a click belongs to the listing it was made in.
@@ -692,6 +694,8 @@ pub struct FolderView {
     size_polling: bool,
     col_scroll: ScrollHandle,
     col_key: Option<(PathBuf, Option<PathBuf>)>,
+    /// The folder of the leftmost column, as last drawn (`column_ancestors`).
+    col_root: Option<PathBuf>,
     /// Per-ancestor-column scroll handles, and which (dir, highlighted child) we already scrolled to.
     col_scrolls: std::collections::HashMap<PathBuf, UniformListScrollHandle>,
     col_scrolled: HashSet<(PathBuf, String)>,
@@ -855,7 +859,8 @@ impl FolderView {
             hover_detail_target: None,
             hover_detail_serial: 0,
             grid_hover: None,
-            static_pick: 0,
+            col_pick: None,
+            col_carry: None,
             first_click: None,
             load_serial: 0,
             soft_pending: None,
@@ -884,6 +889,7 @@ impl FolderView {
             size_polling: false,
             col_scroll: ScrollHandle::new(),
             col_key: None,
+            col_root: None,
             col_scrolls: Default::default(),
             col_scrolled: HashSet::new(),
             _git_task: None,
@@ -1074,6 +1080,40 @@ impl FolderView {
             let tip_path = self.path_of(ei);
             let tip_folder_size = tip_path.as_ref().and_then(|path| self.known_folder_size(path, on_disk));
             let item_tips = !crate::fluent_menu::is_open(cx) && cx.global::<crate::settings::Settings>().item_hover_details;
+            // the rename box, as in the Details rows (issue 319: the columns drew none, so F2 seemed to do nothing while the keys
+            // went to a box that was not on the screen)
+            let rename_input = self.renaming.as_ref().filter(|(i, _)| *i == ei).map(|(_, inp)| inp.clone());
+            let name_el: AnyElement = match rename_input {
+                Some(inp) => div()
+                    .capture_key_down({
+                        let input = inp.clone();
+                        cx.listener(move |_, ev: &KeyDownEvent, _, cx| crate::rtl::handle_key_down(&input, ev, cx))
+                    })
+                    .flex_1()
+                    .min_w_0()
+                    .h(px(24.))
+                    .ml(px(-RENAME_INSET))
+                    .px(px(RENAME_INSET - 1.))
+                    .rounded(px(4.))
+                    .bg(p.card_bg)
+                    .border_1()
+                    .border_color(p.accent)
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    // a press anywhere else applies the new name, as in Explorer (issue 180)
+                    .on_mouse_down_out(cx.listener(|this, _: &MouseDownEvent, window, cx| this.commit_rename_if_open(window, cx)))
+                    .child(gpui_kit::component::input::Input::new(&inp).appearance(false).small().px_0())
+                    .into_any_element(),
+                None => div()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .whitespace_nowrap()
+                    .when(dim, |d| d.opacity(0.6))
+                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true))
+                    .child(crate::rtl::display_text(&row_name(e, show_ext, self.renamed.as_ref())))
+                    .into_any_element(),
+            };
             out.push(
                 h_flex()
                     .id(("crow", vi))
@@ -1096,7 +1136,7 @@ impl FolderView {
                         e.link,
                         overlay,
                     ), self.part_frac(ei))))
-                    .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().when(dim, |d| d.opacity(0.6)).on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true)).child(crate::rtl::display_text(&row_name(e, show_ext, self.renamed.as_ref()))))
+                    .child(name_el)
                     .when(is_dir, |d| d.child(Icon::new(L::ChevronRight).size(px(12.)).text_color(p.text_tertiary)))
                     .on_mouse_down(
                         MouseButton::Left,
@@ -1131,15 +1171,19 @@ impl FolderView {
     fn render_columns(&mut self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         // (a place that is no folder, a tag or search results, is the current column alone: it was an empty view, issue 255)
         let cur = self.current_dir();
-        // Up to two ancestor columns, each highlighting the child on the current path.
-        let mut ancestors: Vec<(PathBuf, String)> = Vec::new();
-        let mut child = cur.clone().unwrap_or_default();
-        for _ in 0..usize::from(cur.is_some()) * 2 {
-            let Some(parent) = child.parent().filter(|p| !p.as_os_str().is_empty()).map(|p| p.to_path_buf()) else { break };
-            ancestors.push((parent.clone(), rf_core::history::display_name(&child)));
-            child = parent;
+        // The ancestor columns, each highlighting the child on the current path.
+        let dirs = cur.as_deref().map(|c| column_ancestors(c, self.col_root.as_deref())).unwrap_or_default();
+        let ancestors: Vec<(PathBuf, String)> = dirs
+            .iter()
+            .enumerate()
+            .filter_map(|(i, d)| {
+                let child = dirs.get(i + 1).map(PathBuf::as_path).or(cur.as_deref())?;
+                Some((d.clone(), rf_core::history::display_name(child)))
+            })
+            .collect();
+        if let Some(c) = &cur {
+            self.col_root = Some(dirs.first().unwrap_or(c).clone());
         }
-        ancestors.reverse();
         let next_dir = self.cursor_entry().filter(|&ei| self.entries[ei as usize].is_dir()).and_then(|ei| self.path_of(ei));
         for (d, _) in &ancestors {
             self.ensure_column(d.clone(), cx);
@@ -1186,7 +1230,9 @@ impl FolderView {
         );
         if let Some(nd) = next_dir {
             let list = self.column_cache.get(&nd).cloned();
-            strip = strip.child(static_column("col-next".into(), nd, list, None, None, p, entity));
+            // (its scroll position is kept too: a click in it makes it the list's column, which starts where it stood)
+            let handle = self.col_scrolls.entry(nd.clone()).or_insert_with(UniformListScrollHandle::new).clone();
+            strip = strip.child(static_column("col-next".into(), nd, list, None, Some(handle), p, entity));
         }
         strip.into_any_element()
     }
@@ -2022,6 +2068,13 @@ impl FolderView {
         if let Some(name) = self.reselect.take() {
             if let Some(vi) = self.visible.iter().position(|&i| &*self.entries[i as usize].name == name) {
                 self.select_only(vi);
+                // (after a click in another column the list starts where that column stood, so the item does not jump)
+                if let Some(y) = self.col_carry.take() {
+                    let base = self.scroll.0.borrow().base_handle.clone();
+                    let mut o = base.offset();
+                    o.y = y;
+                    base.set_offset(o);
+                }
                 self.scroll.scroll_to_item(self.list_row(vi), ScrollStrategy::Nearest);
                 if std::mem::take(&mut self.rename_after_load) {
                     self.pending_rename = true;
@@ -3324,9 +3377,13 @@ impl FolderView {
         let second = is_second_click(ev.click_count);
         let double = second && completes_double(self.first_click.as_ref(), self.load_serial, Some(&name));
         self.first_click = (!second).then(|| FirstClick { load: self.load_serial, name: Some(name) });
+        if !second {
+            self.col_pick = None;
+        }
         if second && !double {
             // (it landed on this row because the listing changed under the pointer: the user did not aim at it, so it does not even
-            // select it)
+            // select it; after a click in another column it is that item's double click)
+            self.finish_col_pick(cx);
             return;
         }
         if plain && double {
@@ -3559,23 +3616,63 @@ impl FolderView {
         .detach();
     }
 
-    /// A click on a file in a column to the right of the list's: once the double-click time passes without a second click, that
-    /// column's folder becomes the list's and the file is selected in it. Not at once: the columns move over by one then, and the
-    /// second click of a double click (which opens the file) has to land on the same row first.
-    fn pick_in_column(&mut self, dir: PathBuf, name: String, cx: &mut Context<Self>) {
-        self.static_pick += 1;
-        let serial = self.static_pick;
+    /// A click on an item in a column beside the list's own: that column's folder becomes the list's and the item is selected in it,
+    /// at once. WHY (issue 319): a click on a folder there went INTO the folder, where the first item is selected by itself, so
+    /// the folder that was clicked looked chosen while Delete took the first item inside it. The columns keep their places
+    /// (`column_ancestors`) and the list starts where that column was scrolled to, so the item stays under the pointer.
+    fn pick_in_column(&mut self, dir: PathBuf, name: String, is_dir: bool, cx: &mut Context<Self>) {
+        self.col_pick = Some(ColPick { target: dir.join(&name), is_dir, at: Instant::now() });
+        self.first_click = None;
+        self.col_carry = self.col_scrolls.get(&dir).map(|h| h.0.borrow().base_handle.offset().y);
+        self.set_reselect(name);
+        self.navigate(Location::Path(dir), cx);
+    }
+
+    /// The second click of a double click whose first one picked an item in another column (`pick_in_column`): it opens that item,
+    /// a folder in the list and a file with its program, whatever stands under the pointer by now (the listing is a new one, so
+    /// the list itself does not take the pair for a double click). `false`: no such pick was waiting.
+    fn finish_col_pick(&mut self, cx: &mut Context<Self>) -> bool {
         let wait = std::time::Duration::from_millis(unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime() } as u64);
-        cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(wait).await;
-            let _ = this.update(cx, |v, cx| {
-                if v.static_pick == serial {
-                    v.set_reselect(name);
-                    v.navigate(Location::Path(dir), cx);
-                }
-            });
-        })
-        .detach();
+        let Some(pick) = self.col_pick.take().filter(|p| p.at.elapsed() <= wait) else { return false };
+        if pick.is_dir {
+            self.clear_reselect();
+            self.col_carry = None;
+            self.navigate(Location::Path(pick.target), cx);
+        } else {
+            // (a shortcut to a folder opens that folder here, as in the list: a user on Discord, 2026-11-20)
+            let view = cx.entity();
+            open_file_or_link(pick.target, cx, move |dir, cx| view.update(cx, |v, cx| v.navigate(Location::Path(dir), cx)));
+        }
+        true
+    }
+
+    /// A click on a row of a column beside the list's own (`second`: the second of a double click).
+    fn column_row_click(&mut self, dir: PathBuf, name: String, is_dir: bool, second: bool, cx: &mut Context<Self>) {
+        if second {
+            self.finish_col_pick(cx);
+        } else if is_dir && cx.global::<crate::settings::Settings>().single_click != crate::settings::ClickPref::Never {
+            // Settings → "Open items with a single click": a folder opens, as it does in the list
+            self.col_pick = None;
+            self.navigate(Location::Path(dir.join(name)), cx);
+        } else {
+            self.pick_in_column(dir, name, is_dir, cx);
+        }
+    }
+
+    /// A press on the empty space of a column beside the list's own. It does not clear the selection (issue 140: the column of the
+    /// selected folder went away under the pointer); a double click there goes up, as one in the list's own column does (Settings →
+    /// "Double-click an empty area to go up"; issue 318: it did so in one column only).
+    fn column_empty_press(&mut self, ev: &MouseDownEvent, cx: &mut Context<Self>) {
+        let second = is_second_click(ev.click_count);
+        let double = second && completes_double(self.first_click.as_ref(), self.load_serial, None);
+        self.first_click = (!second).then(|| FirstClick { load: self.load_serial, name: None });
+        if !second {
+            self.col_pick = None;
+        } else if !double {
+            self.finish_col_pick(cx);
+        } else if cx.global::<crate::settings::Settings>().double_click_up {
+            self.up(cx);
+        }
     }
 
     fn arm_slow_click(&mut self, ei: u32, cx: &mut Context<Self>) {
@@ -4103,7 +4200,8 @@ impl FolderView {
     /// column"): the press went through to the list's background, which took it as a click on nothing and cleared the selection,
     /// and the column of the selected folder went away.
     fn menu_in_column(&mut self, dir: PathBuf, name: String, window: &mut Window, cx: &mut Context<Self>) {
-        self.static_pick += 1; // (a single click's pick still waiting is not wanted any more)
+        self.col_pick = None;
+        self.col_carry = self.col_scrolls.get(&dir).map(|h| h.0.borrow().base_handle.offset().y);
         self.menu_after_load = Some(window.window_handle());
         self.set_reselect(name);
         self.navigate(Location::Path(dir), cx);
@@ -5148,6 +5246,11 @@ impl FolderView {
                             let second = is_second_click(ev.click_count);
                             let double = second && completes_double(this.first_click.as_ref(), this.load_serial, None);
                             this.first_click = (!second).then(|| FirstClick { load: this.load_serial, name: None });
+                            if !second {
+                                this.col_pick = None;
+                            } else if !double && this.finish_col_pick(cx) {
+                                return;
+                            }
                             if double && cx.global::<crate::settings::Settings>().double_click_up {
                                 this.up(cx);
                                 return;
@@ -5886,6 +5989,25 @@ fn row_name(e: &Entry, show_ext: bool, renamed: Option<&(Arc<str>, Arc<str>)>) -
 }
 
 const COL_W: Pixels = px(250.);
+/// The most columns left of the list's own.
+const COL_ANCESTORS_MOST: usize = 6;
+
+/// The folders shown as columns left of the list's own, the leftmost first. The leftmost column (`root`, the folder it showed when
+/// the columns were last drawn) stays while the list's folder is that folder or lies under it, so a click in any column leaves
+/// every column where it is and only the ones to its right change, as in Finder. With always two folders above the list's, a
+/// click in a column moved all of them over (issue 319). Anywhere else, and more than `COL_ANCESTORS_MOST` folders under the
+/// root, the two folders above the list's.
+fn column_ancestors(cur: &Path, root: Option<&Path>) -> Vec<PathBuf> {
+    // (the parent first)
+    let chain: Vec<&Path> = cur.ancestors().skip(1).filter(|p| !p.as_os_str().is_empty()).collect();
+    let usual = chain.len().min(2);
+    let keep = match root {
+        Some(r) if r == cur => 0,
+        Some(r) => chain.iter().position(|p| *p == r).filter(|&i| i < COL_ANCESTORS_MOST).map_or(usual, |i| i + 1),
+        None => usual,
+    };
+    chain[..keep].iter().rev().map(|p| p.to_path_buf()).collect()
+}
 
 /// A read-only column (ancestor or next folder) in the columns view.
 fn static_column(
@@ -5897,6 +6019,7 @@ fn static_column(
     p: &Palette,
     view: Entity<FolderView>,
 ) -> impl IntoElement {
+    let empty_view = view.clone();
     let body: AnyElement = match list {
         None => div().p_3().text_xs().text_color(p.text_tertiary).child(t!("Yükleniyor…")).into_any_element(),
         Some(list) if list.is_empty() => div().p_3().text_xs().text_color(p.text_tertiary).child(t!("Boş")).into_any_element(),
@@ -5945,22 +6068,22 @@ fn static_column(
                                     view.update(cx, |v, cx| v.menu_in_column(dir.clone(), name.clone(), window, cx));
                                 }
                             })
+                            // a middle click on a folder opens it in a new tab, as in the list's own column (issue 318)
+                            .on_mouse_down(MouseButton::Middle, {
+                                let (view, target) = (view.clone(), target.clone());
+                                move |_, _, cx| {
+                                    if is_dir {
+                                        cx.stop_propagation();
+                                        view.update(cx, |_, cx| cx.emit(FolderEvent::OpenInNewTab(Location::Path(target.clone()))));
+                                    }
+                                }
+                            })
+                            // one click selects the item in its own column, a second one opens it (issues 118 and 319)
                             .on_click({
                                 let (dir, name) = (dir.clone(), e.name.to_string());
                                 move |ev: &ClickEvent, _, cx| {
-                                    if is_dir {
-                                        view.update(cx, |v, cx| v.navigate(Location::Path(target.clone()), cx));
-                                    } else if ev.click_count() >= 2 {
-                                        view.update(cx, |v, _| v.static_pick += 1);
-                                        // (a shortcut to a folder opens that folder here, as in the list: a user on Discord, 2026-11-20)
-                                        let view = view.clone();
-                                        open_file_or_link(target.clone(), cx, move |dir, cx| {
-                                            let _ = view.update(cx, |v, cx| v.navigate(Location::Path(dir), cx));
-                                        });
-                                    } else {
-                                        // one click selects the file, as in the list's own column (issue 118: it opened it)
-                                        view.update(cx, |v, cx| v.pick_in_column(dir.clone(), name.clone(), cx));
-                                    }
+                                    let second = is_second_click(ev.click_count());
+                                    view.update(cx, |v, cx| v.column_row_click(dir.clone(), name.clone(), is_dir, second, cx));
                                 }
                             });
                         file_drop_target(row, drop_path, is_dir, &pal).into_any_element()
@@ -5981,7 +6104,10 @@ fn static_column(
         .border_color(p.divider)
         // a press on the column's empty space is not the list's: the list's background took it as a click on nothing, cleared the
         // selection, and the column of the selected folder went away under the pointer (issue 140)
-        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .on_mouse_down(MouseButton::Left, move |ev, _, cx| {
+            cx.stop_propagation();
+            empty_view.update(cx, |v, cx| v.column_empty_press(ev, cx));
+        })
         .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
         .child(body)
 }
@@ -6399,6 +6525,13 @@ struct FirstClick {
     name: Option<Arc<str>>,
 }
 
+/// A click on an item in a column beside the list's own: the item, and when.
+struct ColPick {
+    target: PathBuf,
+    is_dir: bool,
+    at: Instant,
+}
+
 struct RowPress {
     origin: Point<Pixels>,
     open_on_release: bool,
@@ -6508,6 +6641,47 @@ fn is_second_click(click_count: usize) -> bool {
 
 fn completes_double(first: Option<&FirstClick>, load: u64, name: Option<&str>) -> bool {
     first.is_some_and(|f| f.load == load && f.name.as_deref() == name)
+}
+
+#[cfg(test)]
+mod column_tests {
+    use std::path::{Path, PathBuf};
+
+    use super::column_ancestors;
+
+    fn dirs(cur: &str, root: Option<&str>) -> Vec<PathBuf> {
+        column_ancestors(Path::new(cur), root.map(Path::new))
+    }
+
+    fn paths(names: &[&str]) -> Vec<PathBuf> {
+        names.iter().map(PathBuf::from).collect()
+    }
+
+    #[test]
+    fn two_folders_above_the_lists_own_where_no_column_stands_yet() {
+        assert_eq!(dirs("C:/a/b/c/d", None), paths(&["C:/a/b", "C:/a/b/c"]));
+        assert_eq!(dirs("C:/a", None), paths(&["C:/"]));
+        assert_eq!(dirs("C:/", None), paths(&[]));
+        assert_eq!(dirs("C:/a/b/c/d", Some("D:/x")), paths(&["C:/a/b", "C:/a/b/c"]), "another place");
+    }
+
+    #[test]
+    fn the_leftmost_column_stays_while_the_list_is_in_it_or_under_it() {
+        // a click in the first column: its folder is the list's now, and it is still the first column
+        assert_eq!(dirs("C:/a/b", Some("C:/a/b")), paths(&[]));
+        // a click in the second one
+        assert_eq!(dirs("C:/a/b/c", Some("C:/a/b")), paths(&["C:/a/b"]));
+        // going deeper adds columns on the right
+        assert_eq!(dirs("C:/a/b/c/d/e", Some("C:/a/b")), paths(&["C:/a/b", "C:/a/b/c", "C:/a/b/c/d"]));
+        // going up past it starts again
+        assert_eq!(dirs("C:/a", Some("C:/a/b")), paths(&["C:/"]));
+    }
+
+    #[test]
+    fn far_under_the_leftmost_column_the_columns_start_again() {
+        assert_eq!(dirs("C:/1/2/3/4/5/6", Some("C:/")).len(), 6);
+        assert_eq!(dirs("C:/1/2/3/4/5/6/7", Some("C:/")), paths(&["C:/1/2/3/4/5", "C:/1/2/3/4/5/6"]));
+    }
 }
 
 #[cfg(test)]
