@@ -318,7 +318,6 @@
  "56fff0c0": "Slå emnevalg til/fra",
  "244766da": "Filtypenavn",
  "e1205f8f": "Hvis du ændrer et filtypenavn, kan filen blive ubrugelig. Er du sikker på, at du vil ændre det?",
- "7ac75322": "Venstre",
  "5e1cd1c8": "min",
  "38520459": "t",
  "e80edf36": "Åbn i nyt vindue",
@@ -2203,5 +2202,6 @@
  "8207de4b": "Vælg teksteditor",
  "ae5ba83f": "Søg efter navn eller et mønster som *.pdf; Enter søger også i undermapper",
  "0a64f2ce": "Dette element kopieres stadig. Omdøb det, når kopieringen er færdig.",
- "b8952992": "{name} + {n} mere"
+ "b8952992": "{name} + {n} mere",
+ "145a4b30": "{t} tilbage"
 }

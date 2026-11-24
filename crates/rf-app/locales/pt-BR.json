@@ -318,7 +318,6 @@
  "56fff0c0": "Alternar seleção de itens",
  "244766da": "Extensão de nome de arquivo",
  "e1205f8f": "Se você alterar a extensão de um arquivo, ele poderá ficar inutilizável. Tem certeza de que deseja alterá-la?",
- "7ac75322": "Esquerda",
  "5e1cd1c8": "min",
  "38520459": "h",
  "e80edf36": "Abrir em uma nova janela",
@@ -2203,5 +2202,6 @@
  "8207de4b": "Escolher editor de texto",
  "ae5ba83f": "Pesquise por nome ou por um padrão como *.pdf; Enter também procura nas subpastas",
  "0a64f2ce": "Este item ainda está sendo copiado. Renomeie-o quando a cópia terminar.",
- "b8952992": "{name} + {n} mais"
+ "b8952992": "{name} + {n} mais",
+ "145a4b30": "Restam {t}"
 }

@@ -318,7 +318,6 @@
  "56fff0c0": "Prepnúť výber",
  "244766da": "Prípona názvu súboru",
  "e1205f8f": "Ak zmeníte príponu názvu súboru, súbor sa môže stať nepoužiteľným. Naozaj ju chcete zmeniť?",
- "7ac75322": "Vľavo",
  "5e1cd1c8": "min",
  "38520459": "h",
  "e80edf36": "Otvoriť v novom okne",
@@ -2203,5 +2202,6 @@
  "8207de4b": "Vyberte textový editor",
  "ae5ba83f": "Hľadajte podľa názvu alebo vzoru ako *.pdf; Enter hľadá aj v podpriečinkoch",
  "0a64f2ce": "Táto položka sa ešte kopíruje. Premenujte ju po dokončení kopírovania.",
- "b8952992": "{name} + {n} ďalších"
+ "b8952992": "{name} + {n} ďalších",
+ "145a4b30": "Zostáva {t}"
 }

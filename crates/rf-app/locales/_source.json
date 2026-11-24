@@ -1915,12 +1915,6 @@
   "en": "If you change a file name extension, the file might become unusable. Are you sure you want to change it?"
  },
  {
-  "id": "7ac75322",
-  "key": "kaldı",
-  "tr": "kaldı",
-  "en": "left"
- },
- {
   "id": "5e1cd1c8",
   "key": "dk",
   "tr": "dk",
@@ -13298,5 +13292,23 @@
   "key": "{name} ve {n} öğe daha",
   "tr": "{name} ve {n} öğe daha",
   "en": "{name} + {n} more"
+ },
+ {
+  "id": "d14d53d5",
+  "key": "Aynı komut iki menüde de varsa klasik olanı göster",
+  "tr": "Aynı komut iki menüde de varsa klasik olanı göster",
+  "en": "When a command is in both menus, show the classic one"
+ },
+ {
+  "id": "e073e569",
+  "key": "Bazı uygulamalar (NanaZip gibi) komutlarını hem Windows 11'in yeni menüsüne hem klasik menüye ekler; menüde yalnızca biri gösterilir. Kapalıyken yeni menüdeki, açıkken klasik menüdeki kalır.",
+  "tr": "Bazı uygulamalar (NanaZip gibi) komutlarını hem Windows 11'in yeni menüsüne hem klasik menüye ekler; menüde yalnızca biri gösterilir. Kapalıyken yeni menüdeki, açıkken klasik menüdeki kalır.",
+  "en": "Some programs (NanaZip, for one) add their commands to Windows 11's new menu and to the classic one; the menu lists only one of them. Off keeps the new menu's, on keeps the classic one."
+ },
+ {
+  "id": "145a4b30",
+  "key": "{t} kaldı",
+  "tr": "{t} kaldı",
+  "en": "{t} left"
  }
 ]

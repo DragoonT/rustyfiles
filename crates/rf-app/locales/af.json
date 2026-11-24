@@ -318,7 +318,6 @@
  "56fff0c0": "Wissel itemkeuse",
  "244766da": "Lêernaamuitbreiding",
  "e1205f8f": "As jy 'n lêernaamuitbreiding verander, kan die lêer onbruikbaar word. Is jy seker jy wil dit verander?",
- "7ac75322": "oor",
  "5e1cd1c8": "min",
  "38520459": "u",
  "e80edf36": "Maak oop in nuwe venster",
@@ -2203,5 +2202,6 @@
  "8207de4b": "Kies teksredigeerder",
  "ae5ba83f": "Soek op naam of 'n patroon soos *.pdf; Enter soek ook in subomslae",
  "0a64f2ce": "Hierdie item word nog gekopieer. Hernoem dit wanneer die kopiëring klaar is.",
- "b8952992": "{name} + nog {n}"
+ "b8952992": "{name} + nog {n}",
+ "145a4b30": "{t} oor"
 }

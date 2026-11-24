@@ -20,7 +20,7 @@ use rf_core::transfer::{self as xfer, Outcome, Ring, Stage, Strip};
 use rf_win::fastcopy::Resolve;
 
 use crate::settings::TransferProgress;
-use crate::status_center::{OpPhase, OpView, Ops, RingState, fmt_duration};
+use crate::status_center::{OpPhase, OpView, Ops, RingState};
 use crate::t;
 use crate::theme::{self, Palette};
 
@@ -31,7 +31,7 @@ pub(crate) fn speed_text(bytes_per_sec: f64) -> String {
 
 /// "~34 sn kaldı".
 fn eta_text(secs: f64) -> String {
-    format!("{} {}", fmt_duration(secs as f32), t!("kaldı"))
+    crate::status_center::time_left(secs as f32)
 }
 
 /// "3,2 GB / 8,1 GB".

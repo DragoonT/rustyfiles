@@ -1542,7 +1542,7 @@ fn render_op(ops: &Entity<Ops>, op: &OpState, p: &Palette) -> AnyElement {
                     text = format!("{text} · {}", crate::transfer_view::speed_text(v));
                 }
                 match pace.eta_secs {
-                    Some(r) => format!("{text} · {} {}", fmt_duration(r as f32), t!("kaldı")),
+                    Some(r) => format!("{text} · {}", time_left(r as f32)),
                     None => format!("{text} · {} {}", elapsed as u64, t!("sn")),
                 }
             };
@@ -1665,6 +1665,13 @@ fn render_op(ops: &Entity<Ops>, op: &OpState, p: &Palette) -> AnyElement {
 /// "~45 sn", "~3 dk", "~1 sa 5 dk" (rounded; it is an estimate).
 pub(crate) fn fmt_duration(secs: f32) -> String {
     fmt_duration_with(secs, (crate::t!("sn"), crate::t!("dk"), crate::t!("sa")))
+}
+
+/// "~3 dk kaldı": the time a job still needs. One text with the time inside it, so each language puts its word where it belongs
+/// ("Noch ~3 Min"). WHY (issue 314): the word alone, "left" in English, came back from the translations as the left SIDE
+/// ("3 min Gauche"), in some thirty languages.
+pub(crate) fn time_left(secs: f32) -> String {
+    crate::t!("{t} kaldı").replace("{t}", &fmt_duration(secs))
 }
 
 /// Unit labels are parameters so the formatting is testable without the global language.

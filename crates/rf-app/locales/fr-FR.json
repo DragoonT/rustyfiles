@@ -318,7 +318,6 @@
  "56fff0c0": "Activer/Désactiver la sélection d'éléments",
  "244766da": "Extension de nom de fichier",
  "e1205f8f": "Si vous modifiez l'extension d'un nom de fichier, le fichier risque de devenir inutilisable. Voulez-vous vraiment la modifier ?",
- "7ac75322": "Gauche",
  "5e1cd1c8": "min",
  "38520459": "h",
  "e80edf36": "Ouvrir dans une nouvelle fenêtre",
@@ -2203,5 +2202,6 @@
  "8207de4b": "Choisir l'éditeur de texte",
  "ae5ba83f": "Recherchez par nom ou avec un modèle comme *.pdf ; Enter cherche aussi dans les sous-dossiers",
  "0a64f2ce": "Cet élément est encore en cours de copie. Renommez-le une fois la copie terminée.",
- "b8952992": "{name} + {n} de plus"
+ "b8952992": "{name} + {n} de plus",
+ "145a4b30": "{t} restantes"
 }

@@ -318,7 +318,6 @@
  "56fff0c0": "Inverti la selezione degli elementi",
  "244766da": "Estensione del nome file",
  "e1205f8f": "Se cambi l'estensione del nome file, il file potrebbe diventare inutilizzabile. Cambiarla comunque?",
- "7ac75322": "Sinistra",
  "5e1cd1c8": "min",
  "38520459": "h",
  "e80edf36": "Apri in una nuova finestra",
@@ -2203,5 +2202,6 @@
  "8207de4b": "Scegli editor di testo",
  "ae5ba83f": "Cerca per nome o con un modello come *.pdf; Invio cerca anche nelle sottocartelle",
  "0a64f2ce": "Questo elemento è ancora in fase di copia. Rinominalo al termine della copia.",
- "b8952992": "{name} + altri {n}"
+ "b8952992": "{name} + altri {n}",
+ "145a4b30": "{t} rimanenti"
 }

@@ -318,7 +318,6 @@
  "56fff0c0": "Vaihda kohteen valinta",
  "244766da": "Tiedostotarkenne",
  "e1205f8f": "Jos muutat tiedostotarkennetta, tiedosto voi muuttua käyttökelvottomaksi. Haluatko varmasti muuttaa sen?",
- "7ac75322": "Vasen",
  "5e1cd1c8": "min",
  "38520459": "t",
  "e80edf36": "Avaa uudessa ikkunassa",
@@ -2203,5 +2202,6 @@
  "8207de4b": "Valitse tekstieditori",
  "ae5ba83f": "Hae nimellä tai mallilla, kuten *.pdf; Enter hakee myös alikansioista",
  "0a64f2ce": "Tätä kohdetta kopioidaan vielä. Nimeä se uudelleen, kun kopiointi on valmis.",
- "b8952992": "{name} + {n} muuta"
+ "b8952992": "{name} + {n} muuta",
+ "145a4b30": "{t} jäljellä"
 }

@@ -318,7 +318,6 @@
  "56fff0c0": "Přepnout výběr položek",
  "244766da": "Přípona názvu souboru",
  "e1205f8f": "Pokud změníte příponu názvu souboru, soubor může přestat být použitelný. Opravdu ji chcete změnit?",
- "7ac75322": "Vlevo",
  "5e1cd1c8": "min",
  "38520459": "h",
  "e80edf36": "Otevřít v novém okně",
@@ -2203,5 +2202,6 @@
  "8207de4b": "Vyberte textový editor",
  "ae5ba83f": "Hledejte podle názvu nebo vzoru jako *.pdf; Enter hledá i v podsložkách",
  "0a64f2ce": "Tato položka se ještě kopíruje. Přejmenujte ji, až kopírování skončí.",
- "b8952992": "{name} + {n} dalších"
+ "b8952992": "{name} + {n} dalších",
+ "145a4b30": "Zbývá {t}"
 }

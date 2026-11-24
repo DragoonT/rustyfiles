@@ -318,7 +318,6 @@
  "56fff0c0": "Comutați selecția elementelor",
  "244766da": "Extensia numelui de fișier",
  "e1205f8f": "Dacă modificați extensia unui fișier, acesta poate deveni inutilizabil. Sigur doriți să o modificați?",
- "7ac75322": "Stânga",
  "5e1cd1c8": "min",
  "38520459": "h",
  "e80edf36": "Deschideți într-o fereastră nouă",
@@ -2203,5 +2202,6 @@
  "8207de4b": "Alegere editor de text",
  "ae5ba83f": "Căutați după nume sau după un model precum *.pdf; Enter caută și în subfoldere",
  "0a64f2ce": "Acest element încă se copiază. Redenumiți-l după ce copierea se termină.",
- "b8952992": "{name} + încă {n}"
+ "b8952992": "{name} + încă {n}",
+ "145a4b30": "Au mai rămas {t}"
 }

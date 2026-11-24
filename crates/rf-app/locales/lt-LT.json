@@ -318,7 +318,6 @@
  "56fff0c0": "Perjungti elemento pasirinkimą",
  "244766da": "Failo vardo plėtinys",
  "e1205f8f": "Pakeitus failo vardo plėtinį, failas gali tapti nenaudojamas. Ar tikrai norite jį pakeisti?",
- "7ac75322": "Kairė",
  "5e1cd1c8": "min.",
  "38520459": "val.",
  "e80edf36": "Atidaryti naujame lange",
@@ -2203,5 +2202,6 @@
  "8207de4b": "Pasirinkti tekstų redaktorių",
  "ae5ba83f": "Ieškokite pagal pavadinimą arba šabloną, pvz., *.pdf; Enter ieško ir poaplankiuose",
  "0a64f2ce": "Šis elementas dar kopijuojamas. Pervardykite jį, kai kopijavimas bus baigtas.",
- "b8952992": "{name} + dar {n}"
+ "b8952992": "{name} + dar {n}",
+ "145a4b30": "Liko {t}"
 }

@@ -318,7 +318,6 @@
  "56fff0c0": "Uključi/isključi odabir stavke",
  "244766da": "Proširenje naziva datoteke",
  "e1205f8f": "Ako promijenite proširenje naziva datoteke, datoteka bi mogla postati neupotrebljiva. Jeste li sigurni da ga želite promijeniti?",
- "7ac75322": "Lijevo",
  "5e1cd1c8": "min",
  "38520459": "h",
  "e80edf36": "Otvori u novom prozoru",
@@ -2203,5 +2202,6 @@
  "8207de4b": "Odaberi uređivač teksta",
  "ae5ba83f": "Tražite po nazivu ili uzorku poput *.pdf; Enter traži i u podmapama",
  "0a64f2ce": "Ova se stavka još kopira. Preimenujte je kad kopiranje završi.",
- "b8952992": "{name} + još {n}"
+ "b8952992": "{name} + još {n}",
+ "145a4b30": "Preostalo {t}"
 }

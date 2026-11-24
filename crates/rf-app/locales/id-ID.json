@@ -318,7 +318,6 @@
  "56fff0c0": "Aktifkan item pilihan",
  "244766da": "Ekstensi nama file",
  "e1205f8f": "Jika Anda mengubah ekstensi nama file, file mungkin tidak dapat digunakan. Yakin ingin mengubahnya?",
- "7ac75322": "Kiri",
  "5e1cd1c8": "mnt",
  "38520459": "j",
  "e80edf36": "Buka di jendela baru",
@@ -2203,5 +2202,6 @@
  "8207de4b": "Pilih editor teks",
  "ae5ba83f": "Cari berdasarkan nama atau pola seperti *.pdf; Enter juga mencari di subfolder",
  "0a64f2ce": "Item ini masih disalin. Ganti namanya setelah penyalinan selesai.",
- "b8952992": "{name} + {n} lainnya"
+ "b8952992": "{name} + {n} lainnya",
+ "145a4b30": "Sisa {t}"
 }

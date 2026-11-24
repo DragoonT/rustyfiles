@@ -318,7 +318,6 @@
  "56fff0c0": "Hoán đổi lựa chọn cuối",
  "244766da": "Phần mở rộng tên tệp",
  "e1205f8f": "Nếu bạn đổi phần mở rộng tên tệp, tệp có thể không dùng được nữa. Bạn có chắc muốn đổi không?",
- "7ac75322": "Trái",
  "5e1cd1c8": "phút",
  "38520459": "giờ",
  "e80edf36": "Mở trong cửa sổ mới",
@@ -2203,5 +2202,6 @@
  "8207de4b": "Chọn trình soạn thảo văn bản",
  "ae5ba83f": "Tìm theo tên hoặc mẫu như *.pdf; Enter tìm cả trong thư mục con",
  "0a64f2ce": "Mục này vẫn đang được sao chép. Hãy đổi tên khi sao chép xong.",
- "b8952992": "{name} + {n} mục khác"
+ "b8952992": "{name} + {n} mục khác",
+ "145a4b30": "Còn {t}"
 }

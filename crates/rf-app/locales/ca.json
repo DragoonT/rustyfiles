@@ -318,7 +318,6 @@
  "56fff0c0": "Commuta la selecció d'elements",
  "244766da": "Extensió del nom de fitxer",
  "e1205f8f": "Si canvies l'extensió del nom d'un fitxer, és possible que el fitxer quedi inutilitzable. Segur que vols canviar-la?",
- "7ac75322": "Esquerra",
  "5e1cd1c8": "min",
  "38520459": "h",
  "e80edf36": "Obre en una finestra nova",
@@ -2203,5 +2202,6 @@
  "8207de4b": "Tria l'editor de text",
  "ae5ba83f": "Cerca per nom o amb un patró com *.pdf; Enter cerca també a les subcarpetes",
  "0a64f2ce": "Aquest element encara s'està copiant. Canvia-li el nom quan acabi la còpia.",
- "b8952992": "{name} + {n} més"
+ "b8952992": "{name} + {n} més",
+ "145a4b30": "Queden {t}"
 }

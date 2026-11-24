@@ -318,7 +318,6 @@
  "56fff0c0": "Items selectie in-/uitschakelen",
  "244766da": "Bestandsextensie",
  "e1205f8f": "Als u een bestandsextensie wijzigt, kan het bestand onbruikbaar worden. Weet u zeker dat u de extensie wilt wijzigen?",
- "7ac75322": "Links",
  "5e1cd1c8": "min",
  "38520459": "u",
  "e80edf36": "Openen in nieuw venster",
@@ -2203,5 +2202,6 @@
  "8207de4b": "Teksteditor kiezen",
  "ae5ba83f": "Zoek op naam of een patroon zoals *.pdf; Enter zoekt ook in submappen",
  "0a64f2ce": "Dit item wordt nog gekopieerd. Hernoem het wanneer het kopiëren klaar is.",
- "b8952992": "{name} + nog {n}"
+ "b8952992": "{name} + nog {n}",
+ "145a4b30": "Nog {t}"
 }

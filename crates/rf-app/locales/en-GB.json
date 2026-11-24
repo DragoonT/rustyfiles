@@ -318,7 +318,6 @@
  "56fff0c0": "Toggle item selection",
  "244766da": "File name extension",
  "e1205f8f": "If you change a file name extension, the file might become unusable. Are you sure you want to change it?",
- "7ac75322": "left",
  "5e1cd1c8": "min",
  "38520459": "h",
  "e80edf36": "Open in new window",
@@ -2203,5 +2202,6 @@
  "8207de4b": "Choose text editor",
  "ae5ba83f": "Search by name or a pattern like *.pdf; Enter looks in subfolders too",
  "0a64f2ce": "This item is still being copied. Rename it when the copy is done.",
- "b8952992": "{name} + {n} more"
+ "b8952992": "{name} + {n} more",
+ "145a4b30": "{t} left"
 }

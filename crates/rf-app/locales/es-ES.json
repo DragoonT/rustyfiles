@@ -318,7 +318,6 @@
  "56fff0c0": "Seleccionar/No selecionar elemento",
  "244766da": "Extensión de nombre de archivo",
  "e1205f8f": "Si cambia la extensión del nombre de archivo, es posible que el archivo deje de ser utilizable. ¿Seguro que desea cambiarla?",
- "7ac75322": "Flecha izquierda",
  "5e1cd1c8": "min",
  "38520459": "h",
  "e80edf36": "Abrir en una nueva ventana",
@@ -2203,5 +2202,6 @@
  "8207de4b": "Elegir editor de texto",
  "ae5ba83f": "Busque por nombre o con un patrón como *.pdf; Enter también busca en las subcarpetas",
  "0a64f2ce": "Este elemento aún se está copiando. Cámbiele el nombre cuando termine la copia.",
- "b8952992": "{name} + {n} más"
+ "b8952992": "{name} + {n} más",
+ "145a4b30": "Quedan {t}"
 }

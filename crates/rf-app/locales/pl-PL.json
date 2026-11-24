@@ -318,7 +318,6 @@
  "56fff0c0": "Przełącz wybór zaznaczenia",
  "244766da": "Rozszerzenie nazwy pliku",
  "e1205f8f": "Zmiana rozszerzenia nazwy pliku może spowodować, że plik stanie się bezużyteczny. Czy na pewno chcesz zmienić rozszerzenie?",
- "7ac75322": "Lewo",
  "5e1cd1c8": "min",
  "38520459": "godz.",
  "e80edf36": "Otwórz w nowym oknie",
@@ -2203,5 +2202,6 @@
  "8207de4b": "Wybierz edytor tekstu",
  "ae5ba83f": "Szukaj według nazwy lub wzorca, np. *.pdf; Enter szuka także w podfolderach",
  "0a64f2ce": "Ten element jest jeszcze kopiowany. Zmień jego nazwę po zakończeniu kopiowania.",
- "b8952992": "{name} + {n} więcej"
+ "b8952992": "{name} + {n} więcej",
+ "145a4b30": "Pozostało {t}"
 }

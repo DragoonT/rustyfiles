@@ -318,7 +318,6 @@
  "56fff0c0": "Växla val av objekt",
  "244766da": "Filnamnstillägg",
  "e1205f8f": "Om du ändrar ett filnamnstillägg kan filen bli oanvändbar. Vill du verkligen ändra det?",
- "7ac75322": "Vänster",
  "5e1cd1c8": "min",
  "38520459": "h",
  "e80edf36": "Öppna i nytt fönster",
@@ -2203,5 +2202,6 @@
  "8207de4b": "Välj textredigerare",
  "ae5ba83f": "Sök efter namn eller ett mönster som *.pdf; Enter söker även i undermappar",
  "0a64f2ce": "Det här objektet kopieras fortfarande. Byt namn på det när kopieringen är klar.",
- "b8952992": "{name} + {n} till"
+ "b8952992": "{name} + {n} till",
+ "145a4b30": "{t} kvar"
 }

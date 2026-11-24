@@ -330,7 +330,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Öğeyi seç/bırak", "Toggle item selection"),
     ("Dosya adı uzantısı", "File name extension"),
     ("Dosya adı uzantısını değiştirirseniz dosya kullanılamaz hale gelebilir. Değiştirmek istediğinizden emin misiniz?", "If you change a file name extension, the file might become unusable. Are you sure you want to change it?"),
-    ("kaldı", "left"),
+    ("{t} kaldı", "{t} left"),
     ("dk", "min"),
     ("sa", "h"),
     ("Yeni pencerede aç", "Open in new window"),

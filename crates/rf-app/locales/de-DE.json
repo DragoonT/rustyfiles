@@ -318,7 +318,6 @@
  "56fff0c0": "Auswahl umschalten",
  "244766da": "Dateinamenerweiterung",
  "e1205f8f": "Wenn du die Dateinamenerweiterung änderst, kann die Datei unbrauchbar werden. Möchtest du sie wirklich ändern?",
- "7ac75322": "Links",
  "5e1cd1c8": "Min.",
  "38520459": "Std.",
  "e80edf36": "In neuem Fenster öffnen",
@@ -2203,5 +2202,6 @@
  "8207de4b": "Texteditor auswählen",
  "ae5ba83f": "Nach Name oder einem Muster wie *.pdf suchen; Enter sucht auch in Unterordnern",
  "0a64f2ce": "Dieses Element wird noch kopiert. Benennen Sie es um, wenn der Kopiervorgang abgeschlossen ist.",
- "b8952992": "{name} + {n} weitere"
+ "b8952992": "{name} + {n} weitere",
+ "145a4b30": "Noch {t}"
 }

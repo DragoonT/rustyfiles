@@ -318,7 +318,6 @@
  "56fff0c0": "Pārslēgt vienuma atlasi",
  "244766da": "Faila nosaukuma paplašinājums",
  "e1205f8f": "Ja mainīsiet faila nosaukuma paplašinājumu, fails var kļūt nelietojams. Vai tiešām vēlaties to mainīt?",
- "7ac75322": "atlicis",
  "5e1cd1c8": "min",
  "38520459": "h",
  "e80edf36": "Atvērt jaunā logā",
@@ -2203,5 +2202,6 @@
  "8207de4b": "Izvēlēties teksta redaktoru",
  "ae5ba83f": "Meklējiet pēc nosaukuma vai parauga, piemēram, *.pdf; Enter meklē arī apakšmapēs",
  "0a64f2ce": "Šis vienums vēl tiek kopēts. Pārdēvējiet to, kad kopēšana ir pabeigta.",
- "b8952992": "{name} + vēl {n}"
+ "b8952992": "{name} + vēl {n}",
+ "145a4b30": "Atlikušas {t}"
 }

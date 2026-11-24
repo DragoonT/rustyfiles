@@ -318,7 +318,6 @@
  "56fff0c0": "Pindutin ang item na pagpipilian",
  "244766da": "Extension ng pangalan ng file",
  "e1205f8f": "Kung babaguhin mo ang extension ng pangalan ng file, maaaring hindi na magamit ang file. Sigurado ka bang gusto mo itong baguhin?",
- "7ac75322": "natitira",
  "5e1cd1c8": "min",
  "38520459": "h",
  "e80edf36": "Buksan sa bagong window",
@@ -2203,5 +2202,6 @@
  "8207de4b": "Pumili ng text editor",
  "ae5ba83f": "Maghanap ayon sa pangalan o pattern gaya ng *.pdf; hinahanap din ng Enter ang mga subfolder",
  "0a64f2ce": "Kinokopya pa ang item na ito. I-rename ito kapag tapos na ang pagkopya.",
- "b8952992": "{name} + {n} pa"
+ "b8952992": "{name} + {n} pa",
+ "145a4b30": "{t} ang natitira"
 }
