@@ -714,6 +714,9 @@ pub struct FolderView {
     _slow_task: Option<Task<()>>,
     /// Where a left-button press started on a row (for drag-out detection).
     drag_origin: Option<RowPress>,
+    /// Windows' own menu (Shift and a right click) is open over this list: the items' details cards are held back, as they are
+    /// under our own menu (issue 310: the card of the item under the pointer stood behind that menu).
+    pub(crate) native_menu: bool,
     /// Rubber-band selection in list-content coordinates.
     marquee: Option<Marquee>,
     /// Where the selection box reaches now (window px, inside the list's area) and how far the pointer is past the area's top
@@ -877,6 +880,7 @@ impl FolderView {
             renaming: None,
             _rename_sub: None,
             drag_origin: None,
+            native_menu: false,
             marquee: None,
             marquee_at: Point::default(),
             marquee_over: 0.,
@@ -1088,7 +1092,7 @@ impl FolderView {
             let tip_entry = e.clone();
             let tip_path = self.path_of(ei);
             let tip_folder_size = tip_path.as_ref().and_then(|path| self.known_folder_size(path, on_disk));
-            let item_tips = !crate::fluent_menu::is_open(cx) && cx.global::<crate::settings::Settings>().item_hover_details;
+            let item_tips = !crate::fluent_menu::is_open(cx) && !self.native_menu && cx.global::<crate::settings::Settings>().item_hover_details;
             // the rename box, as in the Details rows (issue 319: the columns drew none, so F2 seemed to do nothing while the keys
             // went to a box that was not on the screen)
             let rename_input = self.renaming.as_ref().filter(|(i, _)| *i == ei).map(|(_, inp)| inp.clone());
@@ -3322,7 +3326,7 @@ impl FolderView {
         let tip_path = self.path_of(ei);
         let on_disk = cx.global::<crate::settings::Settings>().folder_size_on_disk;
         let tip_folder_size = tip_path.as_ref().and_then(|path| self.known_folder_size(path, on_disk));
-        let item_tips = !crate::fluent_menu::is_open(cx) && cx.global::<crate::settings::Settings>().item_hover_details;
+        let item_tips = !crate::fluent_menu::is_open(cx) && !self.native_menu && cx.global::<crate::settings::Settings>().item_hover_details;
         let cell = base
             .id(("cell", vi))
             .w(tile_w)
@@ -4857,7 +4861,7 @@ impl FolderView {
             let tip_entry = e.clone();
             let tip_path = self.path_of(ei);
             let tip_folder_size = tip_path.as_ref().and_then(|path| self.known_folder_size(path, on_disk));
-            let item_tips = !crate::fluent_menu::is_open(cx) && cx.global::<crate::settings::Settings>().item_hover_details;
+            let item_tips = !crate::fluent_menu::is_open(cx) && !self.native_menu && cx.global::<crate::settings::Settings>().item_hover_details;
             let selected = self.selected.contains(&ei);
             // (the rows next to it that are selected too: the pill joins them)
             let sel_above = selected && vi > 0 && self.visible.get(vi - 1).is_some_and(|e| self.selected.contains(e));

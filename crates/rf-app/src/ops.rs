@@ -1006,6 +1006,9 @@ impl FolderView {
         let tag_items = items.clone();
         let paste_dir_ui = dir.clone();
         let (tx, rx) = oneshot::channel::<(MenuOutcome, Option<(Vec<PathBuf>, Transfer)>)>();
+        // (until the menu is answered: see `native_menu`)
+        self.native_menu = true;
+        cx.notify();
         // Read Shift here: the shell thread has its own input state.
         let extended = unsafe { GetKeyState(VK_SHIFT.0 as i32) < 0 };
         rf_win::sta::run(move |owner| {
@@ -1032,6 +1035,10 @@ impl FolderView {
         });
         cx.spawn(async move |this, cx| {
             let (outcome, clip) = rx.await.unwrap_or((MenuOutcome::Dismissed, None));
+            let _ = this.update(cx, |v, cx| {
+                v.native_menu = false;
+                cx.notify();
+            });
             let _ = this.update(cx, |v, cx| match outcome {
                 MenuOutcome::Custom(MENU_PASTE) => {
                     if let Some((paths, kind)) = clip {
