@@ -242,6 +242,15 @@ fn build_page(page: Page, p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyEle
 }
 
 pub fn open_page(page: Page, cx: &mut App) {
+    if ui(cx).page != page {
+        // Each page starts at its top (issue 335: the page picked next stood where the last one had been scrolled to). A setting
+        // picked from the search is scrolled to afterwards, at its first paint.
+        PAGE_SCROLL.with(|s| {
+            if let Some(scroll) = s.borrow().as_ref() {
+                scroll.set_offset(Point::default());
+            }
+        });
+    }
     ui(cx).page = page;
 }
 
