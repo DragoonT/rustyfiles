@@ -505,17 +505,7 @@ fn run_menu(
             let _ = DestroyMenu(hmenu);
             return Err(e.into());
         }
-        if !extra.is_empty() {
-            for (i, it) in extra.iter().enumerate() {
-                let label = crate::wide::wide(&it.label);
-                let mut f = MF_BYPOSITION | MF_STRING;
-                if !it.enabled {
-                    f |= MF_GRAYED;
-                }
-                let _ = InsertMenuW(hmenu, i as u32, f, (EXTRA_BASE + it.id) as usize, PCWSTR(label.as_ptr()));
-            }
-            let _ = InsertMenuW(hmenu, extra.len() as u32, MF_BYPOSITION | MF_SEPARATOR, 0, PCWSTR::null());
-        }
+        insert_extras(hmenu, extra);
 
         let cm2: Option<IContextMenu2> = cm.cast().ok();
         let cm3: Option<IContextMenu3> = cm.cast().ok();
@@ -559,6 +549,62 @@ fn run_menu(
     }
 }
 
+/// Puts our own entries into Windows' menu (see [`extras_place`] for where).
+fn insert_extras(hmenu: windows::Win32::UI::WindowsAndMessaging::HMENU, extra: &[ExtraItem]) {
+    if extra.is_empty() {
+        return;
+    }
+    let (at, before, after) = extras_place(&separators_of(hmenu));
+    let mut i = at as u32;
+    // SAFETY: `hmenu` is a live menu of this thread, and every label is a zero-ended string that outlives its call
+    unsafe {
+        if before {
+            let _ = InsertMenuW(hmenu, i, MF_BYPOSITION | MF_SEPARATOR, 0, PCWSTR::null());
+            i += 1;
+        }
+        for it in extra {
+            let label = crate::wide::wide(&it.label);
+            let mut f = MF_BYPOSITION | MF_STRING;
+            if !it.enabled {
+                f |= MF_GRAYED;
+            }
+            let _ = InsertMenuW(hmenu, i, f, (EXTRA_BASE + it.id) as usize, PCWSTR(label.as_ptr()));
+            i += 1;
+        }
+        if after {
+            let _ = InsertMenuW(hmenu, i, MF_BYPOSITION | MF_SEPARATOR, 0, PCWSTR::null());
+        }
+    }
+}
+
+/// Which rows of a menu are separators, top to bottom.
+fn separators_of(hmenu: windows::Win32::UI::WindowsAndMessaging::HMENU) -> Vec<bool> {
+    use windows::Win32::UI::WindowsAndMessaging::{GetMenuItemCount, GetMenuItemInfoW, MENUITEMINFOW, MFT_SEPARATOR, MIIM_FTYPE};
+    let n = unsafe { GetMenuItemCount(Some(hmenu)) }.max(0);
+    (0..n)
+        .map(|i| {
+            let mut mii = MENUITEMINFOW { cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32, fMask: MIIM_FTYPE, ..Default::default() };
+            // SAFETY: `mii` is a MENUITEMINFOW of the size it states, asked for its type only
+            unsafe { GetMenuItemInfoW(hmenu, i as u32, true, &mut mii) }.is_ok() && mii.fType.contains(MFT_SEPARATOR)
+        })
+        .collect()
+}
+
+/// Where our own entries go in Windows' menu: the row they start at, and whether a separator goes before and after them.
+///
+/// WHY (issue 310): they were put at the very top, so the commands of the file's own type (Install, Mount, Open, Extract All: the
+/// menu's first block, the ones people look for first) came second, below Copy path, Compress and Tag. They follow that block now.
+fn extras_place(separators: &[bool]) -> (usize, bool, bool) {
+    match separators.iter().position(|s| *s) {
+        // (a menu that starts with a separator, or an empty one, has no first block to keep above them)
+        Some(0) => (0, false, true),
+        None if separators.is_empty() => (0, false, false),
+        // below the first block: a separator of our own, and the menu's own one closes them
+        Some(first) => (first, true, false),
+        None => (separators.len(), true, false),
+    }
+}
+
 /// A plain popup menu of app items at `screen` (no shell items). Returns the chosen id.
 /// Call on the shell STA thread with its owner window.
 pub fn show_simple(owner: HWND, screen: (i32, i32), items: &[ExtraItem]) -> Option<u32> {
@@ -595,6 +641,45 @@ mod tests {
         assert_eq!(clean_label("&Open"), ("Open".to_string(), None));
         assert_eq!(clean_label("Save && Close\tCtrl+S"), ("Save & Close".to_string(), Some("Ctrl+S".to_string())));
         assert_eq!(clean_label("  Gönder  "), ("Gönder".to_string(), None));
+    }
+
+    #[test]
+    fn our_entries_follow_the_first_block_of_windows_menu() {
+        // Install, Repair, Uninstall | Open with... | Properties: ours start at the first separator, with one of their own before
+        assert_eq!(extras_place(&[false, false, false, true, false, true, false]), (3, true, false));
+        // one block only: they close the menu
+        assert_eq!(extras_place(&[false, false]), (2, true, false));
+        // nothing above them to keep: at the top, as before
+        assert_eq!(extras_place(&[true, false, false]), (0, false, true));
+        assert_eq!(extras_place(&[]), (0, false, false));
+    }
+
+    #[test]
+    fn our_entries_land_below_the_first_block_of_a_real_menu() {
+        // a menu shaped like an installer package's: Install, Repair, Uninstall | Open with | Properties
+        let rows = |hmenu| -> Vec<String> {
+            use windows::Win32::UI::WindowsAndMessaging::{GetMenuStringW, MF_BYPOSITION};
+            let separators = separators_of(hmenu);
+            (0..separators.len())
+                .map(|i| {
+                    let mut buf = [0u16; 64];
+                    let n = unsafe { GetMenuStringW(hmenu, i as u32, Some(&mut buf), MF_BYPOSITION) }.max(0) as usize;
+                    if separators[i] { "-".to_string() } else { String::from_utf16_lossy(&buf[..n]) }
+                })
+                .collect()
+        };
+        unsafe {
+            let hmenu = CreatePopupMenu().unwrap();
+            for (i, label) in ["Install", "Repair", "Uninstall", "", "Open with", "", "Properties"].iter().enumerate() {
+                let w = crate::wide::wide(label);
+                let f = if label.is_empty() { MF_BYPOSITION | MF_SEPARATOR } else { MF_BYPOSITION | MF_STRING };
+                InsertMenuW(hmenu, i as u32, f, i + 1, PCWSTR(w.as_ptr())).unwrap();
+            }
+            let extra = [ExtraItem { id: 1, label: "Copy path".into(), enabled: true }, ExtraItem { id: 2, label: "Tag...".into(), enabled: true }];
+            insert_extras(hmenu, &extra);
+            assert_eq!(rows(hmenu), ["Install", "Repair", "Uninstall", "-", "Copy path", "Tag...", "-", "Open with", "-", "Properties"]);
+            let _ = DestroyMenu(hmenu);
+        }
     }
 
     fn dump(items: &[ShellItem], depth: usize) {

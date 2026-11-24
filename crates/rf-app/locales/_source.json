@@ -13322,5 +13322,11 @@
   "key": "Ayrıntılar ve Sütunlar görünümünde. Kapalıyken öğe, satırının neresinden tutulursa tutulsun sürüklenir.",
   "tr": "Ayrıntılar ve Sütunlar görünümünde. Kapalıyken öğe, satırının neresinden tutulursa tutulsun sürüklenir.",
   "en": "In the Details and Columns views. Off: an item is dragged from anywhere on its row."
+ },
+ {
+  "id": "8f85e23e",
+  "key": "Bağla",
+  "tr": "Bağla",
+  "en": "Mount"
  }
 ]

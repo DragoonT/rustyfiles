@@ -226,6 +226,8 @@ impl FolderView {
             icon(L::SquareArrowOutUpRight)
         };
         v.push(Item::action(t!("Aç"), open_icon, act(me, |v, _, cx| v.open_selected(cx))).hint("Enter"));
+        // the commands of the file's own type go here, right below Open (see `raise`)
+        let mut type_at = v.len();
         if single_dir || single_archive {
             let opened = if single_archive { items[0].clone() } else { target_dir.clone() };
             let (a, b) = (opened.clone(), opened);
@@ -334,6 +336,7 @@ impl FolderView {
             v.push(Item::action(t!("Klasörü düzleştir"), icon(L::FolderTree), act(me, move |v, w, cx| v.flatten_folder(d.clone(), w, cx))));
         }
         // type-specific actions (Files: rotate, set as background, install font, run as administrator)
+        let type_from = v.len();
         if !items.is_empty() && items.iter().all(|p| rf_win::rotate::can_rotate(p) && crate::archive_view::split(p).is_none()) {
             v.push(Item::action(t!("Sağa döndür"), icon(L::RotateCw), act(me, |v, w, cx| v.rotate_selection(true, w, cx))));
             v.push(Item::action(t!("Sola döndür"), icon(L::RotateCcw), act(me, |v, w, cx| v.rotate_selection(false, w, cx))));
@@ -371,6 +374,16 @@ impl FolderView {
                         });
                     }));
                 }
+            } else if rf_win::fileactions::is_disk_image(&p) && !in_archive && rf_win::fileactions::has_verb(&p, "mount") {
+                // a disk image: Windows' own Mount, which was only under "Show more options" (issue 310)
+                v.push(Item::action(t!("Bağla"), icon(L::Disc3), move |_, _| {
+                    let p = p.clone();
+                    rf_win::sta::run(move |owner| {
+                        if let Err(e) = rf_win::ctxmenu::invoke_verb(owner, &ShellTarget::One(p), "mount", cursor()) {
+                            log::warn!("mount: {e:#}");
+                        }
+                    });
+                }));
             } else if rf_win::fileactions::is_runnable(&p) && !in_archive {
                 v.push(Item::action(t!("Yönetici olarak çalıştır"), icon(L::ShieldCheck), move |_, _| {
                     let p = p.clone();
@@ -399,6 +412,7 @@ impl FolderView {
                 let _ = w;
             }));
         }
+        raise(&mut v, type_from, &mut type_at);
         v.push(Item::Separator);
 
         // archives
@@ -444,6 +458,7 @@ impl FolderView {
                 crate::hyperdownload::download_torrent(file.clone(), dir, cx)
             }));
         }
+        let extract_from = v.len();
         if mp.compress && !items.is_empty() && items.iter().all(|p| rf_archive::is_supported(p)) {
             use crate::status_center::ExtractTo;
             let list = items.to_vec();
@@ -468,6 +483,7 @@ impl FolderView {
                 ],
             ));
         }
+        raise(&mut v, extract_from, &mut type_at);
         if mp.tags && !in_archive {
             v.push(Item::sub(t!("Etiketler"), icon(L::Tag), tag_items(me, items, cx)));
         }
@@ -602,6 +618,17 @@ impl FolderView {
 }
 
 /// "Geri al: Silme", or plain "Geri al" when there is nothing to undo.
+/// Moves the rows added since `from` up to row `to`, and `to` past them.
+///
+/// WHY (issue 310): the commands of the file's own type (Install, Mount, Extract, Run as administrator) are what a right click on
+/// such a file is usually for, and they sat in the second and third blocks, below Copy path and Compress.
+fn raise(v: &mut Vec<Item>, from: usize, to: &mut usize) {
+    let moved: Vec<Item> = v.drain(from..).collect();
+    let n = moved.len();
+    v.splice(*to..*to, moved);
+    *to += n;
+}
+
 fn undo_text(what: Option<&str>) -> String {
     match what {
         Some(w) => format!("{}: {w}", t!("Geri al")),

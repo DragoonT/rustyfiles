@@ -34,6 +34,28 @@ pub fn is_msi(p: &Path) -> bool {
     p.extension().is_some_and(|e| e.eq_ignore_ascii_case("msi"))
 }
 
+/// A disk image Windows can mount as a drive.
+pub fn is_disk_image(p: &Path) -> bool {
+    let e = p.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+    matches!(e.as_str(), "iso" | "img" | "vhd" | "vhdx")
+}
+
+/// Whether Windows has this verb for the file's type as it is registered now (a `.iso` loses "mount" when another program takes
+/// the type over, and Explorer's menu loses it too). Registry reads only.
+pub fn has_verb(p: &Path, verb: &str) -> bool {
+    use windows::Win32::UI::Shell::{ASSOCF_NONE, ASSOCSTR_COMMAND, ASSOCSTR_DELEGATEEXECUTE, AssocQueryStringW};
+    let Some(ext) = p.extension().map(|e| format!(".{}", e.to_string_lossy())) else { return false };
+    let (ext, verb) = (wide(&ext), wide(verb));
+    // (a verb is a command line, or a class that runs it: "mount" is the second kind)
+    [ASSOCSTR_COMMAND, ASSOCSTR_DELEGATEEXECUTE].into_iter().any(|what| {
+        let mut buf = [0u16; 1024];
+        let mut len = buf.len() as u32;
+        // SAFETY: both strings end in a zero and `len` is the buffer's size in characters
+        let hr = unsafe { AssocQueryStringW(ASSOCF_NONE, what, PCWSTR(ext.as_ptr()), PCWSTR(verb.as_ptr()), Some(windows::core::PWSTR(buf.as_mut_ptr())), &mut len) };
+        hr == windows::Win32::Foundation::S_OK && buf[0] != 0
+    })
+}
+
 pub fn set_wallpaper(path: &Path) -> anyhow::Result<()> {
     let mut w = wide(path);
     unsafe {
@@ -69,4 +91,19 @@ pub fn install_font_for_user(path: &Path) -> anyhow::Result<PathBuf> {
         let _ = SendMessageTimeoutW(HWND_BROADCAST, WM_FONTCHANGE, WPARAM(0), LPARAM(0), SMTO_ABORTIFHUNG, 1000, None);
     }
     Ok(dest)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_verb_is_found_only_when_the_type_has_it() {
+        // every Windows gives a program "run as administrator", and nothing gives it a verb of this name
+        assert!(has_verb(Path::new("a.exe"), "runas"));
+        assert!(!has_verb(Path::new("a.exe"), "rustyfiles-no-such-verb"));
+        assert!(!has_verb(Path::new("no-extension"), "open"));
+        // (what this PC answers for a disk image depends on which program owns the type)
+        println!("mount for .iso: {}, .vhdx: {}", has_verb(Path::new("a.iso"), "mount"), has_verb(Path::new("a.vhdx"), "mount"));
+    }
 }
