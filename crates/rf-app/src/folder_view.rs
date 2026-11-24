@@ -716,6 +716,12 @@ pub struct FolderView {
     drag_origin: Option<RowPress>,
     /// Rubber-band selection in list-content coordinates.
     marquee: Option<Marquee>,
+    /// Where the selection box reaches now (window px, inside the list's area) and how far the pointer is past the area's top
+    /// (negative) or bottom (positive) edge, which scrolls the list (`marquee_moved`).
+    marquee_at: Point<Pixels>,
+    marquee_over: f32,
+    /// The list is being scrolled under a selection box (`marquee_scroll_step`).
+    marquee_scrolling: bool,
     /// Type-to-select buffer and when it was last extended.
     typeahead: (String, Instant),
     _rename_sub: Option<Subscription>,
@@ -872,6 +878,9 @@ impl FolderView {
             _rename_sub: None,
             drag_origin: None,
             marquee: None,
+            marquee_at: Point::default(),
+            marquee_over: 0.,
+            marquee_scrolling: false,
             typeahead: (String::new(), Instant::now()),
             recycle: None,
             disk_usage: None,
@@ -3735,6 +3744,49 @@ impl FolderView {
         self.marquee = Some(Marquee { start: p, cur: p, base });
     }
 
+    /// The pointer moved while a selection box is being drawn, wherever it is now: over the list, over another part of the window
+    /// or outside the window. The box reaches to the nearest point of the list's `area`, and past its top or bottom edge the list
+    /// scrolls, as in Explorer. WHY (issue 309): the list heard the pointer only while it was over the list, so the box stood
+    /// still as soon as the pointer left it, towards the sidebar or out of the window.
+    fn marquee_moved(&mut self, pos: Point<Pixels>, area: Bounds<Pixels>, cx: &mut Context<Self>) {
+        let (l, t) = (f32::from(area.origin.x), f32::from(area.origin.y));
+        let (r, b) = (l + f32::from(area.size.width), t + f32::from(area.size.height));
+        let ((x, y), over) = marquee_reach((f32::from(pos.x), f32::from(pos.y)), (l, t, r, b));
+        self.marquee_at = point(px(x), px(y));
+        self.marquee_over = over;
+        self.update_marquee(self.marquee_at, cx);
+        if over != 0. && !self.marquee_scrolling {
+            self.marquee_scrolling = true;
+            const STEP: std::time::Duration = std::time::Duration::from_millis(16);
+            cx.spawn(async move |this, cx| {
+                loop {
+                    cx.background_executor().timer(STEP).await;
+                    if !this.update(cx, |v, cx| v.marquee_scroll_step(STEP.as_secs_f32(), cx)).unwrap_or(false) {
+                        break;
+                    }
+                }
+            })
+            .detach();
+        }
+    }
+
+    /// One step of the scroll under a selection box whose pointer is past the list's top or bottom edge. `false`: it is over.
+    fn marquee_scroll_step(&mut self, secs: f32, cx: &mut Context<Self>) -> bool {
+        if self.marquee.is_none() || self.marquee_over == 0. {
+            self.marquee_scrolling = false;
+            return false;
+        }
+        let base = self.scroll.0.borrow().base_handle.clone();
+        let mut o = base.offset();
+        let y = (o.y - px(marquee_scroll_speed(self.marquee_over) * secs)).clamp(-base.max_offset().y, px(0.));
+        if y != o.y {
+            o.y = y;
+            base.set_offset(o);
+            self.update_marquee(self.marquee_at, cx);
+        }
+        true
+    }
+
     fn update_marquee(&mut self, pos: Point<Pixels>, cx: &mut Context<Self>) {
         let cur = self.content_point(pos);
         let Some(m) = self.marquee.as_mut() else { return };
@@ -3853,16 +3905,15 @@ impl FolderView {
         if w < px(3.) && h < px(3.) {
             return None;
         }
+        // (cut at the list's edges: a box whose start has scrolled out of view was drawn on over the toolbar)
         Some(
             div()
                 .absolute()
-                .left(x0)
-                .top(y0)
-                .w(w)
-                .h(h)
-                .bg(p.selection)
-                .border_1()
-                .border_color(p.selection_border)
+                .top_0()
+                .left_0()
+                .size_full()
+                .overflow_hidden()
+                .child(div().absolute().left(x0).top(y0).w(w).h(h).bg(p.selection).border_1().border_color(p.selection_border))
                 .into_any_element(),
         )
     }
@@ -5312,6 +5363,25 @@ impl FolderView {
                         canvas(
                             |_, _, _| {},
                             move |bounds, _, window, _| {
+                                // a selection box follows the pointer everywhere, not only over the list (`marquee_moved`)
+                                let view = me.clone();
+                                window.on_mouse_event(move |ev: &MouseMoveEvent, phase, _, cx| {
+                                    if phase != DispatchPhase::Capture {
+                                        return;
+                                    }
+                                    let _ = view.update(cx, |v, cx| {
+                                        if v.marquee.is_none() {
+                                            return;
+                                        }
+                                        if ev.pressed_button == Some(MouseButton::Left) {
+                                            v.marquee_moved(ev.position, bounds, cx);
+                                        } else {
+                                            // (the button came up where nothing told us)
+                                            v.marquee = None;
+                                            cx.notify();
+                                        }
+                                    });
+                                });
                                 let me = me.clone();
                                 window.on_mouse_event(move |ev: &ScrollEvent, phase, _, cx| {
                                     if phase != DispatchPhase::Capture || !ev.modifiers.control || !bounds.contains(&ev.position) {
@@ -5988,6 +6058,29 @@ fn row_name(e: &Entry, show_ext: bool, renamed: Option<&(Arc<str>, Arc<str>)>) -
     }
 }
 
+/// Where a selection box reaches for a pointer at `pos`: the point itself inside the list's `area` (left, top, right, bottom), the
+/// nearest point of the area beyond it; and how far the pointer is past the top (negative) or the bottom (positive) edge.
+fn marquee_reach(pos: (f32, f32), area: (f32, f32, f32, f32)) -> ((f32, f32), f32) {
+    let (l, t, r, b) = area;
+    let over = if pos.1 < t {
+        pos.1 - t
+    } else if pos.1 > b {
+        pos.1 - b
+    } else {
+        0.
+    };
+    ((pos.0.clamp(l, r.max(l)), pos.1.clamp(t, b.max(t))), over)
+}
+
+/// How fast the list scrolls under a selection box, in px a second, for a pointer `over` px past the top (negative: up) or the
+/// bottom edge: quicker the further out, between a walk and a run.
+fn marquee_scroll_speed(over: f32) -> f32 {
+    if over == 0. {
+        return 0.;
+    }
+    (over.abs() * 12.).clamp(240., 3000.) * over.signum()
+}
+
 const COL_W: Pixels = px(250.);
 /// The most columns left of the list's own.
 const COL_ANCESTORS_MOST: usize = 6;
@@ -6641,6 +6734,40 @@ fn is_second_click(click_count: usize) -> bool {
 
 fn completes_double(first: Option<&FirstClick>, load: u64, name: Option<&str>) -> bool {
     first.is_some_and(|f| f.load == load && f.name.as_deref() == name)
+}
+
+#[cfg(test)]
+mod marquee_tests {
+    use super::{marquee_reach, marquee_scroll_speed};
+
+    const AREA: (f32, f32, f32, f32) = (240., 130., 1000., 650.);
+
+    #[test]
+    fn inside_the_list_the_box_reaches_the_pointer_and_nothing_scrolls() {
+        assert_eq!(marquee_reach((500., 300.), AREA), ((500., 300.), 0.));
+        assert_eq!(marquee_scroll_speed(0.), 0.);
+    }
+
+    #[test]
+    fn beside_the_list_the_box_stops_at_its_edge() {
+        // over the sidebar, and right of the window
+        assert_eq!(marquee_reach((40., 300.), AREA), ((240., 300.), 0.));
+        assert_eq!(marquee_reach((1900., 300.), AREA), ((1000., 300.), 0.));
+    }
+
+    #[test]
+    fn above_and_below_the_list_it_stops_at_the_edge_and_the_list_scrolls_that_way() {
+        let (at, over) = marquee_reach((500., 100.), AREA);
+        assert_eq!((at, over), ((500., 130.), -30.));
+        assert!(marquee_scroll_speed(over) < 0., "up");
+        let (at, over) = marquee_reach((-20., 900.), AREA);
+        assert_eq!((at, over), ((240., 650.), 250.));
+        assert!(marquee_scroll_speed(over) > 0., "down");
+        // quicker the further out, within limits
+        assert!(marquee_scroll_speed(200.) > marquee_scroll_speed(30.));
+        assert_eq!(marquee_scroll_speed(1.), 240.);
+        assert_eq!(marquee_scroll_speed(-5000.), -3000.);
+    }
 }
 
 #[cfg(test)]
