@@ -4061,9 +4061,14 @@ impl Workspace {
         let rail = self.sidebar_rail;
         let explorer_look = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
         let section_divider = if p.dark { p.divider } else { gpui_kit::rgb(0xD1D1D1).into() };
-        let scrollbar_track = if p.dark { gpui_kit::rgb(0x303030) } else { gpui_kit::rgb(0xF0F0F0) };
-        let scrollbar_thumb = if p.dark { gpui_kit::rgb(0x606060) } else { gpui_kit::rgb(0xB8B8B8) };
-        let scrollbar_thumb_hover = if p.dark { gpui_kit::rgb(0xA0A0A0) } else { gpui_kit::rgb(0x5E5E5E) };
+        // The Windows look's scrollbar, as washes over the sidebar instead of greys of their own: on the plain window they come out
+        // as the greys they were (track 303030 / F0F0F0, thumb 606060 / B8B8B8, under the pointer A0A0A0 / 5E5E5E), and over a
+        // background colour or picture they take its tone (issue 321: a grey strip stood on a green window).
+        let wash = |dark: f32, light: f32| if p.dark { gpui_kit::hsla(0., 0., 1., dark) } else { gpui_kit::hsla(0., 0., 0., light) };
+        let scrollbar_track = wash(0.072, 0.059);
+        let scrollbar_thumb = wash(0.232, 0.233);
+        let scrollbar_thumb_hover = wash(0.541, 0.608);
+        let no_fill = gpui_kit::hsla(0., 0., 0., 0.);
         let sidebar_scroll = self.side_tree.scroll_handle().clone();
         let sidebar_scrollable = sidebar_scroll.max_offset().y > px(0.);
         let header = |t: &'static str| {
@@ -4423,9 +4428,10 @@ impl Workspace {
                                     .viewport_from_layout()
                                     .styles(|styles| {
                                         styles
-                                            .track(|track| track.width(px(20.)).bg(scrollbar_track.into()))
-                                            .track_hover(|track| track.width(px(20.)).bg(scrollbar_track.into()))
-                                            .track_active(|track| track.width(px(20.)).bg(scrollbar_track.into()))
+                                            // (the strip under it is the track: a second wash here would double it)
+                                            .track(|track| track.width(px(20.)).bg(no_fill))
+                                            .track_hover(|track| track.width(px(20.)).bg(no_fill))
+                                            .track_active(|track| track.width(px(20.)).bg(no_fill))
                                             .thumb(|thumb| thumb.width(px(6.)).inset(px(7.)).bg(scrollbar_thumb))
                                             .thumb_hover(|thumb| thumb.width(px(8.)).inset(px(6.)).bg(scrollbar_thumb_hover))
                                             .thumb_active(|thumb| thumb.width(px(8.)).inset(px(6.)).bg(scrollbar_thumb_hover))
@@ -4433,24 +4439,6 @@ impl Workspace {
                             )
                             .when(self.sidebar_scroll_hovered, |d| {
                                 d.child(
-                                    div()
-                                        .absolute()
-                                        .top_0()
-                                        .left_0()
-                                        .right_0()
-                                        .h(px(14.))
-                                        .bg(scrollbar_track),
-                                )
-                                .child(
-                                    div()
-                                        .absolute()
-                                        .bottom_0()
-                                        .left_0()
-                                        .right_0()
-                                        .h(px(14.))
-                                        .bg(scrollbar_track),
-                                )
-                                .child(
                                     div()
                                         .absolute()
                                         .top_0()
