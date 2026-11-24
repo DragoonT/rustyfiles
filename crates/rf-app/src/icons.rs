@@ -156,7 +156,7 @@ pub fn category(e: &Entry) -> Category {
 pub const KNOWN_EXTS: &[&str] = &[
     "png", "jpg", "jpeg", "gif", "bmp", "webp", "tif", "tiff", "ico", "heic", "heif", "avif", "svg", "psd", "raw", "cr2", "cr3",
     "nef", "arw", "dng", "jfif", "exr", "jxl", "jxr", "wdp", "mp4", "mov", "mkv", "avi", "wmv", "webm", "m4v", "mpg", "mpeg",
-    "flv", "mxf", "braw", "r3d", "ts", "m2ts", "3gp", "prproj", "aep", "drp", "mp3", "wav", "flac", "aac", "ogg", "m4a", "wma",
+    "flv", "mxf", "braw", "r3d", "ts", "m2ts", "mts", "3gp", "prproj", "aep", "drp", "mp3", "wav", "flac", "aac", "ogg", "m4a", "wma",
     "opus", "aiff", "aif", "mid", "zip", "7z", "rar", "tar", "gz", "tgz", "bz2", "xz", "zst", "cab", "iso", "img", "vhd",
     "vhdx", "rs", "c", "h", "cpp", "hpp", "cs", "js", "jsx", "tsx", "py", "go", "java", "kt", "swift", "rb", "php", "html",
     "htm", "css", "scss", "json", "toml", "yaml", "yml", "xml", "sh", "ps1", "bat", "cmd", "lua", "sql", "vue", "svelte",
@@ -173,7 +173,7 @@ pub fn category_for_ext(ext: &str) -> Category {
         // (JPEG XL, JPEG XR: pictured by the shell when a codec for them is installed, as jxl-winthumb is: issue 179)
         | "jxl" | "jxr" | "wdp" => Image,
         "mp4" | "mov" | "mkv" | "avi" | "wmv" | "webm" | "m4v" | "mpg" | "mpeg" | "flv" | "mxf" | "braw"
-        | "r3d" | "ts" | "m2ts" | "3gp" | "prproj" | "aep" | "drp" => Video,
+        | "r3d" | "ts" | "m2ts" | "mts" | "3gp" | "prproj" | "aep" | "drp" => Video,
         "mp3" | "wav" | "flac" | "aac" | "ogg" | "m4a" | "wma" | "opus" | "aiff" | "aif" | "mid" => Audio,
         "zip" | "7z" | "rar" | "tar" | "gz" | "tgz" | "bz2" | "xz" | "zst" | "cab" | "iso" | "img" | "vhd"
         | "vhdx" => Archive,

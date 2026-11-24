@@ -19,7 +19,8 @@ impl Preview {
         let cat = icons::category(&e);
         let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
         // (the same decisions as the pane at the right: a Windows handler, our player, else the thumbnail or the icon)
-        let handler = !self.occluded && self.wants_handler(&path, &e, cx);
+        let real = self.real_of(&path);
+        let handler = !self.occluded && real.is_some() && self.wants_handler(&path, &e, cx);
         let playable = !handler && self.playable(&path, &e);
         let video = matches!(cat, Category::Video);
         let video_on = playable && video && !self.occluded && self.player.as_ref().is_some_and(|pl| pl.path == path && pl.started);
@@ -73,7 +74,7 @@ impl Preview {
                 .into_any_element()
         } else if handler {
             let me = cx.entity().downgrade();
-            let hp = path.clone();
+            let hp = real.unwrap_or_else(|| path.clone());
             div()
                 .w(px(vw))
                 .h(px(vh))

@@ -197,7 +197,7 @@ pub fn is_playable(path: &Path) -> bool {
     let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
     matches!(
         ext.as_str(),
-        "mp4" | "m4v" | "mov" | "mkv" | "webm" | "avi" | "wmv" | "mpg" | "mpeg" | "ts" | "m2ts" | "3gp" | "mp3" | "wav" | "m4a" | "aac" | "flac" | "wma" | "ogg" | "opus"
+        "mp4" | "m4v" | "mov" | "mkv" | "webm" | "avi" | "wmv" | "mpg" | "mpeg" | "ts" | "m2ts" | "mts" | "3gp" | "mp3" | "wav" | "m4a" | "aac" | "flac" | "wma" | "ogg" | "opus"
     )
 }
 
