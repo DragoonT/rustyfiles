@@ -510,6 +510,65 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    /// By hand only (it writes 3 GB, three times over): `cargo test -p rf-win --lib in_the_middle_of_one_big_file -- --ignored --nocapture`.
+    /// The case of issue 322: one big file pasted into its own folder, paused part way.
+    #[test]
+    #[ignore]
+    fn a_pause_holds_the_shells_engine_in_the_middle_of_one_big_file() {
+        use std::io::Write;
+        use std::time::{Duration, Instant};
+        let d = scratch("pause-big");
+        let big = d.join("big.bin");
+        {
+            let mut f = std::fs::File::create(&big).unwrap();
+            let block = vec![0x5Au8; 8 << 20];
+            for _ in 0..384 {
+                f.write_all(&block).unwrap();
+            }
+        }
+        // how long the whole copy takes when nothing holds it
+        let plain = Arc::new(Tracker::new(Box::new(|_, _, _| {}), Arc::new(AtomicBool::new(false))));
+        let t0 = Instant::now();
+        assert!(transfer_tracked(Transfer::Copy, std::slice::from_ref(&big), &d, plain).unwrap());
+        let whole = t0.elapsed();
+        // the same copy, paused at its first progress report
+        let started = Arc::new(AtomicBool::new(false));
+        let last = Arc::new(std::sync::Mutex::new((0u32, 0u32)));
+        let (s2, l2) = (started.clone(), last.clone());
+        let t = Arc::new(Tracker::new(
+            Box::new(move |total, done, _| {
+                *l2.lock().unwrap() = (total, done);
+                if done > 0 && done < total {
+                    s2.store(true, Ordering::Relaxed);
+                }
+            }),
+            Arc::new(AtomicBool::new(false)),
+        ));
+        let (t2, d2, b2) = (t.clone(), d.clone(), big.clone());
+        let work = std::thread::spawn(move || transfer_tracked(Transfer::Copy, std::slice::from_ref(&b2), &d2, t2));
+        while !started.load(Ordering::Relaxed) {
+            assert!(!work.is_finished(), "the copy ended before it reported any progress");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        t.paused.store(true, Ordering::Relaxed);
+        std::thread::sleep(Duration::from_millis(500));
+        let at_pause = *last.lock().unwrap();
+        std::thread::sleep(Duration::from_secs(6));
+        let after = *last.lock().unwrap();
+        let held = !work.is_finished();
+        let r0 = Instant::now();
+        t.paused.store(false, Ordering::Relaxed);
+        assert!(work.join().unwrap().unwrap());
+        let rest = r0.elapsed();
+        println!("whole {whole:?}, paused at {at_pause:?}, after 6 s {after:?}, held {held}, rest after resume {rest:?}");
+        let _ = std::fs::remove_dir_all(&d);
+        assert!(held, "the copy finished while it was paused");
+        assert_eq!(at_pause, after, "progress moved while paused");
+        // had the engine gone on copying behind the held call, nothing would be left to do after the resume
+        let part = at_pause.1 as f64 / at_pause.0.max(1) as f64;
+        assert!(rest.as_secs_f64() > whole.as_secs_f64() * (1.0 - part) * 0.3, "the rest took {rest:?} of a {whole:?} copy paused at {part:.2}");
+    }
+
     #[test]
     fn without_a_shell_a_rename_is_a_plain_rename_that_does_not_replace() {
         let d = scratch("rename");
