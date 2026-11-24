@@ -3035,7 +3035,7 @@ impl FolderView {
         let (tile_w, row_h, thumb_px) = (self.grid_tile_w(), self.grid_row_h(), self.grid_thumb_px());
         let style = self.grid_style;
         let visual_px = match style {
-            GridStyle::Tiles => px(thumb_px as f32 * 0.75),
+            GridStyle::Tiles => px(thumb_px as f32 * TILE_VISUAL),
             GridStyle::Cards => px(60.),
             GridStyle::List => px(20.),
         };
@@ -3162,6 +3162,7 @@ impl FolderView {
             None if crate::rtl::has_rtl(&e.name) => div()
                 .w_full()
                 .text_xs()
+                .line_height(px(TILE_NAME_LINE))
                 .text_center()
                 .when(dim, |d| d.opacity(0.6))
                 .on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true))
@@ -3172,6 +3173,7 @@ impl FolderView {
             None => div()
                 .w_full()
                 .text_xs()
+                .line_height(px(TILE_NAME_LINE))
                 .text_center()
                 .line_clamp(2)
                 // a name longer than two lines ends in "…": without this the second line holds everything that is left and is
@@ -5696,6 +5698,17 @@ mod tile_tests {
         assert_eq!(split("Notes. And more words here", false), ("Notes. And more words here", ""), "a dot in a sentence");
     }
 
+    #[test]
+    fn a_tile_has_room_for_two_whole_lines_of_its_name_at_every_size() {
+        use super::{GRID_SIZES, TILE_NAME_LINE, tile_name_room};
+        for size in 0..GRID_SIZES.len() {
+            for compact in [false, true] {
+                let room = tile_name_room(size, compact);
+                assert!(room >= 2. * TILE_NAME_LINE, "size {size}, compact {compact}: {room} px for the name");
+            }
+        }
+    }
+
     use super::{grid_hover_step, tile_cols};
 
     #[test]
@@ -5983,8 +5996,26 @@ const LIST_COL_MIN: f32 = 140.;
 const LIST_COL_MAX: f32 = 460.;
 const LIST_CELL_CHROME: f32 = 8. + 20. + 8. + 8. + 12.;
 const LIST_MEASURE_MOST: usize = 4000;
-/// Grid sizes (Ctrl+= / Ctrl+-): tile width, row height, thumbnail pixels.
-const GRID_SIZES: [(f32, f32, u32); 5] = [(76., 94., 64), (92., 112., 80), (124., 150., 128), (172., 204., 192), (236., 276., 272)];
+/// Grid sizes (Ctrl+= / Ctrl+-): tile width, row height, thumbnail pixels. A row is high enough for the picture and two whole lines
+/// of the name (see `tile_name_room`).
+const GRID_SIZES: [(f32, f32, u32); 5] = [(76., 102., 64), (92., 114., 80), (124., 150., 128), (172., 204., 192), (236., 276., 272)];
+/// The height of one line of a tile's name. It is set on the label instead of left to the toolkit's default (1.618 of the text size,
+/// 19.4 px): two such lines were higher than the room under the picture, and the second one was cut in half at the tile's edge
+/// with "Compact items" on (a Discord report).
+const TILE_NAME_LINE: f32 = 16.;
+/// How much of a tile the picture's side is, of the thumbnail's pixels.
+const TILE_VISUAL: f32 = 0.75;
+
+/// The room a tile has for its name, in px, at a grid size: the row without the gap between rows, the cell's outline and padding,
+/// the picture with its frame and the gap under it. The same with "Compact items" on or off: what compact takes off the row
+/// (`COMPACT_TILE_SAVE`) it takes off the frame, the gap and the padding.
+#[cfg(test)]
+fn tile_name_room(size: usize, compact: bool) -> f32 {
+    let (_, row, thumb) = GRID_SIZES[size];
+    let visual = thumb as f32 * TILE_VISUAL;
+    let (row, padding, frame, gap) = if compact { (row - COMPACT_TILE_SAVE, 4., 0., 0.) } else { (row, 8., 4., 4.) };
+    row - f32::from(GRID_GAP) - 2. - padding - (visual + frame) - gap
+}
 const DEFAULT_GRID_SIZE: u8 = 2;
 /// Details row heights for the "Size" slider (30 = the classic one; 22 = as tight as File Explorer's compact rows, asked for on Threads).
 const ROW_SIZES: [f32; 5] = [22., 30., 36., 44., 52.];
