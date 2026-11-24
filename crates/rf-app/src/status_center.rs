@@ -1572,7 +1572,18 @@ fn render_op(ops: &Entity<Ops>, op: &OpState, p: &Palette) -> AnyElement {
                 .flex_1()
                 .min_w_0()
                 .gap_1()
-                .child(div().text_sm().overflow_hidden().text_ellipsis().whitespace_nowrap().child(op.title.clone()))
+                // two lines and the whole text under the pointer: one line cut "Moving: a.txt + 1 more → Ne…" before the folder it
+                // goes to, and nothing showed the rest (issue 296)
+                .child({
+                    let whole = op.title.clone();
+                    div()
+                        .id(("op-title", op.id as usize))
+                        .text_sm()
+                        .line_clamp(2)
+                        .text_ellipsis()
+                        .tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(whole.clone()).build(w, cx))
+                        .child(op.title.clone())
+                })
                 .when_some(running.then(|| crate::downloads_view::card_bar(op.id, &p)).flatten(), |d, bar| d.child(bar))
                 .when(running && crate::downloads_view::card_bar(op.id, &p).is_none(), |d| {
                     d.child(
