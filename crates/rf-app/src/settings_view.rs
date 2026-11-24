@@ -2591,7 +2591,9 @@ fn tags(p: &Palette, cx: &mut App) -> Vec<AnyElement> {
                 )
                 .child(div().flex_1().text_sm().child(crate::i18n::td(&name)))
                 .child(button(("tag-edit", id as usize), p, t!("Yeniden adlandır"), move |window, cx| {
-                    tag_name_dialog(Some((id, rename_name.clone())), window, cx)
+                    // the box starts from the name the list shows: a tag the app came with is kept under its Turkish name and shown
+                    // in the interface's language, and the box began with the Turkish one (issue 320)
+                    tag_name_dialog(Some((id, crate::i18n::td(&rename_name))), window, cx)
                 }))
                 .child(button(("tag-del", id as usize), p, t!("Sil"), move |window, cx| {
                     crate::prompt::show(
@@ -2650,8 +2652,10 @@ fn tag_name_dialog(existing: Option<(u32, String)>, window: &mut Window, cx: &mu
                 if name.is_empty() {
                     return Err(t!("Bir ad yazın").to_string());
                 }
-                match existing {
-                    Some((id, _)) => crate::tags::update(cx, |t| t.rename(id, &name)),
+                match &existing {
+                    // (left as it was: the tag keeps the name it has, which every language shows in its own word)
+                    Some((_, shown)) if *shown == name => {}
+                    Some((id, _)) => crate::tags::update(cx, |t| t.rename(*id, &name)),
                     None => crate::tags::update(cx, |t| {
                         t.add(&name, TAG_COLORS[t.defs.len() % TAG_COLORS.len()].1);
                     }),
