@@ -398,7 +398,7 @@ impl FolderView {
     }
 
     /// The cells of one row: the text of each value that has arrived, nothing for the others.
-    pub(super) fn props_cells(&self, ctx: &PropRowCtx, ei: u32, p: &Palette) -> Vec<AnyElement> {
+    pub(super) fn props_cells(&self, ctx: &PropRowCtx, ei: u32, p: &Palette, cx: &Context<Self>) -> Vec<AnyElement> {
         let e = &self.entries[ei as usize];
         let path = (!e.is_dir() && !e.is_cloud_placeholder()).then(|| self.path_of(ei)).flatten();
         let guard = path.as_ref().map(|_| cache().lock());
@@ -420,7 +420,7 @@ impl FolderView {
                     .whitespace_nowrap()
                     .overflow_hidden()
                     .text_ellipsis()
-                    .children(text.map(|t| SharedString::from(t.to_string())))
+                    .children(text.map(|t| Self::held_text(t.to_string(), cx)))
                     .into_any_element()
             })
             .collect()

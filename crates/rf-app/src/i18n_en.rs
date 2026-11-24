@@ -878,6 +878,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Yazınca bu klasörü süz", "Typing filters this folder"),
     ("Kapalıyken yazmak, adı o harflerle başlayan öğeyi seçer.", "When off, typing selects the item whose name starts with those letters."),
     ("Boş alana çift tıklayınca üst klasöre çık", "Double-click empty space to go up a folder"),
+    ("Satırın boş yerinden seçim kutusu başlat", "Start a selection box from a row's empty space"),
+    ("Ayrıntılar ve Sütunlar görünümünde. Kapalıyken öğe, satırının neresinden tutulursa tutulsun sürüklenir.", "In the Details and Columns views. Off: an item is dragged from anywhere on its row."),
     ("Yukarı çıkınca önceki klasörü seç", "Select the previous folder when going up"),
     ("Boyut biçimi", "Size format"),
     ("İkili (1 KB = 1024 bayt)", "Binary (1 KB = 1024 bytes)"),

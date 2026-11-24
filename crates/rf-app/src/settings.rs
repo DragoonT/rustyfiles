@@ -678,6 +678,9 @@ pub struct Settings {
     /// name starts with them. Issue 106.
     pub type_to_filter: bool,
     pub double_click_up: bool,
+    /// In the Details and Columns views a press on the empty space of a row starts a selection box, as in Explorer (issue 239). Off:
+    /// the item is dragged from anywhere on its row, as before 0.9.9 (asked for on Discord, 2026-11-24: "It feels off").
+    pub row_selection_box: bool,
     pub select_previous_on_up: bool,
     pub decimal_sizes: bool,
     /// With binary sizes: KiB, MiB, GiB instead of Explorer's KB, MB, GB (a request on Discord, 2026-11-23).
@@ -1042,6 +1045,7 @@ impl Default for Settings {
             preview_details: true,
             type_to_filter: false,
             double_click_up: true,
+            row_selection_box: true,
             select_previous_on_up: true,
             decimal_sizes: false,
             binary_prefixes: false,

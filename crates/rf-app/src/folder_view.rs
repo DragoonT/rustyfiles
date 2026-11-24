@@ -637,6 +637,8 @@ pub struct FolderView {
     name_hit: bool,
     /// The press was on an item's icon (set by the icon before the row hears the press).
     icon_hit: bool,
+    /// The press was on the text of one of the row's other cells (its date, type, size…; set by `held_text`).
+    text_hit: bool,
     /// Explorer's "click the name of the selected item again": (entry, serial) armed until the
     /// double-click time passes without a second click or a drag.
     slow_click: Option<(u32, u64)>,
@@ -862,6 +864,7 @@ impl FolderView {
             zoom_acc: 0.0,
             name_hit: false,
             icon_hit: false,
+            text_hit: false,
             slow_click: None,
             slow_click_serial: 0,
             hover_pick: None,
@@ -3370,6 +3373,7 @@ impl FolderView {
         // before anything changes: was this the only selected item, in a focused, active list?
         let on_name = std::mem::take(&mut self.name_hit);
         let on_icon = std::mem::take(&mut self.icon_hit);
+        let on_text = std::mem::take(&mut self.text_hit);
         let was_renaming = self.renaming.is_some();
         let had_focus = window.is_window_active() && self.focus.is_focused(window);
         let was_only = self.visible.get(vi).is_some_and(|ei| self.selected.len() == 1 && self.selected.contains(ei));
@@ -3436,7 +3440,7 @@ impl FolderView {
                 on_release = Release::SelectOnly;
             }
         }
-        let band = (matches!(self.view_mode, ViewMode::Details | ViewMode::Columns) && !on_name && !on_icon).then_some(!plain);
+        let band = row_press_band(self.view_mode, on_name || on_icon || on_text, cx.global::<crate::settings::Settings>().row_selection_box, plain);
         self.drag_origin = Some(RowPress { origin: ev.position, open_on_release: plain && single && !second, on_release, band });
         // Explorer: a click on the name of the item that was already the only one selected
         // renames it, once the double-click time passes without a second click or a drag
@@ -3709,6 +3713,20 @@ impl FolderView {
             });
         })
         .detach();
+    }
+
+    /// The text of one of a row's cells other than its name (a date, the type, the size…), as wide as the text itself: a press on it
+    /// takes hold of the item, as a press on its name does, and a press on the empty rest of the cell starts a selection box (see
+    /// `row_press_band`). An empty text takes no room, so it holds nothing.
+    pub(crate) fn held_text(text: impl Into<SharedString>, cx: &Context<Self>) -> Div {
+        div()
+            .min_w_0()
+            .flex_shrink(1.)
+            .overflow_hidden()
+            .whitespace_nowrap()
+            .text_ellipsis()
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.text_hit = true))
+            .child(text.into())
     }
 
     fn on_drag_motion(&mut self, ev: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -4842,7 +4860,7 @@ impl FolderView {
             let prop_cells = match &prop_ctx {
                 Some(c) => {
                     shown = Some(shown.map_or((vi, vi), |(a, b)| (a.min(vi), b.max(vi))));
-                    self.props_cells(c, ei, &p)
+                    self.props_cells(c, ei, &p, cx)
                 }
                 None => Vec::new(),
             };
@@ -4883,7 +4901,7 @@ impl FolderView {
                     Some(st) => (git_label(st), git_style(st).1),
                     None => ("", p.text_secondary),
                 };
-                div().w(px(cw[5])).flex_shrink_0().px_2().text_color(color).whitespace_nowrap().overflow_hidden().text_ellipsis().child(label)
+                div().w(px(cw[5])).flex_shrink_0().px_2().flex().text_color(color).whitespace_nowrap().overflow_hidden().text_ellipsis().child(Self::held_text(label, cx))
             });
             let git_badge = (!col_git).then_some(()).and(self.git.as_ref()).and_then(|g| {
                 let dir = self.parent_of(ei)?;
@@ -4923,11 +4941,12 @@ impl FolderView {
                         .w(px(cw[7 + i]))
                         .flex_shrink_0()
                         .px_2()
+                        .flex()
                         .text_color(p.text_secondary)
                         .whitespace_nowrap()
                         .overflow_hidden()
                         .text_ellipsis()
-                        .child(text)
+                        .child(Self::held_text(text, cx))
                         .into_any_element()
                 })
                 .collect();
@@ -4939,7 +4958,7 @@ impl FolderView {
                     if let Some(d) = store.def(*id) {
                         cell = cell.child(div().size(px(8.)).flex_shrink_0().rounded_full().bg(crate::tags::color(d.color)));
                         if i == 0 {
-                            cell = cell.child(div().whitespace_nowrap().overflow_hidden().text_ellipsis().child(crate::i18n::td(&d.name)));
+                            cell = cell.child(Self::held_text(crate::i18n::td(&d.name), cx));
                         }
                     }
                 }
@@ -4977,7 +4996,7 @@ impl FolderView {
                     .overflow_hidden()
                     .text_color(p.text_secondary)
                     .children(icon.map(|ic| Icon::new(ic).size(px(14.)).text_color(color)))
-                    .child(div().whitespace_nowrap().overflow_hidden().text_ellipsis().child(label))
+                    .child(Self::held_text(label, cx))
             });
             let cloud_badge = if col_sync { None } else {
                 const PINNED: u32 = 0x80000;
@@ -5132,37 +5151,39 @@ impl FolderView {
                         .w(px(cw[0]))
                         .flex_shrink_0()
                         .px_2()
+                        .flex()
                         .text_color(p.text_secondary)
                         .whitespace_nowrap()
                         .overflow_hidden()
                         .text_ellipsis()
-                        .child(format::datetime(e.modified_ms))
+                        .child(Self::held_text(format::datetime(e.modified_ms), cx))
                 }))
                 .children(show_created.then(|| {
                     div()
                         .w(px(cw[1]))
                         .flex_shrink_0()
                         .px_2()
+                        .flex()
                         .text_color(p.text_secondary)
                         .whitespace_nowrap()
                         .overflow_hidden()
                         .text_ellipsis()
-                        .child(format::datetime(e.created_ms))
+                        .child(Self::held_text(format::datetime(e.created_ms), cx))
                 }))
                 .when(show_type, |row| row.child(
                     div()
                         .w(type_w)
                         .flex_shrink_0()
                         .px_2()
+                        .flex()
                         .text_color(p.text_secondary)
                         .whitespace_nowrap()
                         .overflow_hidden()
                         .text_ellipsis()
-                        .child(if search_mode {
-                            self.parent_of(ei).map(|d| d.to_string_lossy().into_owned()).unwrap_or_default()
-                        } else {
-                            icons::type_label(e)
-                        }),
+                        .child(Self::held_text(
+                            if search_mode { self.parent_of(ei).map(|d| d.to_string_lossy().into_owned()).unwrap_or_default() } else { icons::type_label(e) },
+                            cx,
+                        )),
                 ))
                 .when(show_size, |row| {
                     let cell = div().w(px(cw[3])).flex_shrink_0().px_2().flex().justify_end().whitespace_nowrap().overflow_hidden();
@@ -5189,7 +5210,7 @@ impl FolderView {
                         ),
                         None => {
                             let text = if !e.is_dir() { format::size(e.size) } else { dir_size.clone().unwrap_or_default() };
-                            cell.text_color(p.text_secondary).child(text)
+                            cell.text_color(p.text_secondary).text_ellipsis().child(Self::held_text(text, cx))
                         }
                     };
                     row.child(cell)
@@ -6732,6 +6753,37 @@ fn hover_time() -> std::time::Duration {
 
 /// Whether a press is the second of a pair of quick clicks (2nd, 4th, 6th...): Windows' own pairing, where a third quick click is
 /// the first of the next pair.
+/// What a press on a row becomes when the pointer moves with the button down: `Some` is a selection box (`Some(true)`: one that adds
+/// to the selection, the press was made with Ctrl or Shift), `None` a drag of the item.
+///
+/// In the Details and Columns views a row is as wide as the list, so the list has no empty area to start a box from: there a press
+/// on the row's empty space starts one, as in Explorer (issue 239), and a press on the item itself, its icon, its name or the text
+/// of any other cell, drags it. `on_item` is that press. WHY the other cells count (a Discord report, 2026-11-24, on 0.9.9): only
+/// the name and the icon did, so a file taken by its date or size "cannot be dragged out, it only gets highlighted", and a short
+/// name left almost nothing to take it by. `boxes_from_rows` is the setting that turns the whole rule off: every press on a row
+/// then drags, as before 0.9.9, and a box starts from the empty area below the rows.
+fn row_press_band(mode: ViewMode, on_item: bool, boxes_from_rows: bool, plain: bool) -> Option<bool> {
+    (boxes_from_rows && matches!(mode, ViewMode::Details | ViewMode::Columns) && !on_item).then_some(!plain)
+}
+
+#[cfg(test)]
+mod row_press_tests {
+    use super::{ViewMode, row_press_band};
+
+    #[test]
+    fn a_row_is_dragged_by_its_item_and_starts_a_box_from_its_empty_space() {
+        for mode in [ViewMode::Details, ViewMode::Columns] {
+            assert_eq!(row_press_band(mode, true, true, true), None, "a press on the name, the icon or a cell's text drags the item");
+            assert_eq!(row_press_band(mode, false, true, true), Some(false), "a press on the row's empty space starts a box");
+            assert_eq!(row_press_band(mode, false, true, false), Some(true), "with Ctrl or Shift the box adds to the selection");
+            assert_eq!(row_press_band(mode, false, false, true), None, "with the setting off the whole row drags");
+            assert_eq!(row_press_band(mode, false, false, false), None);
+        }
+        // (a tile has empty space around it: a press on the tile always takes the item)
+        assert_eq!(row_press_band(ViewMode::Grid, false, true, true), None);
+    }
+}
+
 fn is_second_click(click_count: usize) -> bool {
     click_count >= 2 && click_count % 2 == 0
 }

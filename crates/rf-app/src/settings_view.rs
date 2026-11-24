@@ -2279,6 +2279,13 @@ fn files(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         sw("type-filter", p, s.type_to_filter, |s, v| s.type_to_filter = v),
     ));
     v.push(card(p, L::ArrowUp, t!("Boş alana çift tıklayınca üst klasöre çık"), None, sw("dbl-up", p, s.double_click_up, |s, v| s.double_click_up = v)));
+    v.push(card(
+        p,
+        L::ListChecks,
+        t!("Satırın boş yerinden seçim kutusu başlat"),
+        Some(t!("Ayrıntılar ve Sütunlar görünümünde. Kapalıyken öğe, satırının neresinden tutulursa tutulsun sürüklenir.")),
+        sw("row-box", p, s.row_selection_box, |s, v| s.row_selection_box = v),
+    ));
     v.push(card(p, L::FolderUp, t!("Yukarı çıkınca önceki klasörü seç"), None, sw("prev-sel", p, s.select_previous_on_up, |s, v| s.select_previous_on_up = v)));
     v.push(card(
         p,

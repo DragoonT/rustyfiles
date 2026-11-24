@@ -13310,5 +13310,17 @@
   "key": "{t} kaldı",
   "tr": "{t} kaldı",
   "en": "{t} left"
+ },
+ {
+  "id": "0884e8a7",
+  "key": "Satırın boş yerinden seçim kutusu başlat",
+  "tr": "Satırın boş yerinden seçim kutusu başlat",
+  "en": "Start a selection box from a row's empty space"
+ },
+ {
+  "id": "1f5380d9",
+  "key": "Ayrıntılar ve Sütunlar görünümünde. Kapalıyken öğe, satırının neresinden tutulursa tutulsun sürüklenir.",
+  "tr": "Ayrıntılar ve Sütunlar görünümünde. Kapalıyken öğe, satırının neresinden tutulursa tutulsun sürüklenir.",
+  "en": "In the Details and Columns views. Off: an item is dragged from anywhere on its row."
  }
 ]
