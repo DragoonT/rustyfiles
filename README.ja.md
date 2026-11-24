@@ -390,6 +390,7 @@ rustyfiles はまだ若く、作者は Explorer の代わりに毎日使って�
 ## 掲載先
 
 - [AlternativeTo](https://alternativeto.net/software/rustyfiles/about/)（File Explorer の代替として）
+- [Awesome GPUI](https://github.com/zed-industries/awesome-gpui#productivity)（Productivity の項目）
 - [Awesome Rust](https://github.com/rust-unofficial/awesome-rust#file-manager)（File manager の項目）
 - [Scoop](https://scoop.sh)（独自のバケットから。[インストール](#インストール)を参照）
 

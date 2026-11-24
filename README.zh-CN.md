@@ -447,6 +447,7 @@ rustyfiles 还很年轻，其作者每天都用它来代替资源管理器。mac
 ## 收录情况
 
 - [AlternativeTo](https://alternativeto.net/software/rustyfiles/about/)，作为文件资源管理器的替代品
+- [Awesome GPUI](https://github.com/zed-industries/awesome-gpui#productivity)，位于 Productivity 分类中
 - [Awesome Rust](https://github.com/rust-unofficial/awesome-rust#file-manager)，位于 File manager 分类中
 - [Scoop](https://scoop.sh)，来自其自有的 bucket（参见 [安装](#安装)）
 

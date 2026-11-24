@@ -494,6 +494,7 @@ beta sürümü; Linux ondan sonra gelir. Hata raporları ve pull request'ler mem
 ## Listelendiği yerler
 
 - [AlternativeTo](https://alternativeto.net/software/rustyfiles/about/), File Explorer'a alternatif olarak
+- [Awesome GPUI](https://github.com/zed-industries/awesome-gpui#productivity), Productivity bölümünde
 - [Awesome Rust](https://github.com/rust-unofficial/awesome-rust#file-manager), File manager bölümünde
 - [Scoop](https://scoop.sh), kendi bucket'ından ([Kurulum](#kurulum) bölümüne bakın)
 

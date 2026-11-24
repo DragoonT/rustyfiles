@@ -491,6 +491,7 @@ rustyfiles молод, а его автор пользуется им кажды
 ## Где представлен
 
 - [AlternativeTo](https://alternativeto.net/software/rustyfiles/about/), как альтернатива File Explorer
+- [Awesome GPUI](https://github.com/zed-industries/awesome-gpui#productivity), в разделе Productivity
 - [Awesome Rust](https://github.com/rust-unofficial/awesome-rust#file-manager), в разделе File manager
 - [Scoop](https://scoop.sh), из собственного бакета (см. [Установка](#установка))
 

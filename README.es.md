@@ -497,6 +497,7 @@ núcleo, y Linux llegará después. Los informes de errores y las pull requests 
 ## Publicado en
 
 - [AlternativeTo](https://alternativeto.net/software/rustyfiles/about/), como alternativa al Explorador de archivos
+- [Awesome GPUI](https://github.com/zed-industries/awesome-gpui#productivity), en la sección Productivity
 - [Awesome Rust](https://github.com/rust-unofficial/awesome-rust#file-manager), en la sección de gestores de archivos
 - [Scoop](https://scoop.sh), desde su propio bucket (ver [Instalación](#instalación))
 

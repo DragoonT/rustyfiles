@@ -509,6 +509,7 @@ beta on the same core, and Linux comes after it. Bug reports and pull requests a
 ## Listed on
 
 - [AlternativeTo](https://alternativeto.net/software/rustyfiles/about/), as an alternative to File Explorer
+- [Awesome GPUI](https://github.com/zed-industries/awesome-gpui#productivity), in the Productivity section
 - [Awesome Rust](https://github.com/rust-unofficial/awesome-rust#file-manager), in the File manager section
 - [Scoop](https://scoop.sh), from its own bucket (see [Install](#install))
 

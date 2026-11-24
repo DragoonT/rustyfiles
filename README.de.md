@@ -414,6 +414,7 @@ rustyfiles ist jung, und sein Autor benutzt es jeden Tag anstelle des Explorers.
 ## Gelistet bei
 
 - [AlternativeTo](https://alternativeto.net/software/rustyfiles/about/), als Alternative zum File Explorer
+- [Awesome GPUI](https://github.com/zed-industries/awesome-gpui#productivity), im Abschnitt Productivity
 - [Awesome Rust](https://github.com/rust-unofficial/awesome-rust#file-manager), im Abschnitt File manager
 - [Scoop](https://scoop.sh), aus dem eigenen Bucket (siehe [Installation](#installation))
 

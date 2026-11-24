@@ -415,6 +415,7 @@ rustyfiles 還很年輕，它的作者每天都用它取代 Explorer。macOS 應
 ## 收錄於
 
 - [AlternativeTo](https://alternativeto.net/software/rustyfiles/about/)，作為 File Explorer 的替代品
+- [Awesome GPUI](https://github.com/zed-industries/awesome-gpui#productivity)，列於 Productivity 類別
 - [Awesome Rust](https://github.com/rust-unofficial/awesome-rust#file-manager)，列於 File manager 類別
 - [Scoop](https://scoop.sh)，來自其自己的 bucket（見 [安裝](#安裝)）
 

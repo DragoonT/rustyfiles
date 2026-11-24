@@ -505,6 +505,7 @@ beta sobre o mesmo núcleo, e o Linux vem depois dele. Relatos de bugs e pull re
 ## Listado em
 
 - [AlternativeTo](https://alternativeto.net/software/rustyfiles/about/), como alternativa ao Explorador de Arquivos
+- [Awesome GPUI](https://github.com/zed-industries/awesome-gpui#productivity), na seção Productivity
 - [Awesome Rust](https://github.com/rust-unofficial/awesome-rust#file-manager), na seção de gerenciadores de arquivos
 - [Scoop](https://scoop.sh), pelo seu próprio bucket (veja [Instalação](#instalação))
 
