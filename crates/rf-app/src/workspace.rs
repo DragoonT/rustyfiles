@@ -3787,6 +3787,26 @@ impl Workspace {
                             .on_drag_move::<ExternalPaths>(crate::folder_view::drop_effect_over(dir.clone()))
                             .on_drop(move |paths: &ExternalPaths, _, cx| drop_files(paths, dir.clone(), cx))
                     })
+                    // a folder of the path is a place like the sidebar's: the middle button opens it in a tab of its own and the
+                    // right one shows the same menu (issue 331)
+                    .when_some(target.path().map(Path::to_path_buf), |d, dir| {
+                        d.on_mouse_down(
+                            MouseButton::Right,
+                            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                                cx.stop_propagation();
+                                this.sidebar_menu(dir.clone(), window, cx);
+                            }),
+                        )
+                    })
+                    .on_mouse_down(MouseButton::Middle, {
+                        let target = target.clone();
+                        cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                            cx.stop_propagation();
+                            let keep = this.active;
+                            this.open_tab(target.clone(), window, cx);
+                            this.activate(keep, window, cx);
+                        })
+                    })
                     .on_click(cx.listener(move |this, _, window, cx| {
                         cx.stop_propagation();
                         this.navigate(target.clone(), window, cx);
