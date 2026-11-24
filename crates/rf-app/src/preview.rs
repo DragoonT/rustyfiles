@@ -781,7 +781,7 @@ impl Preview {
         if let Some((path, e)) = &self.target {
             // by the path alone (no disk access on the UI thread): a parent named like an archive
             let in_archive = path.ancestors().skip(1).any(|a| a.as_os_str().len() > 3 && crate::archive_view::is_browsable(a));
-            if in_archive && e.size <= crate::archive_view::PREVIEW_EXTRACT_MAX && !e.is_dir() && icons::has_thumbnail(e) {
+            if in_archive && e.size <= crate::archive_view::PREVIEW_EXTRACT_MAX && !e.is_dir() && icons::has_sure_thumbnail(e) {
                 // images (and other thumbnailed files) inside an archive: extract, then the
                 // thumbnail is made from the copy
                 let p2 = path.clone();

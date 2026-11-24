@@ -488,7 +488,7 @@ impl ImageCache {
         if !matches!(crate::settings::icon_theme(), crate::settings::IconThemePref::Freedesktop) || pack.is_empty() {
             return PackPicture::Native;
         }
-        if skip_thumbnail_kinds && crate::icons::has_thumbnail(e) {
+        if skip_thumbnail_kinds && crate::icons::has_sure_thumbnail(e) {
             return PackPicture::Native;
         }
         let path = dir.join(&*e.name);
@@ -632,8 +632,30 @@ impl ImageCache {
     }
 
     fn thumbnail_as(&mut self, dir: &Path, e: &Entry, size: u32, urgent: bool, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
+        // A type outside our own list that a thumbnail provider is registered for (a sound file, a font, what an installed extension
+        // draws: issue 307): its own picture when it has one. Until that is known, and when it has none, a tile shows what it would
+        // for any other file (the theme's, the pack's or the type's icon, below); the pane, which asks urgently, shows its own.
+        // (not on an FTP server: every file would be downloaded to look for a picture in it)
+        if crate::icons::may_have_thumbnail(e) && !rf_win::ftp::is_ftp(dir) {
+            let key = file_picture_key(urgent, dir, &e.name, &e.modified_ms, size);
+            let path = dir.join(&*e.name);
+            let own = self.lookup(
+                key,
+                || {
+                    let mut req = Request::new(key, path, size, Kind::ThumbnailOnly);
+                    req.urgent = urgent;
+                    req
+                },
+                true,
+            );
+            if own.is_some() || urgent {
+                self.evict_over_budget();
+                self.release_evicted(cx);
+                return own;
+            }
+        }
         // The theme folder's picture for what has no content picture (a folder too: the theme's folder wins over its preview).
-        if !crate::icons::has_thumbnail(e)
+        if !crate::icons::has_sure_thumbnail(e)
             && let Some(f) = crate::themes::icon_file(e.is_dir(), &e.ext, shell_own_picture(e))
         {
             return self.theme_icon(f, size, cx);
@@ -652,7 +674,7 @@ impl ImageCache {
             && !own
             && !rf_win::ftp::is_ftp(dir)
             && !crate::nav_touch::may_hold_archive(dir);
-        let wants_thumb = crate::icons::has_thumbnail(e) || folder_preview;
+        let wants_thumb = crate::icons::has_sure_thumbnail(e) || folder_preview;
         let per_file = wants_thumb || own;
         let key = if per_file && e.is_dir() && !wants_thumb {
             let generation = FOLDER_ICON_GEN.load(std::sync::atomic::Ordering::Relaxed);

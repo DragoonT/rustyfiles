@@ -34,6 +34,54 @@ pub enum Kind {
     Icon,
     /// Real thumbnail if the shell has one; otherwise falls back to the icon.
     Thumbnail,
+    /// The file's own picture or nothing (an error): for types that may or may not have one (see `has_provider`), where the caller
+    /// has something better to show than this one file's icon.
+    ThumbnailOnly,
+}
+
+/// Whether the shell has a thumbnail provider for files of this extension (lower case, no dot): one a program registered for the
+/// type itself, for its class or for its kind. Read from the registry once for each extension and remembered until the program ends
+/// (a provider installed meanwhile is seen after a restart).
+///
+/// WHY (issue 307): thumbnails were asked for a fixed list of types only (pictures, videos, PDFs and a few more), so a type that a
+/// thumbnail extension such as SageThumbs 2K draws (`.pcraft`, `.swf`, a sound file's cover) stayed an icon here while Explorer
+/// showed its picture.
+pub fn has_provider(ext: &str) -> bool {
+    static KNOWN: Mutex<Option<std::collections::HashMap<String, bool>>> = Mutex::new(None);
+    if ext.is_empty() || ext.len() > 32 || !ext.chars().all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '+' | '~')) {
+        return false;
+    }
+    if let Some(&known) = KNOWN.lock().get_or_insert_with(Default::default).get(ext) {
+        return known;
+    }
+    // (asked outside the lock: two threads may both ask about a new extension, and both get the same answer)
+    let found = provider_of(ext).is_some_and(|p| Some(&p) != none_provider().as_ref());
+    KNOWN.lock().get_or_insert_with(Default::default).insert(ext.to_string(), found);
+    found
+}
+
+/// What the shell answers for an extension nobody registered: a provider that stands for every file there is (should one exist)
+/// is no sign that this type has a picture of its own.
+fn none_provider() -> Option<String> {
+    static NONE: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    NONE.get_or_init(|| provider_of("rustyfiles-no-such-type")).clone()
+}
+
+/// The class of the thumbnail provider the shell would use for this extension (IThumbnailProvider, or the older IExtractImage).
+fn provider_of(ext: &str) -> Option<String> {
+    use windows::Win32::UI::Shell::{ASSOCF_NONE, ASSOCSTR_SHELLEXTENSION, AssocQueryStringW};
+    let dotted = wide(&format!(".{ext}"));
+    ["{E357FCCD-A995-4576-B01F-234630154E96}", "{BB2E617C-0920-11D1-9A0B-00C04FC2D6C1}"].iter().find_map(|interface| {
+        let interface = wide(interface);
+        let mut buf = [0u16; 64];
+        let mut len = buf.len() as u32;
+        // SAFETY: both strings end in a zero and `len` is the buffer's size in characters
+        let hr = unsafe {
+            AssocQueryStringW(ASSOCF_NONE, ASSOCSTR_SHELLEXTENSION, PCWSTR(dotted.as_ptr()), PCWSTR(interface.as_ptr()), Some(windows::core::PWSTR(buf.as_mut_ptr())), &mut len)
+        };
+        let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+        (hr == windows::Win32::Foundation::S_OK && end > 0).then(|| String::from_utf16_lossy(&buf[..end]).to_uppercase())
+    })
 }
 
 /// Starts GDI+ once and never shuts it down.
@@ -128,6 +176,7 @@ pub fn get_image(path: &Path, size: u32, kind: Kind) -> anyhow::Result<Bgra> {
                 .GetImage(sz, SIIGBF(SIIGBF_THUMBNAILONLY.0 | SIIGBF_RESIZETOFIT.0 | SIIGBF_BIGGERSIZEOK.0))
                 .or_else(|_| factory.GetImage(sz, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK))?
         },
+        Kind::ThumbnailOnly => unsafe { factory.GetImage(sz, SIIGBF(SIIGBF_THUMBNAILONLY.0 | SIIGBF_RESIZETOFIT.0 | SIIGBF_BIGGERSIZEOK.0))? },
     };
     let r = hbitmap_to_bgra(hbmp);
     unsafe {
@@ -408,6 +457,19 @@ impl ThumbPool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_type_has_a_thumbnail_provider_only_when_one_is_registered_for_it() {
+        // (Windows registers one for its own picture types; nothing does for a type nobody knows, a name that is no extension, or none)
+        assert!(super::has_provider("jpg"), "{:?}", super::provider_of("jpg"));
+        assert!(!super::has_provider("rustyfiles-another-unknown-type"));
+        assert!(!super::has_provider(""));
+        assert!(!super::has_provider(r"a\b"));
+        // what this machine says about the types the list never asked for (printed for a look: `-- --nocapture`)
+        for ext in ["mp3", "m4a", "opus", "flac", "wav", "ttf", "otf", "txt", "exe", "lnk", "url", "zip", "msi", "html", "svg", "docx", "swf", "pcraft"] {
+            println!("{ext}: {:?}", super::provider_of(ext).filter(|p| Some(p) != super::none_provider().as_ref()));
+        }
+    }
+
     use super::*;
 
     /// A JPEG with a red top-left corner, turned clockwise via its EXIF tag: the shell
