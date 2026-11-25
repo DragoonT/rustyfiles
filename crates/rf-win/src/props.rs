@@ -32,6 +32,7 @@ fn wanted() -> Vec<(&'static str, PROPERTYKEY)> {
         ("Çekim tarihi", PKEY_Photo_DateTaken),
         ("Sanatçı", PKEY_Music_Artist),
         ("Albüm", PKEY_Music_AlbumTitle),
+        ("Yıl", PKEY_Media_Year),
         ("Başlık", PKEY_Title),
         ("Sayfa", PKEY_Document_PageCount),
         ("Yazar", PKEY_Author),
