@@ -6391,7 +6391,8 @@ pub(crate) fn open_in_background_sorted(path: PathBuf, key: SortKey, ascending: 
     }
     std::thread::spawn(move || {
         // FTP: download to a temp copy, then open that
-        let path = if rf_win::ftp::is_ftp(&path) {
+        let own = !rf_win::ftp::is_ftp(&path);
+        let path = if !own {
             let name = path.file_name().map(|n| n.to_os_string()).unwrap_or_default();
             let dir = std::env::temp_dir().join("rustyfiles-ftp");
             let _ = std::fs::create_dir_all(&dir);
@@ -6405,8 +6406,11 @@ pub(crate) fn open_in_background_sorted(path: PathBuf, key: SortKey, ascending: 
             path
         };
         // (with the user's own program for the file's type when there is one: Settings > File types)
-        if let Err(e) = rf_win::openrules::open_in_order(&path, key, ascending) {
-            log::warn!("open {path:?}: {e}");
+        match rf_win::openrules::open_in_order(&path, key, ascending) {
+            // (the user's own file, not a copy fetched to be shown: it is one of the recent files now)
+            Ok(_) if own && path.is_file() => rf_win::shell::note_recent(&path),
+            Ok(_) => {}
+            Err(e) => log::warn!("open {path:?}: {e}"),
         }
     });
 }

@@ -78,6 +78,11 @@ fn load_recent(limit: usize) -> Vec<Recent> {
     out
 }
 
+/// The two lists show the same files at the same times: nothing to draw again.
+fn same_recent(a: &[Recent], b: &[Recent]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.target == y.target && x.used_ms == y.used_ms && x.is_dir == y.is_dir)
+}
+
 /// Cloud folders (OneDrive, Dropbox, iCloud, Google Drive) and WSL distributions.
 fn load_cloud_and_wsl() -> Vec<Pinned> {
     let mut out = Vec::new();
@@ -156,6 +161,11 @@ pub struct Places {
     pub extras_loaded: bool,
     _task: Option<Task<()>>,
     _recycle_task: Option<Task<()>>,
+    _recent_task: Option<Task<()>>,
+    /// When the reading that gave `recent` began: an older reading that arrives later does not replace it.
+    recent_read: Option<std::time::Instant>,
+    /// The watch on Windows' Recent folder (see `watch_recent`).
+    _recent_watch: Option<rf_win::watch::DirWatch>,
 }
 
 impl Places {
@@ -176,8 +186,12 @@ impl Places {
                 extras_loaded: false,
                 _task: None,
                 _recycle_task: None,
+                _recent_task: None,
+                recent_read: None,
+                _recent_watch: None,
             };
         this.refresh(cx);
+        this.watch_recent(cx);
         // the drives the user hides (Settings > Files and folders, a drive's own menu) leave and come back at once
         let mut hidden = rf_win::drives::hidden();
         // and the pins, when they change anywhere (a pinned folder deleted or renamed: `pins_follow`)
@@ -286,6 +300,49 @@ impl Places {
         }));
     }
 
+    /// Keeps the recent items in step with Windows: its Recent folder is watched, and the list is read again a moment after a
+    /// shortcut is written there. The list was read at the start and on F5 only, and the app stays open for days: Home showed the
+    /// files of the morning in the evening (issue 341: "a gap of up to 10 hours between entries").
+    fn watch_recent(&mut self, cx: &mut Context<Self>) {
+        let Some(dir) = rf_win::dock::startrecent::recent_dir() else { return };
+        let (tx, mut rx) = futures::channel::mpsc::unbounded::<()>();
+        // (a file opened in a program writes its shortcut in two or three steps: one reading after them)
+        match rf_win::watch::watch_dir(&dir, std::time::Duration::from_millis(1500), move || {
+            let _ = tx.unbounded_send(());
+        }) {
+            Ok(w) => self._recent_watch = Some(w),
+            Err(e) => {
+                log::warn!("recent items: the folder cannot be watched: {e:#}");
+                return;
+            }
+        }
+        self._recent_task = Some(cx.spawn(async move |this, cx| {
+            use futures::StreamExt;
+            while rx.next().await.is_some() {
+                let began = std::time::Instant::now();
+                let read = cx.background_spawn(async move {
+                    let recent = load_recent(14);
+                    rf_win::localized::warm(recent.iter().filter(|r| r.is_dir).flat_map(|r| crate::nav_touch::label_paths(&r.target)));
+                    (recent, rf_win::dock::startrecent::recent_tracking_on())
+                });
+                let (recent, tracking) = read.await;
+                // (several changes that came during the reading are one more reading, not one each)
+                while rx.try_recv().is_ok() {}
+                let alive = this.update(cx, |p, cx| {
+                    p.recent_read = Some(began);
+                    if !same_recent(&p.recent, &recent) || p.recent_off == tracking {
+                        p.recent = recent;
+                        p.recent_off = !tracking;
+                        cx.notify();
+                    }
+                });
+                if alive.is_err() {
+                    break;
+                }
+            }
+        }));
+    }
+
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
         let user_pins = cx.try_global::<crate::settings::Settings>().and_then(|s| s.pinned.clone());
         // Two pieces of work, so that the sidebar does not wait for the slow one. The recent items ask the disk about the place each
@@ -319,6 +376,7 @@ impl Places {
             let network = rf_win::network::network_shortcuts();
             (pinned, drives, libraries, network)
         });
+        let began = std::time::Instant::now();
         let extras = cx.background_spawn(async move {
             let recent = load_recent(14);
             // the localized names the jump list and the Home view show for these folders are read here, on this thread: the
@@ -342,8 +400,12 @@ impl Places {
             });
             let (recent, tracking, cloud) = extras.await;
             let _ = this.update(cx, |p, cx| {
-                p.recent = recent;
-                p.recent_off = !tracking;
+                // (the cloud entries can take seconds: the watch may have read the recent items again meanwhile)
+                if p.recent_read.is_none_or(|at| at <= began) {
+                    p.recent = recent;
+                    p.recent_off = !tracking;
+                    p.recent_read = Some(began);
+                }
                 p.cloud = cloud;
                 p.extras_loaded = true;
                 cx.notify();
