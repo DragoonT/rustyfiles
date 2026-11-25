@@ -2859,7 +2859,7 @@ impl FolderView {
     fn grid_row_h(&self) -> Pixels {
         match self.grid_style {
             GridStyle::Tiles => px(GRID_SIZES[self.grid_size as usize].1 - if crate::settings::compact_items() { COMPACT_TILE_SAVE } else { 0. }),
-            GridStyle::Cards => px(84.),
+            GridStyle::Cards => px(CARD_ROW_H),
             GridStyle::List => px(32.),
         }
     }
@@ -3286,9 +3286,9 @@ impl FolderView {
                     v_flex()
                         .flex_1()
                         .min_w_0()
-                        .gap_0p5()
-                        .child(div().text_sm().font_weight(FontWeight::MEDIUM).whitespace_nowrap().overflow_hidden().text_ellipsis().when(dim, |d| d.opacity(0.6)).on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true)).child(name_text.clone()))
-                        .children(facts.unwrap_or_default().into_iter().map(|t| div().text_xs().text_color(p.text_secondary).whitespace_nowrap().overflow_hidden().text_ellipsis().child(t))),
+                        .gap(px(CARD_LINE_GAP))
+                        .child(div().text_sm().line_height(px(CARD_NAME_LINE)).font_weight(FontWeight::MEDIUM).whitespace_nowrap().overflow_hidden().text_ellipsis().when(dim, |d| d.opacity(0.6)).on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true)).child(name_text.clone()))
+                        .children(facts.unwrap_or_default().into_iter().map(|t| div().text_xs().line_height(px(CARD_FACT_LINE)).text_color(p.text_secondary).whitespace_nowrap().overflow_hidden().text_ellipsis().child(t))),
                 ),
             GridStyle::List => h_flex()
                 .px_2()
@@ -5919,6 +5919,17 @@ mod tile_tests {
         assert_eq!(split("Notes. And more words here", false), ("Notes. And more words here", ""), "a dot in a sentence");
     }
 
+    /// A card with all four lines (a file: name, type, size, date) keeps them inside itself, and two cards' texts stand further
+    /// apart than two lines of one card: the eye has to see which lines belong together (issue 366).
+    #[test]
+    fn a_cards_four_lines_fit_and_stand_apart_from_the_next_cards() {
+        use super::{CARD_LINE_GAP, GRID_GAP, card_text_margin};
+        let margin = card_text_margin();
+        assert!(margin >= 4., "{margin} px above and below a card's text");
+        let between_cards = 2. * margin + f32::from(GRID_GAP);
+        assert!(between_cards >= 4. * CARD_LINE_GAP, "{between_cards} px between two cards' texts, {CARD_LINE_GAP} between two lines");
+    }
+
     #[test]
     fn a_tile_has_room_for_two_whole_lines_of_its_name_at_every_size() {
         use super::{GRID_SIZES, TILE_NAME_LINE, tile_name_room};
@@ -6270,6 +6281,23 @@ const GRID_SIZES: [(f32, f32, u32); 5] = [(76., 102., 64), (92., 114., 80), (124
 /// 19.4 px): two such lines were higher than the room under the picture, and the second one was cut in half at the tile's edge
 /// with "Compact items" on (a Discord report).
 const TILE_NAME_LINE: f32 = 16.;
+/// A card's lines: its name and each line of facts under it (type, size, date), at Fluent's line heights for their text sizes
+/// (14 px text on 20, 12 px text on 16), with `CARD_LINE_GAP` between them. They are set on the lines instead of left to the
+/// toolkit's default (1.618 of the text size): four default lines were 87 px in a card of 80, ran over its top and bottom, and
+/// one card's date stood right on the next card's name (issue 366).
+const CARD_NAME_LINE: f32 = 20.;
+const CARD_FACT_LINE: f32 = 16.;
+const CARD_LINE_GAP: f32 = 2.;
+/// The height of a row of cards, with the gap between rows.
+const CARD_ROW_H: f32 = 88.;
+
+/// The room a card leaves above and below its text when it has all four lines (a file's): what keeps one card's text apart from
+/// the next card's.
+#[cfg(test)]
+fn card_text_margin() -> f32 {
+    (CARD_ROW_H - f32::from(GRID_GAP) - (CARD_NAME_LINE + 3. * CARD_FACT_LINE + 3. * CARD_LINE_GAP)) / 2.
+}
+
 /// How much of a tile the picture's side is, of the thumbnail's pixels.
 const TILE_VISUAL: f32 = 0.75;
 
