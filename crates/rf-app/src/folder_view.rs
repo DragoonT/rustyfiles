@@ -3123,6 +3123,8 @@ impl FolderView {
         let units = self.grid_grouped().then(|| self.grid_units_now());
         let (_, slice_h) = self.grid_slices();
         let g = GridCellCtx { hover_select, p, tile_w, row_h, thumb_px, style, visual_px, show_ext, renamed };
+        // the row of tiles (by its first tile) that the lines above have drawn already
+        let mut drawn = None;
         for row in range {
             // (start, how many, the slice of the row) in the grouped Grid; a whole row of `cols` otherwise
             let (start, len, part) = match units.as_ref().map(|u| u.0.get(row).cloned()) {
@@ -3157,6 +3159,16 @@ impl FolderView {
                 }
                 Some(None) => break,
             };
+            // A row of tiles is several lines of the list (its slices). It is drawn ONCE, by the first of its lines that is asked
+            // for, moved up by the slices above that line and not cut; its other lines only keep their height. (Until 1.0.0 every
+            // slice drew the whole row cut to itself. Where two slices met on a pixel's middle both drew that pixel row, and a
+            // hovered or selected tile's fill and outline came out twice there: a thin lighter line across the tile at 150 %
+            // scaling, 45 or 90 px under its top in the reporter's pictures, which is one and two slices. Issue 363.)
+            if part.is_some() && drawn == Some(start) {
+                out.push(div().w_full().h(slice_h).into_any_element());
+                continue;
+            }
+            drawn = Some(start);
             let mut r = h_flex().w_full().h(self.grid_row_h()).gap(GRID_GAP).items_start();
             for c in 0..len {
                 let Some(cell) = self.grid_cell(start + c, part, &g, window, cx) else { break };
@@ -3164,16 +3176,7 @@ impl FolderView {
             }
             match part {
                 None => out.push(r.into_any_element()),
-                // one slice of the row: the row drawn whole, moved up by the slices above this one and cut to this slice
-                Some(part) => out.push(
-                    div()
-                        .id(("gslice", row))
-                        .w_full()
-                        .h(slice_h)
-                        .overflow_hidden()
-                        .child(div().relative().top(-(slice_h * part as f32)).w_full().child(r))
-                        .into_any_element(),
-                ),
+                Some(part) => out.push(div().w_full().h(slice_h).child(div().relative().top(-(slice_h * part as f32)).w_full().child(r)).into_any_element()),
             }
         }
         out
