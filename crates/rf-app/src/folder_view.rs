@@ -2976,7 +2976,7 @@ impl FolderView {
             p: Palette::for_window(window),
             tile_w: px(LIST_COL_MIN),
             row_h,
-            thumb_px: self.grid_thumb_px(),
+            thumb_px: picture_px(self.grid_thumb_px(), px(20.), window.scale_factor()),
             style: GridStyle::List,
             visual_px: px(20.),
             show_ext,
@@ -3116,7 +3116,7 @@ impl FolderView {
         };
         // the picture is asked for at the screen's pixels: at 150 % and more the tile shows more pixels than the size step's own,
         // and a folder (Windows' own picture of it) came out blurred (issue 253)
-        let thumb_px = thumb_px.max(((f32::from(visual_px) * window.scale_factor() / 16.).ceil() as u32) * 16);
+        let thumb_px = picture_px(thumb_px, visual_px, window.scale_factor());
         let show_ext = cx.global::<crate::settings::Settings>().show_extensions;
         let renamed = self.renamed.clone();
         let mut out = Vec::with_capacity(range.len());
@@ -5919,6 +5919,20 @@ mod tile_tests {
         assert_eq!(split("Notes. And more words here", false), ("Notes. And more words here", ""), "a dot in a sentence");
     }
 
+    /// A tile's picture is asked for at the pixels its box has on the screen when that is more than the size step's own, and at
+    /// those pixels exactly (issue 253).
+    #[test]
+    fn a_tiles_picture_is_asked_for_at_the_boxs_own_pixels() {
+        use super::picture_px;
+        use gpui_kit::px;
+        assert_eq!(picture_px(128, px(96.), 1.0), 128, "100 %: the step's own");
+        assert_eq!(picture_px(128, px(96.), 1.25), 128, "125 %: the box is 120 px, the step's 128 cover it");
+        assert_eq!(picture_px(128, px(96.), 1.5), 144);
+        assert_eq!(picture_px(128, px(96.), 1.75), 168, "175 %: 168, not 176");
+        assert_eq!(picture_px(96, px(60.), 1.75), 105, "a card");
+        assert_eq!(picture_px(32, px(20.), 1.75), 35, "the List layout");
+    }
+
     /// A card with all four lines (a file: name, type, size, date) keeps them inside itself, and two cards' texts stand further
     /// apart than two lines of one card: the eye has to see which lines belong together (issue 366).
     #[test]
@@ -6281,6 +6295,14 @@ const GRID_SIZES: [(f32, f32, u32); 5] = [(76., 102., 64), (92., 114., 80), (124
 /// 19.4 px): two such lines were higher than the room under the picture, and the second one was cut in half at the tile's edge
 /// with "Compact items" on (a Discord report).
 const TILE_NAME_LINE: f32 = 16.;
+/// The pixels a tile's picture is asked for: the size step's own, or what its box is on this screen when that is more. The box's
+/// pixels exactly, not rounded up to some step: an icon made 176 px wide and drawn into 168 (medium tiles at 175 %) has every one
+/// of its pixels spread over two of the screen's and is soft; made 168 px wide it is drawn pixel for pixel (issue 253, "this is
+/// a valid issue in 1.0.0", which rounded up to 16).
+fn picture_px(step: u32, visual: Pixels, scale: f32) -> u32 {
+    step.max((f32::from(visual) * scale).ceil() as u32)
+}
+
 /// A card's lines: its name and each line of facts under it (type, size, date), at Fluent's line heights for their text sizes
 /// (14 px text on 20, 12 px text on 16), with `CARD_LINE_GAP` between them. They are set on the lines instead of left to the
 /// toolkit's default (1.618 of the text size): four default lines were 87 px in a card of 80, ran over its top and bottom, and

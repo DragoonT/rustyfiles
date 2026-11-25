@@ -178,7 +178,7 @@ pub fn get_image(path: &Path, size: u32, kind: Kind) -> anyhow::Result<Bgra> {
         },
         Kind::ThumbnailOnly => unsafe { factory.GetImage(sz, SIIGBF(SIIGBF_THUMBNAILONLY.0 | SIIGBF_RESIZETOFIT.0 | SIIGBF_BIGGERSIZEOK.0))? },
     };
-    let r = hbitmap_to_bgra(hbmp);
+    let r = hbitmap_to_bgra(hbmp).map(|b| fit_to(b, size));
     unsafe {
         let _ = DeleteObject(HGDIOBJ(hbmp.0));
     }
@@ -190,13 +190,52 @@ pub fn get_image(path: &Path, size: u32, kind: Kind) -> anyhow::Result<Bgra> {
         && std::fs::metadata(path).is_ok_and(|m| m.is_dir())
     {
         let hbmp = unsafe { factory.GetImage(sz, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK)? };
-        let r = hbitmap_to_bgra(hbmp);
+        let r = hbitmap_to_bgra(hbmp).map(|b| fit_to(b, size));
         unsafe {
             let _ = DeleteObject(HGDIOBJ(hbmp.0));
         }
         return r;
     }
     r
+}
+
+/// A picture that came out bigger than it was asked for, made to fit `size` (its longer side); any other is handed back as it is.
+///
+/// The shell may answer with more pixels than asked (`SIIGBF_BIGGERSIZEOK`), and for a folder's preview it always does: 256 x 256,
+/// whatever the size. Such a picture went to the screen as it was and the graphics card squeezed it into the tile, from four
+/// neighbouring pixels a point and nothing else: jagged at 100 % (256 into 96) and soft at 175 % (256 into 168), "blurred and
+/// pixelated" in the report (issue 253). Here, on the worker's thread, every pixel of the result is the weighted mean of all the
+/// pixels it stands for, and the tile then draws it one to one.
+///
+/// The mean is taken with the colours weighted by their alpha: a transparent pixel's colour is black, and it would darken the
+/// picture's edge otherwise.
+fn fit_to(b: Bgra, size: u32) -> Bgra {
+    let longest = b.width.max(b.height);
+    if size == 0 || longest <= size || b.data.len() != (b.width as usize) * (b.height as usize) * 4 {
+        return b;
+    }
+    let side = |v: u32| ((v as u64 * size as u64 + longest as u64 / 2) / longest as u64).max(1) as u32;
+    let (w, h) = (side(b.width), side(b.height));
+    let mut data = b.data;
+    for p in data.chunks_exact_mut(4) {
+        let a = p[3] as u32;
+        if a != 255 {
+            p[0] = ((p[0] as u32 * a + 127) / 255) as u8;
+            p[1] = ((p[1] as u32 * a + 127) / 255) as u8;
+            p[2] = ((p[2] as u32 * a + 127) / 255) as u8;
+        }
+    }
+    let Some(src) = image::RgbaImage::from_raw(b.width, b.height, data) else { return Bgra { width: 0, height: 0, data: Vec::new() } };
+    let mut data = image::imageops::resize(&src, w, h, image::imageops::FilterType::CatmullRom).into_raw();
+    for p in data.chunks_exact_mut(4) {
+        let a = p[3] as u32;
+        if a != 0 && a != 255 {
+            p[0] = ((p[0] as u32 * 255 + a / 2) / a).min(255) as u8;
+            p[1] = ((p[1] as u32 * 255 + a / 2) / a).min(255) as u8;
+            p[2] = ((p[2] as u32 * 255 + a / 2) / a).min(255) as u8;
+        }
+    }
+    Bgra { width: w, height: h, data }
 }
 
 /// The file's own picture only (a song's cover art, a video's frame), never its type's icon: `None` when it has none. Blocking.
@@ -457,6 +496,36 @@ impl ThumbPool {
 
 #[cfg(test)]
 mod tests {
+    /// A picture bigger than asked for is made to fit, with its colours kept right up to a transparent edge (issue 253).
+    #[test]
+    fn a_picture_bigger_than_asked_is_made_to_fit() {
+        use super::{Bgra, fit_to};
+        // a yellow square with a transparent frame around it, as a folder's 256 px preview is
+        let (w, h) = (256u32, 256u32);
+        let mut data = vec![0u8; (w * h * 4) as usize];
+        // (its edges between two of the smaller picture's pixels, so that those come out part see-through)
+        for y in 37..219u32 {
+            for x in 37..219u32 {
+                let i = ((y * w + x) * 4) as usize;
+                data[i..i + 4].copy_from_slice(&[40, 200, 250, 255]);
+            }
+        }
+        let b = fit_to(Bgra { width: w, height: h, data }, 168);
+        assert_eq!((b.width, b.height, b.data.len()), (168, 168, 168 * 168 * 4));
+        let at = |x: u32, y: u32| -> [u8; 4] { b.data[((y * 168 + x) * 4) as usize..][..4].try_into().unwrap() };
+        assert_eq!(at(84, 84), [40, 200, 250, 255], "the middle keeps its colour");
+        assert_eq!(at(2, 2)[3], 0, "the frame stays transparent");
+        // on the edge of the square the pixels are part see-through, and their colour is still the square's, not darkened by
+        // the transparent ground's black
+        let edge = (0..168).map(|x| at(x, 84)).find(|p| p[3] > 20 && p[3] < 235).expect("a part see-through pixel on the edge");
+        assert!(edge[0].abs_diff(40) <= 12 && edge[1].abs_diff(200) <= 12 && edge[2].abs_diff(250) <= 12, "{edge:?}");
+        // the longer side decides, and a picture that fits already is left as it is
+        let wide = fit_to(Bgra { width: 200, height: 100, data: vec![255; 200 * 100 * 4] }, 100);
+        assert_eq!((wide.width, wide.height), (100, 50));
+        let small = fit_to(Bgra { width: 48, height: 48, data: vec![7; 48 * 48 * 4] }, 168);
+        assert_eq!((small.width, small.height, small.data[0]), (48, 48, 7));
+    }
+
     #[test]
     fn a_type_has_a_thumbnail_provider_only_when_one_is_registered_for_it() {
         // (Windows registers one for its own picture types; nothing does for a type nobody knows, a name that is no extension, or none)
