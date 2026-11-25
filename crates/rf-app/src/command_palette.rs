@@ -165,8 +165,12 @@ enum Row {
     Tab(usize),
 }
 
-/// How many rows are listed under the typed path's row.
+/// How many rows are listed under the typed path's row. The tab search lists every tab and shows this many at a time, the rest
+/// by scrolling (issue 79: "it can only display a maximum of 12 tabs ... add a scrollbar").
 const VISIBLE: usize = 12;
+/// A row's height and the gap between two rows.
+const ROW_H: f32 = 34.;
+const ROW_GAP: f32 = 2.;
 /// At most this many past folders among the commands (the folder-only mode lists [`VISIBLE`]).
 const FOLDERS_AMONG_COMMANDS: usize = 5;
 
@@ -180,7 +184,14 @@ pub struct CommandPalette {
     filtered: Vec<Row>,
     path: Option<PathBuf>,
     selected: usize,
+    /// The list's scroll place (the tab search's list can be longer than what shows).
+    scroll: ScrollHandle,
     _sub: Subscription,
+}
+
+/// How many of the matching rows a mode lists: every tab, [`VISIBLE`] of anything else.
+fn listed(mode: PaletteMode, matching: usize) -> usize {
+    if mode == PaletteMode::Tabs { matching } else { matching.min(VISIBLE) }
 }
 
 /// How well `label` matches the lowercase query `q`: a substring (earlier is better), else its letters in order (fewer gaps is
@@ -282,7 +293,7 @@ impl CommandPalette {
         });
         input.update(cx, |s, cx| s.focus(window, cx));
         let cmds = if matches!(mode, PaletteMode::Folders | PaletteMode::Tabs) { Vec::new() } else { commands() };
-        let mut this = Self { input, mode, cmds, folders, tabs, filtered: Vec::new(), path: None, selected: 0, _sub: sub };
+        let mut this = Self { input, mode, cmds, folders, tabs, filtered: Vec::new(), path: None, selected: 0, scroll: ScrollHandle::new(), _sub: sub };
         this.refilter(cx);
         this
     }
@@ -293,12 +304,13 @@ impl CommandPalette {
         self.path = as_path(&raw).filter(|_| self.mode != PaletteMode::Tabs).map(|_| PathBuf::from(raw.trim().trim_matches('"')));
         self.filtered = if self.mode == PaletteMode::Tabs { filter_tabs(&self.tabs, &raw.trim().to_lowercase()) } else { filter(self.mode, &self.cmds, &self.folders, &raw) };
         self.selected = 0;
+        self.scroll.set_offset(point(px(0.), px(0.)));
         cx.notify();
     }
 
-    /// The rows drawn (and walked by Up/Down): the path row and at most [`VISIBLE`] others.
+    /// The rows drawn (and walked by Up/Down): the path row and the listed others (`listed`).
     fn rows(&self) -> usize {
-        self.filtered.len().min(VISIBLE) + usize::from(self.path.is_some())
+        listed(self.mode, self.filtered.len()) + usize::from(self.path.is_some())
     }
 
     fn run_selected(&mut self, cx: &mut Context<Self>) {
@@ -325,7 +337,8 @@ impl CommandPalette {
         let sel = ix == self.selected;
         h_flex()
             .id(("pal", ix))
-            .h(px(34.))
+            .h(px(ROW_H))
+            .flex_shrink_0()
             .px_3()
             .gap_3()
             .items_center()
@@ -360,13 +373,20 @@ impl CommandPalette {
 impl Render for CommandPalette {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = Palette::for_window(window);
-        let mut list = v_flex().gap_0p5();
+        // (as high as `VISIBLE` rows at most: a longer list scrolls, and the row the keyboard is on is kept in view)
+        let mut list = v_flex()
+            .id("palette-list")
+            .gap(px(ROW_GAP))
+            .max_h(px(VISIBLE as f32 * ROW_H + (VISIBLE - 1) as f32 * ROW_GAP))
+            .overflow_y_scroll()
+            .track_scroll(&self.scroll);
         let mut ix = 0;
         if let Some(path) = self.path.clone() {
             list = list.child(self.row(ix, L::FolderOpen, format!("{} {}", crate::t!("Git:"), path.display()), "Enter".into(), &p, cx));
             ix += 1;
         }
-        let visible: Vec<Row> = self.filtered.iter().take(VISIBLE).cloned().collect();
+        let visible: Vec<Row> = self.filtered.iter().take(listed(self.mode, self.filtered.len())).cloned().collect();
+        let scrolls = visible.len() > VISIBLE;
         for r in visible {
             let (icon, label, keys): (L, String, SharedString) = match r {
                 Row::Cmd(ci) => {
@@ -418,11 +438,13 @@ impl Render for CommandPalette {
                         match ev.keystroke.key.as_str() {
                             "down" if n > 0 => {
                                 this.selected = (this.selected + 1) % n;
+                                this.scroll.scroll_to_item(this.selected);
                                 cx.stop_propagation();
                                 cx.notify();
                             }
                             "up" if n > 0 => {
                                 this.selected = (this.selected + n - 1) % n;
+                                this.scroll.scroll_to_item(this.selected);
                                 cx.stop_propagation();
                                 cx.notify();
                             }
@@ -451,7 +473,9 @@ impl Render for CommandPalette {
                                     ),
                             ),
                     )
-                    .child(list)
+                    .child(div().relative().child(list).when(scrolls, |d| {
+                        d.child(gpui_kit::component::scroll::Scrollbar::vertical(&self.scroll).id("palette-scrollbar").mode(gpui_kit::component::scroll::ScrollbarMode::Always))
+                    }))
                     .when(self.rows() == 0, |d| {
                         let none = match self.mode {
                             PaletteMode::Commands { .. } => crate::t!("Eşleşen komut yok"),
@@ -468,6 +492,16 @@ impl Render for CommandPalette {
 #[cfg(test)]
 mod tests {
     use super::{PaletteMode, Row, as_path, commands, filter, score};
+
+    /// The tab search lists every tab that matches; commands and folders keep to what shows at once (issue 79).
+    #[test]
+    fn the_tab_search_lists_every_tab() {
+        use super::{VISIBLE, listed};
+        assert_eq!(listed(PaletteMode::Tabs, 40), 40);
+        assert_eq!(listed(PaletteMode::Tabs, 3), 3);
+        assert_eq!(listed(PaletteMode::Folders, 40), VISIBLE);
+        assert_eq!(listed(PaletteMode::Commands { with_folders: true }, 40), VISIBLE);
+    }
 
     #[test]
     fn the_tab_search_finds_a_tab_by_its_name_or_place_open_ones_first() {
