@@ -2203,5 +2203,10 @@
  "ae5ba83f": "Ieškokite pagal pavadinimą arba šabloną, pvz., *.pdf; Enter ieško ir poaplankiuose",
  "0a64f2ce": "Šis elementas dar kopijuojamas. Pervardykite jį, kai kopijavimas bus baigtas.",
  "b8952992": "{name} + dar {n}",
- "145a4b30": "Liko {t}"
+ "d14d53d5": "Kai komanda yra abiejuose meniu, rodyti klasikinę",
+ "e073e569": "Kai kurios programos (pavyzdžiui, NanaZip) savo komandas prideda ir į naująjį „Windows 11“ meniu, ir į klasikinį; meniu rodo tik vieną iš jų. Išjungta palieka naujojo meniu komandą, įjungta palieka klasikinę.",
+ "145a4b30": "Liko {t}",
+ "0884e8a7": "Pradėti žymėjimo rėmelį nuo tuščios eilutės vietos",
+ "1f5380d9": "Rodiniuose „Detalės“ ir „Stulpeliai“. Išjungta: elementas velkamas iš bet kurios jo eilutės vietos.",
+ "8f85e23e": "Prijungti"
 }

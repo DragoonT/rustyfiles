@@ -2203,5 +2203,10 @@
  "ae5ba83f": "Cerca per nome o con un modello come *.pdf; Invio cerca anche nelle sottocartelle",
  "0a64f2ce": "Questo elemento è ancora in fase di copia. Rinominalo al termine della copia.",
  "b8952992": "{name} + altri {n}",
- "145a4b30": "{t} rimanenti"
+ "d14d53d5": "Quando un comando è in entrambi i menu, mostra quello classico",
+ "e073e569": "Alcuni programmi (NanaZip, per esempio) aggiungono i loro comandi sia al nuovo menu di Windows 11 sia a quello classico; il menu ne mostra solo uno. Disattivato mantiene quello del nuovo menu, attivato mantiene quello classico.",
+ "145a4b30": "{t} rimanenti",
+ "0884e8a7": "Inizia un riquadro di selezione dallo spazio vuoto di una riga",
+ "1f5380d9": "Nelle viste Dettagli e Colonne. Disattivato: un elemento si trascina da qualsiasi punto della sua riga.",
+ "8f85e23e": "Monta"
 }

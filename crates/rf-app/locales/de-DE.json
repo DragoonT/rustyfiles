@@ -2203,5 +2203,10 @@
  "ae5ba83f": "Nach Name oder einem Muster wie *.pdf suchen; Enter sucht auch in Unterordnern",
  "0a64f2ce": "Dieses Element wird noch kopiert. Benennen Sie es um, wenn der Kopiervorgang abgeschlossen ist.",
  "b8952992": "{name} + {n} weitere",
- "145a4b30": "Noch {t}"
+ "d14d53d5": "Wenn ein Befehl in beiden Menüs steht, den klassischen anzeigen",
+ "e073e569": "Manche Programme (zum Beispiel NanaZip) fügen ihre Befehle sowohl dem neuen Menü von Windows 11 als auch dem klassischen hinzu; das Menü zeigt nur einen davon. Aus behält den des neuen Menüs, Ein behält den klassischen.",
+ "145a4b30": "Noch {t}",
+ "0884e8a7": "Auswahlrahmen im leeren Bereich einer Zeile beginnen",
+ "1f5380d9": "In den Ansichten Details und Spalten. Aus: Ein Element wird von jeder Stelle seiner Zeile aus gezogen.",
+ "8f85e23e": "Einbinden"
 }

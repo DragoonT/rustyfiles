@@ -2203,5 +2203,10 @@
  "ae5ba83f": "Tražite po nazivu ili uzorku poput *.pdf; Enter traži i u podmapama",
  "0a64f2ce": "Ova se stavka još kopira. Preimenujte je kad kopiranje završi.",
  "b8952992": "{name} + još {n}",
- "145a4b30": "Preostalo {t}"
+ "d14d53d5": "Kad je naredba u oba izbornika, prikaži klasičnu",
+ "e073e569": "Neki programi (primjerice NanaZip) dodaju svoje naredbe i u novi izbornik sustava Windows 11 i u klasični; izbornik prikazuje samo jednu od njih. Isključeno zadržava onu iz novog izbornika, uključeno zadržava klasičnu.",
+ "145a4b30": "Preostalo {t}",
+ "0884e8a7": "Započni okvir odabira s praznog mjesta retka",
+ "1f5380d9": "U prikazima Detalji i Stupci. Isključeno: stavka se povlači s bilo kojeg mjesta u svom retku.",
+ "8f85e23e": "Montiraj"
 }

@@ -2203,5 +2203,10 @@
  "ae5ba83f": "Cerca per nom o amb un patró com *.pdf; Enter cerca també a les subcarpetes",
  "0a64f2ce": "Aquest element encara s'està copiant. Canvia-li el nom quan acabi la còpia.",
  "b8952992": "{name} + {n} més",
- "145a4b30": "Queden {t}"
+ "d14d53d5": "Quan una ordre és als dos menús, mostra la clàssica",
+ "e073e569": "Alguns programes (NanaZip, per exemple) afegeixen les seves ordres al menú nou del Windows 11 i al clàssic; el menú només en mostra una. Desactivat conserva la del menú nou, activat conserva la clàssica.",
+ "145a4b30": "Queden {t}",
+ "0884e8a7": "Inicia un quadre de selecció des de l'espai buit d'una fila",
+ "1f5380d9": "A les vistes Detalls i Columnes. Desactivat: un element s'arrossega des de qualsevol punt de la seva fila.",
+ "8f85e23e": "Munta"
 }

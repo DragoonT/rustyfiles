@@ -2203,5 +2203,10 @@
  "ae5ba83f": "Hae nimellä tai mallilla, kuten *.pdf; Enter hakee myös alikansioista",
  "0a64f2ce": "Tätä kohdetta kopioidaan vielä. Nimeä se uudelleen, kun kopiointi on valmis.",
  "b8952992": "{name} + {n} muuta",
- "145a4b30": "{t} jäljellä"
+ "d14d53d5": "Kun komento on molemmissa valikoissa, näytä perinteinen",
+ "e073e569": "Jotkin ohjelmat (esimerkiksi NanaZip) lisäävät komentonsa sekä Windows 11:n uuteen valikkoon että perinteiseen; valikko näyttää niistä vain yhden. Pois päältä säilyttää uuden valikon komennon, päällä säilyttää perinteisen.",
+ "145a4b30": "{t} jäljellä",
+ "0884e8a7": "Aloita valintakehys rivin tyhjästä kohdasta",
+ "1f5380d9": "Tiedot- ja Sarakkeet-näkymissä. Pois päältä: kohdetta vedetään mistä tahansa sen riviltä.",
+ "8f85e23e": "Liitä levyksi"
 }

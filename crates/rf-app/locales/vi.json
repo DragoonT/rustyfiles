@@ -2203,5 +2203,10 @@
  "ae5ba83f": "Tìm theo tên hoặc mẫu như *.pdf; Enter tìm cả trong thư mục con",
  "0a64f2ce": "Mục này vẫn đang được sao chép. Hãy đổi tên khi sao chép xong.",
  "b8952992": "{name} + {n} mục khác",
- "145a4b30": "Còn {t}"
+ "d14d53d5": "Khi một lệnh có trong cả hai menu, hiện lệnh cổ điển",
+ "e073e569": "Một số chương trình (ví dụ NanaZip) thêm lệnh của mình vào cả menu mới của Windows 11 lẫn menu cổ điển; menu chỉ liệt kê một trong hai. Tắt thì giữ lệnh của menu mới, bật thì giữ lệnh cổ điển.",
+ "145a4b30": "Còn {t}",
+ "0884e8a7": "Bắt đầu khung chọn từ khoảng trống của một hàng",
+ "1f5380d9": "Trong chế độ xem Chi tiết và Cột. Tắt: mục được kéo từ bất kỳ đâu trên hàng của nó.",
+ "8f85e23e": "Gắn"
 }

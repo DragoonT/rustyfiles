@@ -2203,5 +2203,10 @@
  "ae5ba83f": "Search by name or a pattern like *.pdf; Enter looks in subfolders too",
  "0a64f2ce": "This item is still being copied. Rename it when the copy is done.",
  "b8952992": "{name} + {n} more",
- "145a4b30": "{t} left"
+ "d14d53d5": "When a command is in both menus, show the classic one",
+ "e073e569": "Some programs (NanaZip, for one) add their commands to Windows 11's new menu and to the classic one; the menu lists only one of them. Off keeps the new menu's, on keeps the classic one.",
+ "145a4b30": "{t} left",
+ "0884e8a7": "Start a selection box from a row's empty space",
+ "1f5380d9": "In the Details and Columns views. Off: an item is dragged from anywhere on its row.",
+ "8f85e23e": "Mount"
 }

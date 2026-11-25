@@ -2203,5 +2203,10 @@
  "ae5ba83f": "Søg efter navn eller et mønster som *.pdf; Enter søger også i undermapper",
  "0a64f2ce": "Dette element kopieres stadig. Omdøb det, når kopieringen er færdig.",
  "b8952992": "{name} + {n} mere",
- "145a4b30": "{t} tilbage"
+ "d14d53d5": "Når en kommando findes i begge menuer, vis den klassiske",
+ "e073e569": "Nogle programmer (f.eks. NanaZip) føjer deres kommandoer til både den nye menu i Windows 11 og den klassiske; menuen viser kun én af dem. Fra beholder den nye menus, til beholder den klassiske.",
+ "145a4b30": "{t} tilbage",
+ "0884e8a7": "Start en markeringsramme fra en rækkes tomme plads",
+ "1f5380d9": "I visningerne Detaljer og Kolonner. Fra: et element trækkes fra et hvilket som helst sted på sin række.",
+ "8f85e23e": "Monter"
 }

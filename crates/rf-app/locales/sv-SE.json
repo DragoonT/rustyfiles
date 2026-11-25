@@ -2203,5 +2203,10 @@
  "ae5ba83f": "Sök efter namn eller ett mönster som *.pdf; Enter söker även i undermappar",
  "0a64f2ce": "Det här objektet kopieras fortfarande. Byt namn på det när kopieringen är klar.",
  "b8952992": "{name} + {n} till",
- "145a4b30": "{t} kvar"
+ "d14d53d5": "När ett kommando finns i båda menyerna, visa det klassiska",
+ "e073e569": "Vissa program (till exempel NanaZip) lägger till sina kommandon både i den nya menyn i Windows 11 och i den klassiska; menyn visar bara ett av dem. Av behåller den nya menyns, på behåller det klassiska.",
+ "145a4b30": "{t} kvar",
+ "0884e8a7": "Starta en markeringsram från det tomma utrymmet på en rad",
+ "1f5380d9": "I vyerna Information och Kolumner. Av: ett objekt dras från var som helst på sin rad.",
+ "8f85e23e": "Montera"
 }
