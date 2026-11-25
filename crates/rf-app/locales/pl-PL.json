@@ -2204,5 +2204,6 @@
  "0a64f2ce": "Ten element jest jeszcze kopiowany. Zmień jego nazwę po zakończeniu kopiowania.",
  "b8952992": "{name} + {n} więcej",
  "145a4b30": "Pozostało {t}",
- "d59927ac": "Materiał menu podręcznych"
+ "d59927ac": "Materiał menu podręcznych",
+ "338db07f": "Określa tło menu kontekstowych i list rozwijanych. Kolory zależą od wybranego motywu."
 }

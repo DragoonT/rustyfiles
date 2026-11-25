@@ -159,7 +159,7 @@ pub struct MenuView {
     /// The menu was opened from a window that shows glass (or from a popup that does): the liquid look, whose rows have other
     /// measures, so the layout reads it too.
     liquid: bool,
-    /// File-list context menus use Explorer's opaque Fluent treatment when that theme is enabled.
+    /// File-list context menus use Explorer-style icons when that theme is enabled.
     explorer_context: bool,
     background: WindowBackgroundAppearance,
     /// Some popups borrow the Explorer surface while keeping the app's original icons.
@@ -217,36 +217,24 @@ fn host(cx: &App) -> Option<HostState> {
 
 /// Opens `menu` at `pos` (window coordinates), replacing any open menu.
 pub fn show(menu: Menu, pos: Point<Pixels>, window: &mut Window, cx: &mut App) -> Entity<MenuView> {
-    show_ex(menu, pos, None, false, false, window, cx)
+    show_ex(menu, pos, false, false, window, cx)
 }
 
-/// Opens a file-list context menu, using the Windows Explorer presentation when its icon
-/// theme is enabled. Other app menus keep their existing appearance.
+/// Opens a file-list context menu with Explorer-style icons when its theme is enabled.
 pub fn show_context(menu: Menu, pos: Point<Pixels>, window: &mut Window, cx: &mut App) -> Entity<MenuView> {
     let explorer_context = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
-    let liquid = explorer_context.then_some(false);
-    show_ex(menu, pos, liquid, explorer_context, false, window, cx)
+    show_ex(menu, pos, explorer_context, false, window, cx)
 }
 
-/// Explorer's opaque menu surface with the original app icons.
+/// Opens a file-list context menu with the original app icons.
 pub fn show_context_original_icons(menu: Menu, pos: Point<Pixels>, window: &mut Window, cx: &mut App) -> Entity<MenuView> {
     let explorer_context = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
-    let liquid = explorer_context.then_some(false);
-    show_ex(menu, pos, liquid, explorer_context, true, window, cx)
-}
-
-/// [`show`] on HyperGlass whatever the window under it shows: for the desktop, whose menus stand among the Dock's (glass) islands and
-/// menus but whose own window has no glass of the main window's kind, so they came on Windows' Acrylic (the owner, 2026-11-18:
-/// "masaüstüne sağ tıklayınca açılan kutu hyperglass değil?"). Where Windows gives no materials the menu stays plain.
-pub fn show_on_glass(menu: Menu, pos: Point<Pixels>, window: &mut Window, cx: &mut App) -> Entity<MenuView> {
-    let glass = crate::settings::materials_available();
-    show_ex(menu, pos, Some(glass), false, false, window, cx)
+    show_ex(menu, pos, explorer_context, true, window, cx)
 }
 
 fn show_ex(
     menu: Menu,
     pos: Point<Pixels>,
-    liquid: Option<bool>,
     explorer_context: bool,
     original_icons: bool,
     window: &mut Window,
@@ -255,12 +243,8 @@ fn show_ex(
     if host(cx).is_some() {
         close(window, cx);
     }
-    let auto_liquid = liquid.unwrap_or_else(|| crate::glass::liquid(crate::look::window::hwnd_of(window)));
-    let (liquid, background) = cx.global::<crate::settings::Settings>().menu_material.resolve(
-        auto_liquid,
-        explorer_context,
-        crate::settings::materials_available(),
-    );
+    let material = cx.global::<crate::settings::Settings>().menu_material;
+    let (liquid, background) = material.resolve(crate::settings::materials_available());
     let restore = window.focused(cx);
     let main = window.window_handle();
     let view = cx.new(|cx| MenuView {

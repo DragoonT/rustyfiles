@@ -2204,5 +2204,6 @@
  "0a64f2ce": "This item is still being copied. Rename it when the copy is done.",
  "b8952992": "{name} + {n} more",
  "145a4b30": "{t} left",
- "d59927ac": "Popup menu material"
+ "d59927ac": "Popup menu material",
+ "338db07f": "Sets the background of context menus and dropdown lists. Colors follow the selected theme."
 }

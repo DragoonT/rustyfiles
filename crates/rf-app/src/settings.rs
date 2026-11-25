@@ -221,9 +221,9 @@ pub enum BackdropPref {
 #[serde(rename_all = "lowercase")]
 pub enum MenuMaterial {
     #[default]
-    Auto,
-    Solid,
+    #[serde(alias = "auto")]
     Mica,
+    Solid,
     MicaAlt,
     Acrylic,
     Glass,
@@ -231,12 +231,9 @@ pub enum MenuMaterial {
 
 impl MenuMaterial {
     /// Whether to draw HyperGlass and what backdrop the popup window requests.
-    pub fn resolve(self, auto_liquid: bool, auto_opaque: bool, materials: bool) -> (bool, WindowBackgroundAppearance) {
+    pub fn resolve(self, materials: bool) -> (bool, WindowBackgroundAppearance) {
         use WindowBackgroundAppearance::{Blurred, MicaAltBackdrop, MicaBackdrop, Opaque, Transparent};
         match self {
-            Self::Auto if auto_opaque => (false, Opaque),
-            Self::Auto if auto_liquid => (true, Transparent),
-            Self::Auto => (false, Blurred),
             Self::Mica if materials => (false, MicaBackdrop),
             Self::MicaAlt if materials => (false, MicaAltBackdrop),
             Self::Acrylic if materials => (false, Blurred),
@@ -1810,6 +1807,14 @@ pub fn app_dir() -> Option<std::path::PathBuf> {
 #[cfg(test)]
 mod lenient_tests {
     use super::{DEFAULT_EXPLORER_SIDEBAR_WIDTH, DEFAULT_SIDEBAR_WIDTH, Settings};
+
+    #[test]
+    fn popup_material_defaults_to_mica_and_migrates_automatic() {
+        use super::MenuMaterial;
+        assert_eq!(Settings::parse_lenient("").unwrap().menu_material, MenuMaterial::Mica);
+        assert_eq!(Settings::parse_lenient("menu_material = \"auto\"").unwrap().menu_material, MenuMaterial::Mica);
+        assert_eq!(Settings::parse_lenient("menu_material = \"micaalt\"").unwrap().menu_material, MenuMaterial::MicaAlt);
+    }
 
     #[test]
     fn windows_file_explorer_theme_defaults_off_and_round_trips() {
