@@ -215,6 +215,9 @@ impl Render for ChooserView {
             .items_center()
             .justify_center()
             .bg(hsla(0., 0., 0., 0.35))
+            // (the pointer over the dialog is not over the folder behind it: a turn of the wheel here scrolled the file list as
+            // well, a Discord report on 1.0.0)
+            .occlude()
             .track_focus(&self.focus)
             .on_mouse_down(MouseButton::Left, cx.listener(|_, _, window, cx| close(window, cx)))
             .capture_key_down(cx.listener(|_, ev: &KeyDownEvent, window, cx| {
