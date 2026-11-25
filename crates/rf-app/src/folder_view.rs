@@ -3194,10 +3194,12 @@ impl FolderView {
         let dim = e.is_hidden() || e.is_cloud_placeholder() || (crate::cut_marks::any() && self.path_of(ei).is_some_and(|p| crate::cut_marks::is_cut(&p)));
         // Settings → "Show thumbnails" off: the file type's icon instead of a preview
         let thumbs_on = cx.global::<crate::settings::Settings>().show_thumbnails;
+        // the pixels the picture's box has on this screen: a picture that comes bigger is made to fit them (issue 253)
+        let box_px = (f32::from(visual_px) * window.scale_factor()).ceil() as u32;
         let thumb = self.parent_of(ei).map(|d| d.to_path_buf()).and_then(|d| {
             self.images.update(cx, |c, cx| {
                 if thumbs_on {
-                    c.thumbnail(&d, e, thumb_px, cx)
+                    c.thumbnail_fit(&d, e, thumb_px, box_px, cx)
                 } else if crate::settings::icon_theme() == crate::settings::IconThemePref::Freedesktop {
                     c.icon_sized(&d, e, thumb_px, cx)
                 } else {

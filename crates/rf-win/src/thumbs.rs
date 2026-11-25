@@ -178,7 +178,7 @@ pub fn get_image(path: &Path, size: u32, kind: Kind) -> anyhow::Result<Bgra> {
         },
         Kind::ThumbnailOnly => unsafe { factory.GetImage(sz, SIIGBF(SIIGBF_THUMBNAILONLY.0 | SIIGBF_RESIZETOFIT.0 | SIIGBF_BIGGERSIZEOK.0))? },
     };
-    let r = hbitmap_to_bgra(hbmp).map(|b| fit_to(b, size));
+    let r = hbitmap_to_bgra(hbmp);
     unsafe {
         let _ = DeleteObject(HGDIOBJ(hbmp.0));
     }
@@ -190,7 +190,7 @@ pub fn get_image(path: &Path, size: u32, kind: Kind) -> anyhow::Result<Bgra> {
         && std::fs::metadata(path).is_ok_and(|m| m.is_dir())
     {
         let hbmp = unsafe { factory.GetImage(sz, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK)? };
-        let r = hbitmap_to_bgra(hbmp).map(|b| fit_to(b, size));
+        let r = hbitmap_to_bgra(hbmp);
         unsafe {
             let _ = DeleteObject(HGDIOBJ(hbmp.0));
         }
@@ -199,7 +199,8 @@ pub fn get_image(path: &Path, size: u32, kind: Kind) -> anyhow::Result<Bgra> {
     r
 }
 
-/// A picture that came out bigger than it was asked for, made to fit `size` (its longer side); any other is handed back as it is.
+/// A picture that came out bigger than its box on the screen, made to fit `size` (its longer side); any other is handed back as it
+/// is. Done for the requests that name their box's pixels (`Request::fit`), on the worker's thread.
 ///
 /// The shell may answer with more pixels than asked (`SIIGBF_BIGGERSIZEOK`), and for a folder's preview it always does: 256 x 256,
 /// whatever the size. Such a picture went to the screen as it was and the graphics card squeezed it into the tile, from four
@@ -326,13 +327,17 @@ pub struct Request {
     pub kind: Kind,
     /// The picture the user is looking at right now (the preview pane's): see `ThumbPool` lanes.
     pub urgent: bool,
+    /// The pixels the picture's box has on the screen, when the asker knows them: a picture that comes out bigger is made to fit
+    /// them (`fit_to`). `None` leaves the picture as Windows gave it, which is what every asker that gives its size in the
+    /// interface's own pixels counts on (on a scaled display the bigger picture is what keeps it sharp there).
+    pub fit: Option<u32>,
     /// When it was handed to the pool (for `Response::waited`).
     queued: std::time::Instant,
 }
 
 impl Request {
     pub fn new(key: u64, path: PathBuf, size: u32, kind: Kind) -> Self {
-        Self { key, path, size, kind, urgent: false, queued: std::time::Instant::now() }
+        Self { key, path, size, kind, urgent: false, fit: None, queued: std::time::Instant::now() }
     }
 }
 
@@ -445,7 +450,10 @@ impl ThumbPool {
                             let req = stack.lock().pop();
                             let Some(req) = req else { break };
                             let started = std::time::Instant::now();
-                            let image = get_image(&req.path, req.size, req.kind).ok().map(Arc::new);
+                            let image = get_image(&req.path, req.size, req.kind).ok().map(|b| match req.fit {
+                                Some(px) => fit_to(b, px),
+                                None => b,
+                            }).map(Arc::new);
                             on_done(Response { key: req.key, image, dropped: false, waited: started - req.queued, took: started.elapsed(), urgent: false });
                         }
                     }

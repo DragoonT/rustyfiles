@@ -79,7 +79,7 @@ const FOLDER_PREVIEW_MIN: u32 = 64;
 /// The key of a file's picture. The preview pane's picture (made by the pool's urgent lane) has a key space of its own:
 /// were it the list's key, a tile the list had already queued at the same size would answer the pane's request
 /// "pending" and the pane would wait behind the list again (no size is shared today; this keeps it so).
-fn file_picture_key(pane: bool, dir: &Path, name: &str, modified_ms: &impl Hash, size: u32) -> u64 {
+fn file_picture_key(pane: bool, dir: &Path, name: &str, modified_ms: &impl Hash, size: impl Hash) -> u64 {
     key_of(&[&(if pane { "pane" } else { "thumb" }), &dir, &name, modified_ms, &size])
 }
 
@@ -651,28 +651,39 @@ impl ImageCache {
     }
 
     pub fn thumbnail(&mut self, dir: &Path, e: &Entry, size: u32, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
-        self.thumbnail_as(dir, e, size, false, cx)
+        self.thumbnail_as(dir, e, size, false, None, cx)
+    }
+
+    /// `thumbnail` for an asker that knows how many of the screen's pixels its box has (`box_px`): a picture Windows hands over
+    /// bigger than that is brought to it on the worker, and the box then draws it pixel for pixel. A folder's preview always
+    /// comes at 256 px, and squeezed into a tile by the graphics card it was soft and jagged (issue 253). The grid's tiles ask
+    /// this way. `size` is what Windows is asked for, as in `thumbnail`.
+    pub fn thumbnail_fit(&mut self, dir: &Path, e: &Entry, size: u32, box_px: u32, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
+        self.thumbnail_as(dir, e, size, false, Some(box_px), cx)
     }
 
     /// The picture the user is looking at right now (the preview pane's, Quick Look's): made by the pool's urgent lane,
     /// at normal priority and not behind the list's own tiles. The list's tiles use `thumbnail`.
     pub fn pane_picture(&mut self, dir: &Path, e: &Entry, size: u32, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
-        self.thumbnail_as(dir, e, size, true, cx)
+        self.thumbnail_as(dir, e, size, true, None, cx)
     }
 
-    fn thumbnail_as(&mut self, dir: &Path, e: &Entry, size: u32, urgent: bool, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
+    fn thumbnail_as(&mut self, dir: &Path, e: &Entry, size: u32, urgent: bool, fit: Option<u32>, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
+        // (a picture made to fit a box is another picture than the one left as it came: its own place in the cache)
+        let key_size = (size, fit);
         // A type outside our own list that a thumbnail provider is registered for (a sound file, a font, what an installed extension
         // draws: issue 307): its own picture when it has one. Until that is known, and when it has none, a tile shows what it would
         // for any other file (the theme's, the pack's or the type's icon, below); the pane, which asks urgently, shows its own.
         // (not on an FTP server: every file would be downloaded to look for a picture in it)
         if crate::icons::may_have_thumbnail(e) && !rf_win::ftp::is_ftp(dir) {
-            let key = file_picture_key(urgent, dir, &e.name, &e.modified_ms, size);
+            let key = file_picture_key(urgent, dir, &e.name, &e.modified_ms, key_size);
             let path = dir.join(&*e.name);
             let own = self.lookup(
                 key,
                 || {
                     let mut req = Request::new(key, path, size, Kind::ThumbnailOnly);
                     req.urgent = urgent;
+                    req.fit = fit;
                     req
                 },
                 true,
@@ -707,13 +718,13 @@ impl ImageCache {
         let per_file = wants_thumb || own;
         let key = if per_file && e.is_dir() && !wants_thumb {
             let generation = FOLDER_ICON_GEN.load(std::sync::atomic::Ordering::Relaxed);
-            key_of(&[&"dirpathL", &dir, &&*e.name, &e.modified_ms, &e.attrs, &size, &generation])
+            key_of(&[&"dirpathL", &dir, &&*e.name, &e.modified_ms, &e.attrs, &key_size, &generation])
         } else if per_file {
-            file_picture_key(urgent && wants_thumb, dir, &e.name, &e.modified_ms, size)
+            file_picture_key(urgent && wants_thumb, dir, &e.name, &e.modified_ms, key_size)
         } else if e.is_dir() {
-            key_of(&[&"dirL", &size])
+            key_of(&[&"dirL", &key_size])
         } else {
-            key_of(&[&"extL", &&*e.ext, &size])
+            key_of(&[&"extL", &&*e.ext, &key_size])
         };
         let path = dir.join(&*e.name);
         let kind = if wants_thumb { Kind::Thumbnail } else { Kind::Icon };
@@ -724,6 +735,7 @@ impl ImageCache {
             || {
                 let mut req = Request::new(key, path, size, kind);
                 req.urgent = urgent && wants_thumb;
+                req.fit = fit;
                 req
             },
             per_file,
