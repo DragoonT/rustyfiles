@@ -199,6 +199,19 @@ pub fn get_image(path: &Path, size: u32, kind: Kind) -> anyhow::Result<Bgra> {
     r
 }
 
+/// How many pixels of a picture are kept (its longer side), for a request of `size` that may name its box (`fit`).
+///
+/// The box's own pixels when the asker knows them. Otherwise up to three times what was asked: the askers that give their size in
+/// the interface's pixels count on a bigger picture to stay sharp on a scaled display (three times covers 300 %, and leaves
+/// Windows' usual 256 px thumbnails alone for anything asked at 86 px and up), but not on ANY size. The first time a video's
+/// thumbnail is made, Windows hands back the frame it took, 1280 x 720 and 3.6 MB for a request of 144 px (measured on four new
+/// videos; asked a second time it gives 256 x 144). A screenful of those filled the 64 MB the pictures may take, the ones in
+/// view were thrown out and asked for again, and the tiles went back to their icons and to their pictures over and over until
+/// each had been asked for twice (a Discord report on 1.0.0: "thumbnails ... keep switching back to the file icon").
+fn kept_px(size: u32, fit: Option<u32>) -> u32 {
+    fit.unwrap_or(size.saturating_mul(3))
+}
+
 /// A picture that came out bigger than its box on the screen, made to fit `size` (its longer side); any other is handed back as it
 /// is. Done for the requests that name their box's pixels (`Request::fit`), on the worker's thread.
 ///
@@ -450,10 +463,7 @@ impl ThumbPool {
                             let req = stack.lock().pop();
                             let Some(req) = req else { break };
                             let started = std::time::Instant::now();
-                            let image = get_image(&req.path, req.size, req.kind).ok().map(|b| match req.fit {
-                                Some(px) => fit_to(b, px),
-                                None => b,
-                            }).map(Arc::new);
+                            let image = get_image(&req.path, req.size, req.kind).ok().map(|b| fit_to(b, kept_px(req.size, req.fit))).map(Arc::new);
                             on_done(Response { key: req.key, image, dropped: false, waited: started - req.queued, took: started.elapsed(), urgent: false });
                         }
                     }
@@ -504,6 +514,21 @@ impl ThumbPool {
 
 #[cfg(test)]
 mod tests {
+    /// What is kept of a picture: its box's pixels when the request names them, three times the asked size otherwise.
+    #[test]
+    fn a_videos_first_thumbnail_does_not_stay_at_the_frames_size() {
+        use super::{Bgra, fit_to, kept_px};
+        assert_eq!((kept_px(144, None), kept_px(144, Some(144)), kept_px(96, None)), (432, 144, 288));
+        let frame = || Bgra { width: 1280, height: 720, data: vec![255; 1280 * 720 * 4] };
+        let kept = fit_to(frame(), kept_px(144, None));
+        assert_eq!((kept.width, kept.height), (432, 243), "a list that asked in the interface's pixels");
+        let tile = fit_to(frame(), kept_px(144, Some(144)));
+        assert_eq!((tile.width, tile.height), (144, 81), "a tile that named its box");
+        // Windows' usual thumbnail for the same request is left as it is
+        let usual = fit_to(Bgra { width: 256, height: 144, data: vec![9; 256 * 144 * 4] }, kept_px(144, None));
+        assert_eq!((usual.width, usual.height, usual.data[0]), (256, 144, 9));
+    }
+
     /// A picture bigger than asked for is made to fit, with its colours kept right up to a transparent edge (issue 253).
     #[test]
     fn a_picture_bigger_than_asked_is_made_to_fit() {
