@@ -38,8 +38,31 @@ use crate::theme::{self, Palette};
 const READONLY: u32 = 0x1;
 const HIDDEN: u32 = 0x2;
 
-/// Opens a Properties window for `paths` (one window per call), on the display of the window
-/// in front.
+thread_local! {
+    /// The Properties windows that are open: the items each one shows (see [`same_items`]), whether it is locked, its window.
+    static OPEN: std::cell::RefCell<Vec<(Vec<String>, bool, AnyWindowHandle)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The items of a Properties window as one value that is equal for the same items in any order and any letter case.
+fn same_items(paths: &[PathBuf]) -> Vec<String> {
+    let mut key: Vec<String> = paths.iter().map(|p| p.to_string_lossy().trim_end_matches('\\').to_lowercase()).collect();
+    key.sort();
+    key.dedup();
+    key
+}
+
+/// The window that already shows exactly these items, if it is still open. Windows that were closed leave the list here.
+fn open_window_for(key: &[String], locked: bool, cx: &mut App) -> Option<AnyWindowHandle> {
+    let all: Vec<(Vec<String>, bool, AnyWindowHandle)> = OPEN.with(|o| std::mem::take(&mut *o.borrow_mut()));
+    let alive: Vec<_> = all.into_iter().filter(|(_, _, h)| h.update(cx, |_, _, _| ()).is_ok()).collect();
+    let found = alive.iter().find(|(k, l, _)| k.as_slice() == key && *l == locked).map(|(_, _, h)| *h);
+    OPEN.with(|o| *o.borrow_mut() = alive);
+    found
+}
+
+/// Opens a Properties window for `paths`, on the display of the window in front. One window per item (or per set of items): asked
+/// again for what a window already shows, that window comes to the front instead of a second one opening over it (issue 337:
+/// every click on Properties opened another window, and the earlier ones lay behind the main window).
 pub fn open(paths: Vec<PathBuf>, images: Entity<ImageCache>, cx: &mut App) {
     open_with(paths, images, false, cx);
 }
@@ -50,6 +73,12 @@ pub fn open(paths: Vec<PathBuf>, images: Entity<ImageCache>, cx: &mut App) {
 pub fn open_with(paths: Vec<PathBuf>, images: Entity<ImageCache>, locked: bool, cx: &mut App) {
     if paths.is_empty() {
         return;
+    }
+    let key = same_items(&paths);
+    if let Some(open) = open_window_for(&key, locked, cx) {
+        if open.update(cx, |_, window, _| window.activate_window()).is_ok() {
+            return;
+        }
     }
     let display = cx.active_window().and_then(|w| w.update(cx, |_, w, cx| w.display(cx).map(|d| d.id())).ok().flatten());
     // the size the user last left it at, or the default, never more than most of the display (it was 500 x 680 always, which filled a
@@ -64,7 +93,7 @@ pub fn open_with(paths: Vec<PathBuf>, images: Entity<ImageCache>, locked: bool, 
         window_background: crate::theme::window_material(WindowBackgroundAppearance::MicaBackdrop),
         ..TitleBar::window_options()
     };
-    if let Err(e) = gpui_kit::open_window(options, cx, move |window, cx| {
+    match gpui_kit::open_window(options, cx, move |window, cx| {
         // it often lies over a main window: with glass behind it, the glass must not bend its picture
         crate::glass::keep_out_of_capture(crate::look::window::hwnd_of(window));
         cx.new(|cx| {
@@ -73,8 +102,18 @@ pub fn open_with(paths: Vec<PathBuf>, images: Entity<ImageCache>, locked: bool, 
             v
         })
     }) {
-        log::error!("properties window: {e:#}");
+        Ok((handle, _)) => OPEN.with(|o| o.borrow_mut().push((key, locked, handle))),
+        Err(e) => log::error!("properties window: {e:#}"),
     }
+}
+
+/// A Properties window renamed its item: it is that item's window from now on.
+fn items_changed(window: AnyWindowHandle, paths: &[PathBuf]) {
+    OPEN.with(|o| {
+        if let Some(entry) = o.borrow_mut().iter_mut().find(|(_, _, h)| *h == window) {
+            entry.0 = same_items(paths);
+        }
+    });
 }
 
 /// The Properties window's size the first time (logical px).
@@ -96,6 +135,18 @@ fn fit_size(wanted: [f32; 2], screen: Option<[f32; 2]>) -> [f32; 2] {
 #[cfg(test)]
 mod size_tests {
     use super::{DEFAULT_SIZE, fit_size};
+
+    #[test]
+    fn a_window_is_found_again_by_its_items_in_any_order_and_letter_case() {
+        use super::same_items;
+        use std::path::PathBuf;
+        let a = same_items(&[PathBuf::from(r"C:\Docs\a.txt"), PathBuf::from(r"C:\Docs\B.txt")]);
+        let b = same_items(&[PathBuf::from(r"c:\docs\b.txt"), PathBuf::from(r"C:\Docs\a.txt")]);
+        assert_eq!(a, b);
+        assert_ne!(a, same_items(&[PathBuf::from(r"C:\Docs\a.txt")]));
+        // a folder with and without its closing backslash is one item
+        assert_eq!(same_items(&[PathBuf::from(r"C:\Docs\")]), same_items(&[PathBuf::from(r"C:\Docs")]));
+    }
 
     #[test]
     fn the_window_keeps_the_size_it_was_left_at_within_the_display() {
@@ -842,6 +893,7 @@ impl PropsView {
                         if let Some((from, to)) = renamed {
                             crate::undo::push(crate::undo::UndoOp::Renamed { from, to });
                         }
+                        items_changed(window.window_handle(), &paths);
                         v.paths = paths;
                         v.attrs.commit();
                         v.recurse = false;
