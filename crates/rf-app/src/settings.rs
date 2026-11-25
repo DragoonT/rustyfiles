@@ -223,18 +223,25 @@ pub enum MenuMaterial {
     #[default]
     Auto,
     Solid,
+    Mica,
+    MicaAlt,
     Acrylic,
     Glass,
 }
 
 impl MenuMaterial {
-    /// Whether to draw HyperGlass and whether to paint a solid surface.
-    pub fn resolve(self, auto_liquid: bool, auto_opaque: bool, materials: bool) -> (bool, bool) {
+    /// Whether to draw HyperGlass and what backdrop the popup window requests.
+    pub fn resolve(self, auto_liquid: bool, auto_opaque: bool, materials: bool) -> (bool, WindowBackgroundAppearance) {
+        use WindowBackgroundAppearance::{Blurred, MicaAltBackdrop, MicaBackdrop, Opaque, Transparent};
         match self {
-            Self::Auto => (auto_liquid, auto_opaque),
-            Self::Solid => (false, true),
-            Self::Acrylic => (false, !materials),
-            Self::Glass => (materials, !materials),
+            Self::Auto if auto_opaque => (false, Opaque),
+            Self::Auto if auto_liquid => (true, Transparent),
+            Self::Auto => (false, Blurred),
+            Self::Mica if materials => (false, MicaBackdrop),
+            Self::MicaAlt if materials => (false, MicaAltBackdrop),
+            Self::Acrylic if materials => (false, Blurred),
+            Self::Glass if materials => (true, Transparent),
+            _ => (false, Opaque),
         }
     }
 }

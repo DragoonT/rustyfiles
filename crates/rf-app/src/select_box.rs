@@ -154,7 +154,7 @@ fn open(key: SharedString, field: Bounds<Pixels>, choices: Vec<Choice>, window: 
     let search = choices.len() > SEARCH_FROM;
     // opened from a window that shows glass (or from a popup that does): the liquid list on real glass
     let auto_liquid = crate::glass::liquid(crate::look::window::hwnd_of(window));
-    let (liquid, opaque) = cx.global::<crate::settings::Settings>().menu_material.resolve(
+    let (liquid, background) = cx.global::<crate::settings::Settings>().menu_material.resolve(
         auto_liquid,
         false,
         crate::settings::materials_available(),
@@ -195,9 +195,10 @@ fn open(key: SharedString, field: Bounds<Pixels>, choices: Vec<Choice>, window: 
         is_resizable: false,
         is_minimizable: false,
         // over glass the window is see-through and the glass engine draws behind it (the view paints its own fill until it does)
-        window_background: if opaque { WindowBackgroundAppearance::Opaque } else { theme::popup_material(liquid) },
+        window_background: theme::window_material(background),
         ..Default::default()
     };
+    let opaque = matches!(background, WindowBackgroundAppearance::Opaque);
     let opened = cx.open_window(opts, move |w, cx| {
         use raw_window_handle::{HasWindowHandle, RawWindowHandle};
         if let Ok(h) = w.window_handle() {

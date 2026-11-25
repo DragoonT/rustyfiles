@@ -1666,6 +1666,8 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                 vec![
                     (settings::MenuMaterial::Auto, t!("Otomatik").into()),
                     (settings::MenuMaterial::Solid, t!("Düz").into()),
+                    (settings::MenuMaterial::Mica, "Mica".into()),
+                    (settings::MenuMaterial::MicaAlt, "Mica Alt".into()),
                     (settings::MenuMaterial::Acrylic, t!("Akrilik").into()),
                     (settings::MenuMaterial::Glass, t!("HyperGlass (deneysel)").into()),
                 ],
