@@ -313,7 +313,14 @@ final class PreviewPane: FlippedView {
         if folder {
             let n = (try? FileManager.default.contentsOfDirectory(atPath: url.path).count) ?? 0
             out.append((String(localized: "Contains"), n == 1 ? String(localized: "1 item") : String(localized: "\(n) items")))
-            out.append((String(localized: "Size"), formatSize(bytes: folderSize(path: url.path))))
+            // a folder at the root of a disk (Users, System, Applications…) is most of the disk:
+            // its size waits for "Calculate size", as in the list (issue 324)
+            let parent = url.deletingLastPathComponent()
+            let atRoot = parent.path == "/" || ((try? parent.resourceValues(forKeys: [.isVolumeKey]).isVolume) ?? false)
+            let isVolume = (try? url.resourceValues(forKeys: [.isVolumeKey]).isVolume) ?? false
+            if !atRoot && !isVolume {
+                out.append((String(localized: "Size"), formatSize(bytes: folderSize(path: url.path))))
+            }
         } else if let src = CGImageSourceCreateWithURL(url as CFURL, nil),
             let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
             let w = props[kCGImagePropertyPixelWidth] as? Int, let h = props[kCGImagePropertyPixelHeight] as? Int
