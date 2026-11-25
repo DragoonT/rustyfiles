@@ -894,5 +894,7 @@
 "A USB stick, a card or a disk image opens in a tab, as Finder does.": "แฟลชไดรฟ์ USB การ์ด หรือไฟล์อิมเมจดิสก์จะเปิดในแท็บ เหมือนใน Finder",
 "Resume": "ทำต่อ",
 "Pause": "หยุดชั่วคราว",
-"Paused": "หยุดชั่วคราวแล้ว"
+"Paused": "หยุดชั่วคราวแล้ว",
+"Drop here to pin": "วางที่นี่เพื่อปักหมุด",
+"No grouping": "ไม่จัดกลุ่ม"
 }

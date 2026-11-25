@@ -784,8 +784,12 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         let rows = IndexSet(names.compactMap { folder.rowOf(name: $0).map(Int.init) })
         selectRows(rows, scrollToFirst: y == nil)
         if let y {
+            // the place it was at, kept within the list as it is now: a list that got shorter, or a
+            // place taken mid-bounce, must not leave empty space above the first row
             let clip = (viewMode == .details ? scroll : tileScroll).contentView
-            clip.scroll(to: NSPoint(x: 0, y: y))
+            clip.superview?.layoutSubtreeIfNeeded()
+            let place = clip.constrainBoundsRect(NSRect(origin: NSPoint(x: 0, y: y), size: clip.bounds.size)).origin
+            clip.scroll(to: place)
             (viewMode == .details ? scroll : tileScroll).reflectScrolledClipView(clip)
         } else if rows.isEmpty && !same {
             scrollToTop()
@@ -844,6 +848,18 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         }
         header.sortKey = sortKey
         header.ascending = ascending
+        rearrange()
+        rememberLayout()
+    }
+
+    /// Group by, from the Sort button or the folder's menu (ctx_menu.rs `group_items`): this
+    /// folder's own when each folder keeps its layout, every folder's otherwise.
+    func group(by g: AppSettings.GroupBy) {
+        if AppSettings.syncLayout {
+            AppSettings.groupBy = g
+        } else {
+            groupBy = g
+        }
         rearrange()
         rememberLayout()
     }
@@ -982,12 +998,27 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
                 i.state = self.ascending == asc ? .on : .off
                 m.addItem(i)
             }
+            m.addItem(.separator())
+            let g = NSMenuItem(title: String(localized: "Group by"), action: nil, keyEquivalent: "")
+            g.image = Icons.menu("list-tree")
+            g.submenu = self.groupMenu().menu
+            m.addItem(g)
             btn.pop(m)
         }
         b.view.action = { [weak self] btn in
             guard let self else { return }
             LayoutFlyout.show(from: btn, list: self)
         }
+    }
+
+    /// None, Type, Date modified, Size, Name; the current one is checked.
+    func groupMenu() -> MenuBuilder {
+        let m = MenuBuilder()
+        for g in AppSettings.GroupBy.allCases {
+            m.add(g == .none ? String(localized: "No grouping") : g.title, checked: g == groupBy) { [weak self] in self?.group(by: g) }
+            if g == .none { m.separator() }
+        }
+        return m
     }
 
     @objc private func sortMenu(_ sender: NSMenuItem) {
@@ -1834,6 +1865,9 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             m.separator()
             m.add(String(localized: "Sort folders first"), checked: foldersFirst) { AppSettings.foldersFirst.toggle() }
         }
+        let groups = groupMenu()
+        let g = b.sub(String(localized: "Group by"), "list-tree") { _ in }
+        g.submenu = groups.menu
         b.add(String(localized: "Refresh"), "rotate-cw", key: "r") { [weak self] in self?.onRefresh?() }
         b.separator()
         let um = FileUndo.shared.manager

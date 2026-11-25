@@ -894,5 +894,7 @@
 "A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB флашка, карта или образ на диск се отварят в раздел, както във Finder.",
 "Resume": "Продължи",
 "Pause": "Пауза",
-"Paused": "На пауза"
+"Paused": "На пауза",
+"Drop here to pin": "Пуснете тук за закачане",
+"No grouping": "Без групиране"
 }

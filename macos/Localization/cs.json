@@ -894,5 +894,7 @@
 "A USB stick, a card or a disk image opens in a tab, as Finder does.": "Flashdisk, karta nebo obraz disku se otevře na kartě, stejně jako ve Finderu.",
 "Resume": "Pokračovat",
 "Pause": "Pozastavit",
-"Paused": "Pozastaveno"
+"Paused": "Pozastaveno",
+"Drop here to pin": "Přetažením sem připnete",
+"No grouping": "Bez seskupení"
 }

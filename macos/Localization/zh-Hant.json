@@ -894,5 +894,7 @@
 "A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB 隨身碟、記憶卡或磁碟映像會像 Finder 一樣在分頁中開啟。",
 "Resume": "繼續",
 "Pause": "暫停",
-"Paused": "已暫停"
+"Paused": "已暫停",
+"Drop here to pin": "拖放到此處以固定",
+"No grouping": "不分組"
 }

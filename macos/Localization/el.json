@@ -894,5 +894,7 @@
 "A USB stick, a card or a disk image opens in a tab, as Finder does.": "Ένας δίσκος USB, μια κάρτα ή μια εικόνα δίσκου ανοίγει σε καρτέλα, όπως στο Finder.",
 "Resume": "Συνέχεια",
 "Pause": "Παύση",
-"Paused": "Σε παύση"
+"Paused": "Σε παύση",
+"Drop here to pin": "Αποθέστε εδώ για καρφίτσωμα",
+"No grouping": "Χωρίς ομαδοποίηση"
 }

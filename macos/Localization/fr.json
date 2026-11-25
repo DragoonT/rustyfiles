@@ -894,5 +894,7 @@
 "A USB stick, a card or a disk image opens in a tab, as Finder does.": "Une clé USB, une carte ou une image disque s’ouvre dans un onglet, comme dans le Finder.",
 "Resume": "Reprendre",
 "Pause": "Pause",
-"Paused": "En pause"
+"Paused": "En pause",
+"Drop here to pin": "Déposer ici pour épingler",
+"No grouping": "Aucun regroupement"
 }

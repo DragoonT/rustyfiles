@@ -894,5 +894,7 @@
 "A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB 메모리, 카드, 디스크 이미지는 Finder처럼 탭에서 열립니다.",
 "Resume": "계속",
 "Pause": "일시 중지",
-"Paused": "일시 중지됨"
+"Paused": "일시 중지됨",
+"Drop here to pin": "여기에 놓아 고정",
+"No grouping": "그룹 없음"
 }

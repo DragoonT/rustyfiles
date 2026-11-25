@@ -894,5 +894,7 @@
 "A USB stick, a card or a disk image opens in a tab, as Finder does.": "Një USB, kartë ose imazh disku hapet në një skedë, ashtu si në Finder.",
 "Resume": "Vazhdo",
 "Pause": "Pauzë",
-"Paused": "Në pauzë"
+"Paused": "Në pauzë",
+"Drop here to pin": "Lëshoje këtu për ta fiksuar",
+"No grouping": "Pa grupim"
 }

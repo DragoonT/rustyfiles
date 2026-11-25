@@ -895,5 +895,7 @@
 "A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB bellek, kart ya da disk görüntüsü Finder'daki gibi bir sekmede açılır.",
 "Pause": "Duraklat",
 "Paused": "Duraklatıldı",
-"Resume": "Devam et"
+"Resume": "Devam et",
+"Drop here to pin": "Sabitlemek için buraya bırakın",
+"No grouping": "Gruplama yok"
 }
