@@ -250,7 +250,10 @@ impl Actions for GpuiActions<'_> {
         // places do (the running rustyfiles takes it, none running starts one; "This PC" is a place we show ourselves, so this never
         // goes to Explorer)
         if ROLE.get() == Some(&Role::Main) {
-            crate::open_main_window(None, None, None, self.cx);
+            // (in front: this program is not the one in front when the key comes, issue 367)
+            if let Some(rf_win::switcher::activate::Outcome::Flashed) = crate::open_main_window_in_front(None, self.cx) {
+                log::info!("win+e: Windows would not let the new window come to the front; its taskbar button flashes");
+            }
             return;
         }
         crate::dock::actions::run_rustyfiles(vec!["shell:MyComputerFolder".to_string()]);

@@ -368,6 +368,31 @@ pub fn open_main_window_made(
     bounds: Option<WindowBounds>,
     cx: &mut App,
 ) -> bool {
+    open_main_window_handle(start, ipc, bounds, cx).is_some()
+}
+
+/// A new main window for a key the running program caught itself (Win+E while rustyfiles is the default file manager), brought to
+/// the front.
+///
+/// A window opened like that is opened by a program that is NOT in front (it may be minimized, or behind another program), and
+/// Windows then shows the window without giving it the keyboard: it opened behind what was in front, and Win+E seemed to do
+/// nothing (issue 367: "when an instance is already open, pressing Win + E spawns an additional window without giving it focus").
+/// A second process started by Explorer does not have this trouble: it hands its right to come forward to the first
+/// (`rf_win::handover`). Here the window is taken to the front with the sequence the Dock's window switcher uses
+/// (`rf_win::switcher::activate`): the plain call, then the thread-input route, and a flash of its taskbar button when Windows
+/// still refuses. No key is sent.
+pub fn open_main_window_in_front(start: Option<Location>, cx: &mut App) -> Option<rf_win::switcher::activate::Outcome> {
+    let handle = open_main_window_handle(start, None, None, cx)?;
+    let hwnd = handle.update(cx, |_, window, _| look::window::hwnd_of(window)).ok().filter(|h| *h != 0)?;
+    Some(rf_win::switcher::activate::activate(&mut rf_win::switcher::activate::Win32Ops, hwnd))
+}
+
+fn open_main_window_handle(
+    start: Option<Location>,
+    ipc: Option<futures::channel::mpsc::UnboundedReceiver<String>>,
+    bounds: Option<WindowBounds>,
+    cx: &mut App,
+) -> Option<AnyWindowHandle> {
     let (bounds, display_id) = match bounds {
         Some(bounds) => (bounds, None),
         None => {
@@ -382,12 +407,14 @@ pub fn open_main_window_made(
         window_background: crate::theme::window_material(WindowBackgroundAppearance::MicaBackdrop),
         ..TitleBar::window_options()
     };
-    if let Err(e) = gpui_kit::open_window(options, cx, move |window, cx| cx.new(|cx| Workspace::new(start, ipc, window, cx))) {
-        log::error!("open window: {e:#}");
-        rf_win::handover::trace("open window: failed");
-        return false;
+    match gpui_kit::open_window(options, cx, move |window, cx| cx.new(|cx| Workspace::new(start, ipc, window, cx))) {
+        Ok((handle, _)) => Some(handle),
+        Err(e) => {
+            log::error!("open window: {e:#}");
+            rf_win::handover::trace("open window: failed");
+            None
+        }
     }
-    true
 }
 
 /// Quits now, or once running copy/move/delete operations finish (closing the window must not
