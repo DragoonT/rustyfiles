@@ -1792,6 +1792,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Salt okunur önizleme", "Read-only preview"),
     ("Simge boyutu", "Icon size"),
     ("Küçük", "Small"),
+    ("Çok küçük", "Extra small"),
     ("Büyük", "Large"),
     ("Simgeleri ızgaraya hizala", "Align icons to grid"),
     ("Ortak masaüstü ve sistem öğeleri burada değiştirilmez", "Public Desktop and system items are not changed here"),

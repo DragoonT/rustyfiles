@@ -1882,7 +1882,9 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
             "text-size",
             p,
             u32::from(s.text_percent),
-            vec![(87, t!("Küçük").into()), (100, t!("Normal").into()), (112, t!("Büyük").into())],
+            // (four steps since issue 89: "a font size in between small and normal". What was Small is Extra small, at the same
+            // size, so nobody's text changes; the new step is 13 px where Normal is 14.)
+            vec![(87, t!("Çok küçük").into()), (93, t!("Küçük").into()), (100, t!("Normal").into()), (112, t!("Büyük").into())],
             |s, v| s.text_percent = v as u16,
         ),
     ));
