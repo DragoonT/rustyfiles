@@ -3226,7 +3226,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-windows"
 version = "0.3.11"
-source = "git+https://github.com/gelenmedya/gpui-pre-windows?rev=34c15bcfd36000ae817fc8b9f081b9ff07668355#34c15bcfd36000ae817fc8b9f081b9ff07668355"
+source = "git+https://github.com/gelenmedya/gpui-pre-windows?rev=4ebb89d1d9961a1e21876e270c1af46e0469b4d5#4ebb89d1d9961a1e21876e270c1af46e0469b4d5"
 dependencies = [
  "accesskit",
  "accesskit_windows",
