@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import AVKit
 import ImageIO
 import Quartz
 
@@ -25,6 +26,10 @@ final class PreviewPane: FlippedView {
     private var shown: URL?
     private var properties: [(String, String)] = []
     private var generation = 0
+    /// The file whose playback last stopped part way, and where (seconds): back on it, the
+    /// player is put at that place, so Play goes on from there (issue 326). One for the app,
+    /// as the pane of another tab or window may be the one that shows the file next.
+    private static var resume: (url: URL, at: Double)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -142,6 +147,7 @@ final class PreviewPane: FlippedView {
     /// Shows `url` (the focused item), or the empty prompt for nil.
     func show(_ url: URL?) {
         guard url != shown || url == nil else { return }
+        rememberPlace()
         shown = url
         generation += 1
         let none = url == nil
@@ -170,6 +176,7 @@ final class PreviewPane: FlippedView {
             quickLook?.isHidden = false
             iconView.isHidden = true
             quickLook?.previewItem = url as NSURL
+            if let r = Self.resume, r.url == url { putBack(at: r.at, gen: generation, tries: 20) }
         }
         setProperties(Self.quickProperties(url, folder: folder))
         // the slow ones (folder contents, picture size, duration) come when they are known
@@ -184,6 +191,43 @@ final class PreviewPane: FlippedView {
             }
         }
         needsLayout = true
+    }
+
+    /// Quick Look's player, when the shown item is a sound or a video it has loaded.
+    private var player: AVPlayer? {
+        func find(_ v: NSView) -> AVPlayerView? {
+            if let p = v as? AVPlayerView { return p }
+            for s in v.subviews { if let p = find(s) { return p } }
+            return nil
+        }
+        return quickLook.flatMap(find)?.player
+    }
+
+    /// Before the pane shows something else: where the shown file's playback stopped. One that
+    /// had hardly begun or was at its end starts over next time (preview.rs `left_at`).
+    private func rememberPlace() {
+        guard let url = shown, let p = player, let item = p.currentItem else { return }
+        let at = p.currentTime().seconds, length = item.duration.seconds
+        let edge = 2.0
+        if length.isFinite, length > 0, at >= edge, at < length - edge {
+            Self.resume = (url, at)
+        } else if Self.resume?.url == url {
+            Self.resume = nil
+        }
+        p.pause()
+    }
+
+    /// Puts the newly shown file's player at `at` once Quick Look has made it.
+    private func putBack(at: Double, gen: Int, tries: Int) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.generation == gen, tries > 0 else { return }
+                guard let p = self.player, p.currentItem?.status == .readyToPlay else {
+                    return self.putBack(at: at, gen: gen, tries: tries - 1)
+                }
+                p.seek(to: CMTime(seconds: at, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+            }
+        }
     }
 
     /// Forgets what it showed, so the next `show` reads it again (the file changed).

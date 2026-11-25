@@ -15,6 +15,10 @@ final class BreadcrumbView: HoverView {
     var onHome: (() -> Void)?
     /// A click on empty space: the pill turns into a text field.
     var onEmptyClick: (() -> Void)?
+    /// A middle click on a folder of the path: it opens in a new tab (issue 331).
+    var onOpenInNewTab: ((URL) -> Void)?
+    /// A right click on a folder of the path: the sidebar's menu for it (issue 331).
+    var folderMenu: ((URL) -> NSMenu?)?
 
     private enum Part {
         case home
@@ -118,6 +122,24 @@ final class BreadcrumbView: HoverView {
             let url = i < 0 ? segments.first?.url : segments[i].url
             popFolders(of: url, at: r, plus: [])
         }
+    }
+
+    /// The folder of the path under `event`, if it is one on disk (not Home, Settings, a search…).
+    private func folder(at event: NSEvent) -> URL? {
+        guard let (part, _) = part(at: convert(event.locationInWindow, from: nil)), case .segment(let i) = part else { return nil }
+        let url = segments[i].url
+        var dir: ObjCBool = false
+        return url.isFileURL && FileManager.default.fileExists(atPath: url.path, isDirectory: &dir) && dir.boolValue ? url : nil
+    }
+
+    override func otherMouseUp(with event: NSEvent) {
+        guard event.buttonNumber == 2, let url = folder(at: event) else { return super.otherMouseUp(with: event) }
+        onOpenInNewTab?(url)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let url = folder(at: event) else { return nil }
+        return folderMenu?(url)
     }
 
     /// The folders in `url` as a menu under `r` (listed off the main thread).

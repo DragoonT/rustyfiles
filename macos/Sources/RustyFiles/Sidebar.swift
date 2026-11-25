@@ -82,6 +82,28 @@ final class SidebarView: FlippedView {
     var onOpenInNewTab: ((URL) -> Void)?
     var onOpenInNewWindow: ((URL) -> Void)?
     var onDiskUsage: ((URL) -> Void)?
+
+    /// The menu of a folder in the sidebar, which the address bar's segments show too (issue
+    /// 331): open here / in a new tab / in a new window, pin, copy the path, Terminal,
+    /// Properties and Disk usage. Callers add their own items to the end.
+    func folderMenu(_ url: URL, pinnable: Bool = true, open: @escaping () -> Void) -> MenuBuilder {
+        let b = MenuBuilder()
+        b.add(String(localized: "Open"), "square-arrow-out-up-right", open)
+        b.add(String(localized: "Open in new tab"), "square-plus") { [weak self] in self?.onOpenInNewTab?(url) }
+        b.add(String(localized: "Open in new window"), "app-window") { [weak self] in self?.onOpenInNewWindow?(url) }
+        b.separator()
+        if pinnable {
+            let pinned = MenuActions.isPinned(url)
+            b.add(pinned ? String(localized: "Unpin from sidebar") : String(localized: "Pin to sidebar"), pinned ? "pin-off" : "pin") {
+                MenuActions.setPinned(url, !pinned)
+            }
+        }
+        b.add(String(localized: "Copy path"), "clipboard-copy") { MenuActions.copyPaths([url]) }
+        b.add(String(localized: "Open in Terminal"), "square-terminal") { MenuActions.openInTerminal(url) }
+        b.add(String(localized: "Properties"), "wrench", key: "i") { PropertiesWindow.show([url]) }
+        b.add(String(localized: "Disk usage"), "chart-pie") { [weak self] in self?.onDiskUsage?(url) }
+        return b
+    }
     var selectedURL: URL? {
         didSet {
             if let u = selectedURL, u != oldValue { follow(u) }
@@ -436,21 +458,7 @@ final class SidebarListView: HoverView {
             items[i].kind != .trash, let owner
         else { return nil }
         let item = items[i]
-        let b = MenuBuilder()
-        b.add(String(localized: "Open"), "square-arrow-out-up-right") { owner.clicked(item) }
-        b.add(String(localized: "Open in new tab"), "square-plus") { owner.onOpenInNewTab?(url) }
-        b.add(String(localized: "Open in new window"), "app-window") { owner.onOpenInNewWindow?(url) }
-        b.separator()
-        if item.kind != .drive {
-            let pinned = MenuActions.isPinned(url)
-            b.add(pinned ? String(localized: "Unpin from sidebar") : String(localized: "Pin to sidebar"), pinned ? "pin-off" : "pin") {
-                MenuActions.setPinned(url, !pinned)
-            }
-        }
-        b.add(String(localized: "Copy path"), "clipboard-copy") { MenuActions.copyPaths([url]) }
-        b.add(String(localized: "Open in Terminal"), "square-terminal") { MenuActions.openInTerminal(url) }
-        b.add(String(localized: "Properties"), "wrench", key: "i") { PropertiesWindow.show([url]) }
-        b.add(String(localized: "Disk usage"), "chart-pie") { owner.onDiskUsage?(url) }
+        let b = owner.folderMenu(url, pinnable: item.kind != .drive) { owner.clicked(item) }
         // a cloud folder, a drive, Applications or Library can be hidden on its own (issue 141)
         if [.cloud, .drive, .place].contains(item.kind) {
             b.separator()
