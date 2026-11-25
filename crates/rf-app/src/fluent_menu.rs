@@ -161,6 +161,7 @@ pub struct MenuView {
     liquid: bool,
     /// File-list context menus use Explorer's opaque Fluent treatment when that theme is enabled.
     explorer_context: bool,
+    opaque: bool,
     /// Some popups borrow the Explorer surface while keeping the app's original icons.
     original_icons: bool,
     /// The highlight capsule of each level (keyed by the path of open submenus that leads to it), drawn at every paint of that level.
@@ -254,6 +255,12 @@ fn show_ex(
     if host(cx).is_some() {
         close(window, cx);
     }
+    let auto_liquid = liquid.unwrap_or_else(|| crate::glass::liquid(crate::look::window::hwnd_of(window)));
+    let (liquid, opaque) = cx.global::<crate::settings::Settings>().menu_material.resolve(
+        auto_liquid,
+        explorer_context,
+        crate::settings::materials_available(),
+    );
     let restore = window.focused(cx);
     let main = window.window_handle();
     let view = cx.new(|cx| MenuView {
@@ -267,8 +274,9 @@ fn show_ex(
         hover_gen: 0,
         focus: cx.focus_handle(),
         popup: None,
-        liquid: liquid.unwrap_or_else(|| crate::glass::liquid(crate::look::window::hwnd_of(window))),
+        liquid,
         explorer_context,
+        opaque,
         original_icons,
         glides: RefCell::new(BTreeMap::new()),
         scrolls: RefCell::new(Vec::new()),
@@ -428,7 +436,7 @@ fn run_in_main(run: Run, window: &mut Window, cx: &mut App) {
 /// Opens / rebuilds / closes level windows to match the menu state. False if the root popup
 /// could not be created.
 fn sync_popups(view: &Entity<MenuView>, cx: &mut App) -> bool {
-    let (wanted, have, dark, liquid, display, explorer_context) = {
+    let (wanted, have, dark, liquid, display, opaque) = {
         let m = view.read(cx);
         let Some(pp) = &m.popup else { return false };
         let display = pp.display;
@@ -445,7 +453,7 @@ fn sync_popups(view: &Entity<MenuView>, cx: &mut App) -> bool {
             matches!(cx.window_appearance(), WindowAppearance::Dark | WindowAppearance::VibrantDark),
             m.liquid,
             display,
-            m.explorer_context,
+            m.opaque,
         )
     };
     let dark = match crate::settings::theme_override() {
@@ -458,7 +466,7 @@ fn sync_popups(view: &Entity<MenuView>, cx: &mut App) -> bool {
     // open the new ones first (so focus moves to a menu window, never to nothing), then drop
     // the stale ones
     for (lv, key) in wanted.iter().enumerate().skip(keep) {
-        match open_level(view.clone(), lv, key.bounds, lv == 0, dark, liquid, display, explorer_context, cx) {
+        match open_level(view.clone(), lv, key.bounds, lv == 0, dark, liquid, display, opaque, cx) {
             Some(h) => wins.push((h, key.clone())),
             None if lv == 0 => return false,
             None => break,
@@ -487,7 +495,7 @@ fn open_level(
     dark: bool,
     liquid: bool,
     display: Option<DisplayId>,
-    explorer_context: bool,
+    opaque: bool,
     cx: &mut App,
 ) -> Option<AnyWindowHandle> {
     let opts = WindowOptions {
@@ -500,8 +508,8 @@ fn open_level(
         is_movable: false,
         is_resizable: false,
         is_minimizable: false,
-        // Explorer context menus paint their own opaque surface; other popups keep their chosen material.
-        window_background: if explorer_context { WindowBackgroundAppearance::Opaque } else { theme::popup_material(liquid) },
+        // Solid menus paint their own surface.
+        window_background: if opaque { WindowBackgroundAppearance::Opaque } else { theme::popup_material(liquid) },
         ..Default::default()
     };
     let r = cx.open_window(opts, move |w, cx| {
@@ -512,7 +520,7 @@ fn open_level(
                 crate::glass::keep_out_of_capture(h.hwnd.get());
             }
         }
-        cx.new(|cx| LevelView::new(view, level, liquid.then_some(dark), explorer_context, w, cx))
+        cx.new(|cx| LevelView::new(view, level, liquid.then_some(dark), opaque, w, cx))
     });
     match r {
         Ok(h) => Some(h.into()),
@@ -527,7 +535,7 @@ fn open_level(
 struct LevelView {
     menu: Entity<MenuView>,
     level: usize,
-    explorer_context: bool,
+    opaque: bool,
     focus: FocusHandle,
     /// The glass behind this level's window, in the liquid look.
     glass: Option<PopupGlass>,
@@ -541,7 +549,7 @@ impl LevelView {
         menu: Entity<MenuView>,
         level: usize,
         liquid: Option<bool>,
-        explorer_context: bool,
+        opaque: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -569,7 +577,7 @@ impl LevelView {
         }
         let glass = liquid.map(|dark| PopupGlass::start(crate::look::window::hwnd_of(window), dark));
         let watch = glass.is_some().then(|| glass_watch::watch(cx, |this: &mut Self| this.glass.as_mut()));
-        Self { menu, level, explorer_context, focus, glass, _watch: watch, _subs: subs }
+        Self { menu, level, opaque, focus, glass, _watch: watch, _subs: subs }
     }
 }
 
@@ -586,8 +594,8 @@ impl Render for LevelView {
         if self.menu.read(cx).glide_busy(level) {
             window.request_animation_frame();
         }
-        // Explorer uses a consistent opaque surface; the other popup modes keep their material.
-        let surface = if self.explorer_context {
+        // Solid menus take their colors from the theme.
+        let surface = if self.opaque {
             div().size_full().rounded(theme::RADIUS).bg(p.card_bg).border_1().border_color(p.border).shadow_lg()
         } else {
             let fill = self.glass.as_ref().map(|g| glass_watch::panel_fill(p.dark, g.fallback())).or_else(|| theme::popup_fill(&p));

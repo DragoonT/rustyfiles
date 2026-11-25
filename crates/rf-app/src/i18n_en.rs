@@ -2192,6 +2192,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Komut paletinde geçmiş klasörleri göster", "Show past folders in the command palette"),
     ("Yazdıkça daha önce gidilen klasörler komutlarla birlikte listelenir. Ctrl+P her zaman yalnızca geçmiş klasörlerde arar.", "As you type, folders you went to before are listed with the commands. Ctrl+P always searches past folders only."),
     ("Windows Dosya Gezgini görünümü", "Windows File Explorer look"),
+    ("Açılır menü malzemesi", "Popup menu material"),
     ("Kompakt pencere", "Compact window"),
     ("Uygulama simgesi", "App icon"),
     ("Başlat menüsündeki, masaüstündeki ve görev çubuğuna sabitlenmiş rustyfiles kısayollarının simgesi. Güncellemelerden sonra da kalır.", "The icon of rustyfiles' shortcuts in the Start menu, on the desktop and pinned to the taskbar. It stays after updates."),

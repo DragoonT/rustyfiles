@@ -1654,6 +1654,24 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                 .into_any_element(),
         ),
         backdrop_card(p, s),
+        card(
+            p,
+            L::Layers,
+            t!("Açılır menü malzemesi"),
+            None,
+            dropdown(
+                "menu-material",
+                p,
+                s.menu_material,
+                vec![
+                    (settings::MenuMaterial::Auto, t!("Otomatik").into()),
+                    (settings::MenuMaterial::Solid, t!("Düz").into()),
+                    (settings::MenuMaterial::Acrylic, t!("Akrilik").into()),
+                    (settings::MenuMaterial::Glass, t!("HyperGlass (deneysel)").into()),
+                ],
+                |s, v| s.menu_material = v,
+            ),
+        ),
         accent_card(p, s),
         card(
             p,

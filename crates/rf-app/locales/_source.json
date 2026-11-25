@@ -13328,5 +13328,11 @@
   "key": "Bağla",
   "tr": "Bağla",
   "en": "Mount"
+ },
+ {
+  "id": "d59927ac",
+  "key": "Açılır menü malzemesi",
+  "tr": "Açılır menü malzemesi",
+  "en": "Popup menu material"
  }
 ]

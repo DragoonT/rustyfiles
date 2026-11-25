@@ -216,6 +216,29 @@ pub enum BackdropPref {
     Glass,
 }
 
+/// The material for the app's popup menus. Colors come from the theme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum MenuMaterial {
+    #[default]
+    Auto,
+    Solid,
+    Acrylic,
+    Glass,
+}
+
+impl MenuMaterial {
+    /// Whether to draw HyperGlass and whether to paint a solid surface.
+    pub fn resolve(self, auto_liquid: bool, auto_opaque: bool, materials: bool) -> (bool, bool) {
+        match self {
+            Self::Auto => (auto_liquid, auto_opaque),
+            Self::Solid => (false, true),
+            Self::Acrylic => (false, !materials),
+            Self::Glass => (materials, !materials),
+        }
+    }
+}
+
 /// Hızlı Bakış penceresinin arka planı.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -604,6 +627,7 @@ pub struct Settings {
     pub animations: AnimPref,
     /// Extend the Windows File Explorer look to the navigation, toolbar, and file-list appearance.
     pub windows_file_explorer_theme: bool,
+    pub menu_material: MenuMaterial,
     /// "Compact window": the tab row, the address bar and the command bar are thinner and the content card has no margin or round
     /// corners at its right and bottom; icons and text keep their size (a Discord request, 2026-11-22: room on small laptop screens).
     #[serde(default)]
@@ -1001,6 +1025,7 @@ impl Default for Settings {
             icon_theme_pack: String::new(),
             animations: AnimPref::System,
             windows_file_explorer_theme: false,
+            menu_material: MenuMaterial::default(),
             compact_window: false,
             compact_items: false,
             props_size: None,

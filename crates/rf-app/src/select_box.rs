@@ -153,7 +153,12 @@ fn open(key: SharedString, field: Bounds<Pixels>, choices: Vec<Choice>, window: 
     close_open(cx);
     let search = choices.len() > SEARCH_FROM;
     // opened from a window that shows glass (or from a popup that does): the liquid list on real glass
-    let liquid = crate::glass::liquid(crate::look::window::hwnd_of(window));
+    let auto_liquid = crate::glass::liquid(crate::look::window::hwnd_of(window));
+    let (liquid, opaque) = cx.global::<crate::settings::Settings>().menu_material.resolve(
+        auto_liquid,
+        false,
+        crate::settings::materials_available(),
+    );
     let m = liquid::metrics(liquid);
     // wide enough for the longest label (estimated: the popup is sized before it is drawn); the leading tick column adds its width
     let longest = choices.iter().map(|c| c.label.chars().count()).max().unwrap_or(0) as f32;
@@ -190,7 +195,7 @@ fn open(key: SharedString, field: Bounds<Pixels>, choices: Vec<Choice>, window: 
         is_resizable: false,
         is_minimizable: false,
         // over glass the window is see-through and the glass engine draws behind it (the view paints its own fill until it does)
-        window_background: theme::popup_material(liquid),
+        window_background: if opaque { WindowBackgroundAppearance::Opaque } else { theme::popup_material(liquid) },
         ..Default::default()
     };
     let opened = cx.open_window(opts, move |w, cx| {
@@ -201,7 +206,7 @@ fn open(key: SharedString, field: Bounds<Pixels>, choices: Vec<Choice>, window: 
                 crate::glass::keep_out_of_capture(h.hwnd.get());
             }
         }
-        cx.new(|cx| SelectView::new(key, choices, search, main, liquid.then_some(dark), w, cx))
+        cx.new(|cx| SelectView::new(key, choices, search, main, liquid.then_some(dark), opaque, w, cx))
     });
     match opened {
         Ok(h) => {
@@ -238,14 +243,16 @@ struct SelectView {
     /// The liquid look: the list sits on real glass (`glass`), its rows are 34 high and one capsule (`glide`) is the highlight.
     liquid: bool,
     glass: Option<PopupGlass>,
+    opaque: bool,
     glide: Glide,
     _watch: Option<Task<()>>,
     _subs: Vec<Subscription>,
 }
 
 impl SelectView {
-    /// `liquid`: `Some(dark)` for the liquid look over glass (and which tint), `None` for the Acrylic list.
-    fn new(key: SharedString, choices: Vec<Choice>, search: bool, main: AnyWindowHandle, liquid: Option<bool>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// `liquid`: `Some(dark)` for the liquid look over glass (and which tint), `None` otherwise.
+    #[allow(clippy::too_many_arguments)]
+    fn new(key: SharedString, choices: Vec<Choice>, search: bool, main: AnyWindowHandle, liquid: Option<bool>, opaque: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let labels: Vec<SharedString> = choices.iter().map(|c| c.label.clone()).collect();
         let hl = choices.iter().position(|c| c.selected).unwrap_or(0);
         let focus = cx.focus_handle();
@@ -296,6 +303,7 @@ impl SelectView {
             done: false,
             liquid: is_liquid,
             glass,
+            opaque,
             glide,
             _watch: watch,
             _subs: subs,
@@ -420,7 +428,11 @@ impl Render for SelectView {
             });
         }
         // the panel: over glass a wash (or the plain fill until the glass runs); the Acrylic list has no fill of its own
-        let fill = self.glass.as_ref().map(|g| glass_watch::panel_fill(p.dark, g.fallback())).or_else(|| theme::popup_fill(&p));
+        let fill = if self.opaque {
+            Some(p.card_bg)
+        } else {
+            self.glass.as_ref().map(|g| glass_watch::panel_fill(p.dark, g.fallback())).or_else(|| theme::popup_fill(&p))
+        };
         v_flex()
             .size_full()
             .px(px(m.pad_x))
