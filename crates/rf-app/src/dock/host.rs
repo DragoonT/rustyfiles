@@ -1183,11 +1183,14 @@ fn open_dock(d: &monitors::Display, cx: &mut App) {
     let Some(geo) = host.compute_geo(&dock) else { return };
     let (scale, size) = (d.info.scale(), fitted_factor(host.prefs.size, &d.info));
     dock.geo = Some(geo);
-    if !make_islands(&mut dock, &geo, scale, &lines, "", false, cx) {
-        log::error!("dock: no island could be opened on {}", d.name);
+    // (all three or none: a dock that got only some of its islands would stay that way)
+    if !make_islands(&mut dock, &geo, scale, &lines, "", false, cx) || dock.placed.len() < 3 {
+        log::error!("dock: the islands could not be opened on {}", d.name);
         close_windows(&mut dock, cx);
+        reopen_later(cx);
         return;
     }
+    REOPEN_TRIES.store(0, std::sync::atomic::Ordering::Relaxed);
     log::info!("dock: a dock on {} ({}x{} at {} %)", d.name, d.info.rect.width(), d.info.rect.height(), d.info.dpi * 100 / 96);
     let setup = setup_jobs(&dock, &geo);
     let unit = rf_win::dock::size::unit(scale, size);
@@ -1198,6 +1201,26 @@ fn open_dock(d: &monitors::Display, cx: &mut App) {
     let dark = cx.try_global::<Env>().is_some_and(|e| e.dark);
     on_message_loop(cx, move || start_windows(setup, dark, unit));
     cx.refresh_windows();
+}
+
+/// The new tries made since a dock last opened (see `monitors::reopen_delay_ms`).
+static REOPEN_TRIES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// A dock could not be opened (the graphics device is away while a display driver is updated): the docks are brought in line with the
+/// monitors again a little later, a few times.
+fn reopen_later(cx: &mut App) {
+    let attempt = REOPEN_TRIES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let Some(ms) = monitors::reopen_delay_ms(attempt) else {
+        log::error!("dock: giving up on the dock that could not be opened, until the monitors change");
+        return;
+    };
+    cx.spawn(async move |cx| {
+        cx.background_executor().timer(Duration::from_millis(ms)).await;
+        cx.update(|cx| {
+            sync_docks(cx);
+        });
+    })
+    .detach();
 }
 
 /// Closes the dock of a monitor that went (or that became the primary one, or whose switch went off): the dock leaves the list FIRST, then

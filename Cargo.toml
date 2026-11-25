@@ -202,4 +202,4 @@ incremental = true
 # Velopack with one change: its downloads trust the Windows certificate store (issue 121), see vendor/velopack/VENDORED.md
 velopack = { path = "vendor/velopack" }
 # our fork of GPUI's Windows layer (GPU/CPU hot-swap renderer), see its FORK.md
-gpui-pre-windows = { git = "https://github.com/gelenmedya/gpui-pre-windows", rev = "f25f533a029520777bff22f1f433aee69c0e748f" }
+gpui-pre-windows = { git = "https://github.com/gelenmedya/gpui-pre-windows", rev = "34c15bcfd36000ae817fc8b9f081b9ff07668355" }

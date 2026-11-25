@@ -543,6 +543,24 @@ fn display_of(m: &MonitorInfo, cx: &App) -> Option<DisplayId> {
     .map(|d| d.id())
 }
 
+/// The new tries made since a desktop window last opened (see `rf_win::dock::monitors::reopen_delay_ms`).
+static REOPEN_TRIES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// A monitor's desktop window could not be opened (the graphics device is away while a display driver is updated): the windows are
+/// brought in line with the monitors again a little later, a few times.
+fn reopen_later(cx: &mut App) {
+    let attempt = REOPEN_TRIES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let Some(ms) = rf_win::dock::monitors::reopen_delay_ms(attempt) else {
+        log::error!("cover: giving up on the window that could not be opened, until the monitors change");
+        return;
+    };
+    cx.spawn(async move |cx| {
+        cx.background_executor().timer(Duration::from_millis(ms)).await;
+        cx.update(reconcile);
+    })
+    .detach();
+}
+
 fn create(infos: &[MonitorInfo], index: usize, cx: &mut App) {
     let m = &infos[index];
     let scale = m.dpi as f32 / 96.0;
@@ -577,9 +595,11 @@ fn create(infos: &[MonitorInfo], index: usize, cx: &mut App) {
         Ok(h) => h,
         Err(e) => {
             log::error!("cover: cannot open a window for a monitor: {e:#}");
+            reopen_later(cx);
             return;
         }
     };
+    REOPEN_TRIES.store(0, std::sync::atomic::Ordering::Relaxed);
     let Ok(hwnd) = handle.update(cx, |_, window, _| crate::look::window::hwnd_of(window)) else { return };
     let Ok(view) = handle.entity(cx) else { return };
     let seen = Have { key: m.device_key.clone(), rect: m.rect, scale_percent: m.scale_percent, work: m.work };
