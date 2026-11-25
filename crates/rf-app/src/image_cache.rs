@@ -121,6 +121,25 @@ pub fn refresh_folder_icons() {
     FOLDER_ICON_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// Folders given an icon in our Properties since the start.
+static ICON_GIVEN: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
+
+/// A folder's icon was set (or taken away) in our Properties: its picture is asked for again everywhere.
+///
+/// WHY the folder is also written down (issue 349: "changing a folder icon does not always update its icon in the sidebar"): the
+/// folder tree draws Windows' picture only for a folder its listing marked as customised (the read-only attribute), and it keeps that
+/// listing until the branch is read again. A folder that gets its FIRST icon was listed without the mark, so the tree went on
+/// drawing the plain folder; one that already had an icon changed at once. [`folder_icon_given`] is what the tree asks as well.
+pub fn folder_icon_changed(folder: &Path) {
+    ICON_GIVEN.get_or_init(|| Mutex::new(HashSet::new())).lock().unwrap().insert(folder.to_path_buf());
+    refresh_folder_icons();
+}
+
+/// Whether `folder` got an icon in our Properties since the start (nothing is locked until the first such change).
+pub fn folder_icon_given(folder: &Path) -> bool {
+    ICON_GIVEN.get().is_some_and(|s| s.lock().unwrap().contains(folder))
+}
+
 fn key_of(parts: &[&dyn HashPart]) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     for p in parts {
@@ -601,9 +620,19 @@ impl ImageCache {
     /// Asked as a thumbnail: inside rustyfiles the icon of a Store app comes back as the shell's
     /// blank app placeholder, its thumbnail is the app's own logo.
     pub fn shell_icon(&mut self, parsing: &str, px: u32, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
-        let key = key_of(&[&"shell", &parsing, &px]);
+        // (asked again after F5 or an icon change in Properties: in the Explorer look a pinned folder that was given a new icon kept
+        // the old picture until the app was started again, issue 349)
+        let generation = FOLDER_ICON_GEN.load(std::sync::atomic::Ordering::Relaxed);
+        let key = key_of(&[&"shell", &parsing, &px, &generation]);
         let path = std::path::PathBuf::from(parsing);
-        let r = self.lookup(key, || Request::new(key, path, px, Kind::Thumbnail), true);
+        let mut r = self.lookup(key, || Request::new(key, path, px, Kind::Thumbnail), true);
+        if r.is_none() && generation > 0 {
+            // the picture of before stays while the new one is made: the row does not blink
+            let before = key_of(&[&"shell", &parsing, &px, &(generation - 1)]);
+            if let Some(Slot::Ready(img)) = self.map.get(&before) {
+                r = Some(img.clone());
+            }
+        }
         self.evict_over_budget();
         self.release_evicted(cx);
         r

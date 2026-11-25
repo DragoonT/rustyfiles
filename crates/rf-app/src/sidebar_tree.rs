@@ -721,8 +721,8 @@ impl SidebarTree {
                 crate::image_cache::PackPicture::Ready(im) => Some(im),
                 _ => None,
             }
-        } else if info.own_icon && root.is_none() {
-            // (only a folder whose desktop.ini names a picture: issue 225)
+        } else if (info.own_icon || crate::image_cache::folder_icon_given(info.path)) && root.is_none() {
+            // (only a folder whose desktop.ini names a picture: issue 225; one given its first icon since it was listed: issue 349)
             self.images.update(cx, |c, cx| if c.folder_names_icon(info.path, cx) { c.icon(dir, &e, cx) } else { None })
         } else {
             None

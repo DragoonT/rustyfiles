@@ -797,6 +797,7 @@ impl PropsView {
         };
         let compat = (self.compat != self.compat_loaded).then(|| (self.compat_exe.clone(), self.compat.clone()));
         let icon = (self.folder_icon != self.folder_icon_loaded).then(|| self.folder_icon.clone());
+        let icon_changed = icon.is_some();
         let desc = match (self.desc_loaded.clone(), self.desc_now(cx)) {
             (Some(was), Some(now)) if was != now => Some((was, now)),
             _ => None,
@@ -867,8 +868,8 @@ impl PropsView {
             }
             if let Some(icon) = &icon {
                 rf_win::folder_custom::set_folder_icon(&paths[0], icon.as_ref().map(|(f, i)| (f.as_str(), *i))).map_err(|e| named(&paths[0], &format!("{e:#}")))?;
-                // the list and the tree show the new icon, not the one they kept (issue 65)
-                crate::image_cache::refresh_folder_icons();
+                // the list and the tree show the new icon, not the one they kept (issues 65 and 349)
+                crate::image_cache::folder_icon_changed(&paths[0]);
             }
             let mut renamed = None;
             if let Some(n) = new_name {
@@ -894,6 +895,10 @@ impl PropsView {
                             crate::undo::push(crate::undo::UndoOp::Renamed { from, to });
                         }
                         items_changed(window.window_handle(), &paths);
+                        if icon_changed {
+                            // (the main window draws the folder too, in its list, its tree and its sidebar)
+                            cx.refresh_windows();
+                        }
                         v.paths = paths;
                         v.attrs.commit();
                         v.recurse = false;
