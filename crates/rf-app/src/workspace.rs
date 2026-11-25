@@ -4452,6 +4452,8 @@ impl Workspace {
                     .min_h_0()
                     .children(pins_top)
                     .child(col)
+                    // the folder tree's sideways bar, while a deep row has the tree moved or able to move (issue 359)
+                    .children((!rail).then(|| self.tree_sideways_bar(if explorer_look && sidebar_scrollable { 20. } else { 0. }, scrollbar_thumb, scrollbar_thumb_hover, cx)).flatten())
                     // the Windows look's scrollbar, only while there is something to scroll (issue 229: it stood there with nothing to
                     // scroll, a thumb drawn on an empty track)
                     .when(explorer_look && sidebar_scrollable, |d| d.child(
