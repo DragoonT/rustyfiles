@@ -1664,6 +1664,7 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                 p,
                 s.menu_material,
                 vec![
+                    (settings::MenuMaterial::Automatic, t!("Otomatik").into()),
                     (settings::MenuMaterial::Mica, "Mica".into()),
                     (settings::MenuMaterial::MicaAlt, "Mica Alt".into()),
                     (settings::MenuMaterial::Acrylic, t!("Akrilik").into()),

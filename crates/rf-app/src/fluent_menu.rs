@@ -217,24 +217,30 @@ fn host(cx: &App) -> Option<HostState> {
 
 /// Opens `menu` at `pos` (window coordinates), replacing any open menu.
 pub fn show(menu: Menu, pos: Point<Pixels>, window: &mut Window, cx: &mut App) -> Entity<MenuView> {
-    show_ex(menu, pos, false, false, window, cx)
+    show_ex(menu, pos, None, false, false, window, cx)
 }
 
 /// Opens a file-list context menu with Explorer-style icons when its theme is enabled.
 pub fn show_context(menu: Menu, pos: Point<Pixels>, window: &mut Window, cx: &mut App) -> Entity<MenuView> {
     let explorer_context = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
-    show_ex(menu, pos, explorer_context, false, window, cx)
+    show_ex(menu, pos, None, explorer_context, false, window, cx)
 }
 
 /// Opens a file-list context menu with the original app icons.
 pub fn show_context_original_icons(menu: Menu, pos: Point<Pixels>, window: &mut Window, cx: &mut App) -> Entity<MenuView> {
     let explorer_context = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
-    show_ex(menu, pos, explorer_context, true, window, cx)
+    show_ex(menu, pos, None, explorer_context, true, window, cx)
+}
+
+/// Desktop menus match the Dock's glass in Automatic mode, even when their own window has no glass.
+pub fn show_on_glass(menu: Menu, pos: Point<Pixels>, window: &mut Window, cx: &mut App) -> Entity<MenuView> {
+    show_ex(menu, pos, Some(crate::settings::materials_available()), false, false, window, cx)
 }
 
 fn show_ex(
     menu: Menu,
     pos: Point<Pixels>,
+    auto_liquid: Option<bool>,
     explorer_context: bool,
     original_icons: bool,
     window: &mut Window,
@@ -244,7 +250,8 @@ fn show_ex(
         close(window, cx);
     }
     let material = cx.global::<crate::settings::Settings>().menu_material;
-    let (liquid, background) = material.resolve(crate::settings::materials_available());
+    let auto_liquid = auto_liquid.unwrap_or_else(|| crate::glass::liquid(crate::look::window::hwnd_of(window)));
+    let (liquid, background) = material.resolve(auto_liquid, explorer_context, crate::settings::materials_available());
     let restore = window.focused(cx);
     let main = window.window_handle();
     let view = cx.new(|cx| MenuView {

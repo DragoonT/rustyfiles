@@ -222,6 +222,7 @@ pub enum BackdropPref {
 pub enum MenuMaterial {
     #[default]
     #[serde(alias = "auto")]
+    Automatic,
     Mica,
     Solid,
     MicaAlt,
@@ -230,10 +231,14 @@ pub enum MenuMaterial {
 }
 
 impl MenuMaterial {
-    /// Whether to draw HyperGlass and what backdrop the popup window requests.
-    pub fn resolve(self, materials: bool) -> (bool, WindowBackgroundAppearance) {
+    /// Whether to draw HyperGlass and what backdrop the popup requests before OS fallback.
+    pub fn resolve(self, auto_liquid: bool, auto_opaque: bool, materials: bool) -> (bool, WindowBackgroundAppearance) {
         use WindowBackgroundAppearance::{Blurred, MicaAltBackdrop, MicaBackdrop, Opaque, Transparent};
         match self {
+            Self::Automatic if auto_opaque => (false, Opaque),
+            Self::Automatic if auto_liquid => (true, Transparent),
+            // Keep the legacy popup fill on systems that fall back from Acrylic.
+            Self::Automatic => (false, Blurred),
             Self::Mica if materials => (false, MicaBackdrop),
             Self::MicaAlt if materials => (false, MicaAltBackdrop),
             Self::Acrylic if materials => (false, Blurred),
@@ -1809,11 +1814,36 @@ mod lenient_tests {
     use super::{DEFAULT_EXPLORER_SIDEBAR_WIDTH, DEFAULT_SIDEBAR_WIDTH, Settings};
 
     #[test]
-    fn popup_material_defaults_to_mica_and_migrates_automatic() {
+    fn popup_material_defaults_to_automatic_and_parses_saved_choices() {
         use super::MenuMaterial;
-        assert_eq!(Settings::parse_lenient("").unwrap().menu_material, MenuMaterial::Mica);
-        assert_eq!(Settings::parse_lenient("menu_material = \"auto\"").unwrap().menu_material, MenuMaterial::Mica);
-        assert_eq!(Settings::parse_lenient("menu_material = \"micaalt\"").unwrap().menu_material, MenuMaterial::MicaAlt);
+        assert_eq!(Settings::parse_lenient("").unwrap().menu_material, MenuMaterial::Automatic);
+        for (stored, expected) in [
+            ("auto", MenuMaterial::Automatic),
+            ("automatic", MenuMaterial::Automatic),
+            ("mica", MenuMaterial::Mica),
+            ("micaalt", MenuMaterial::MicaAlt),
+            ("acrylic", MenuMaterial::Acrylic),
+            ("solid", MenuMaterial::Solid),
+            ("glass", MenuMaterial::Glass),
+        ] {
+            assert_eq!(Settings::parse_lenient(&format!("menu_material = \"{stored}\"")).unwrap().menu_material, expected);
+        }
+    }
+
+    #[test]
+    fn popup_material_automatic_preserves_host_and_explorer_appearance() {
+        use super::MenuMaterial::{Automatic, Glass, Mica, Solid};
+        use super::WindowBackgroundAppearance::{Blurred, MicaBackdrop, Opaque, Transparent};
+
+        assert_eq!(Automatic.resolve(false, false, true), (false, Blurred));
+        assert_eq!(Automatic.resolve(true, false, true), (true, Transparent));
+        assert_eq!(Automatic.resolve(true, true, true), (false, Opaque));
+        assert_eq!(Automatic.resolve(false, true, false), (false, Opaque));
+        assert_eq!(Automatic.resolve(false, false, false), (false, Blurred));
+        assert_eq!(Mica.resolve(true, true, true), (false, MicaBackdrop));
+        assert_eq!(Solid.resolve(true, false, true), (false, Opaque));
+        assert_eq!(Glass.resolve(false, true, true), (true, Transparent));
+        assert_eq!(Glass.resolve(true, false, false), (false, Opaque));
     }
 
     #[test]

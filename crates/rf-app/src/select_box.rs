@@ -153,7 +153,8 @@ fn open(key: SharedString, field: Bounds<Pixels>, choices: Vec<Choice>, window: 
     close_open(cx);
     let search = choices.len() > SEARCH_FROM;
     let material = cx.global::<crate::settings::Settings>().menu_material;
-    let (liquid, background) = material.resolve(crate::settings::materials_available());
+    let auto_liquid = crate::glass::liquid(crate::look::window::hwnd_of(window));
+    let (liquid, background) = material.resolve(auto_liquid, false, crate::settings::materials_available());
     let m = liquid::metrics(liquid);
     // wide enough for the longest label (estimated: the popup is sized before it is drawn); the leading tick column adds its width
     let longest = choices.iter().map(|c| c.label.chars().count()).max().unwrap_or(0) as f32;
