@@ -924,7 +924,7 @@ pub(crate) fn item_property_rows(
             rows.push((t!("Boyut"), size));
         }
     } else if !e.is_dir() {
-        rows.push((t!("Boyut"), format!("{} ({} {})", format::size(e.size), group(e.size), t!("bayt"))));
+        rows.push((t!("Boyut"), size_and_bytes(e.size)));
     }
     for (label, value) in media {
         rows.push((crate::i18n::t(label), value.clone()));
@@ -1194,8 +1194,15 @@ impl Render for Preview {
     }
 }
 
+/// A size as the details say it: "2,4 MB (2.516.582 bayt)", the short form and the exact count of bytes. A size that is
+/// below one unit is its count of bytes already, and it is said once: "14 bayt", not "14 bayt (14 bayt)".
+pub(crate) fn size_and_bytes(n: u64) -> String {
+    let short = format::size(n);
+    if short.starts_with(&format!("{n} ")) { short } else { format!("{short} ({} {})", group(n), t!("bayt")) }
+}
+
 /// 1234567 → "1.234.567"
-fn group(n: u64) -> String {
+pub(crate) fn group(n: u64) -> String {
     let sep = if crate::i18n::is_tr() { '.' } else { ',' };
     let s = n.to_string();
     let mut out = String::new();
@@ -1210,6 +1217,15 @@ fn group(n: u64) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// A size under one unit is said once (the hover card showed "14 bytes (14 bytes)").
+    #[test]
+    fn a_small_size_is_not_said_twice() {
+        let small = super::size_and_bytes(14);
+        assert!(!small.contains('('), "{small}");
+        let big = super::size_and_bytes(2_516_582);
+        assert!(big.contains('(') && big.contains(&super::group(2_516_582)), "{big}");
+    }
+
     use super::{item_property_rows, left_at};
     use rf_core::{Entry, EntryKind};
     use std::path::Path;

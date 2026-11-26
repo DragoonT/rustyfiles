@@ -1073,7 +1073,7 @@ impl PropsView {
                     if i.is_dir {
                         let (size, contents) = match &self.folder {
                             Some(Some(fs)) => (
-                                format!("{} ({} {})", format::size(fs.bytes), group(fs.bytes), t!("bayt")),
+                                crate::preview::size_and_bytes(fs.bytes),
                                 format!("{} {}, {} {}", group(fs.files), t!("dosya"), group(fs.dirs), t!("klasör")),
                             ),
                             Some(None) if self.folder.is_some() => (t!("Hesaplanıyor…").into(), t!("Hesaplanıyor…").into()),
@@ -1081,13 +1081,13 @@ impl PropsView {
                         };
                         card1.push(row(p, t!("Boyut"), size));
                         if let Some(d) = self.folder.as_ref().and_then(|f| f.as_ref()).and_then(|fs| fs.allocated) {
-                            card1.push(row(p, t!("Disk üzerindeki boyut"), format!("{} ({} {})", format::size(d), group(d), t!("bayt"))));
+                            card1.push(row(p, t!("Disk üzerindeki boyut"), crate::preview::size_and_bytes(d)));
                         }
                         card1.push(row(p, t!("İçerik"), contents));
                     } else {
-                        card1.push(row(p, t!("Boyut"), format!("{} ({} {})", format::size(i.size), group(i.size), t!("bayt"))));
+                        card1.push(row(p, t!("Boyut"), crate::preview::size_and_bytes(i.size)));
                         if let Some(d) = i.size_on_disk {
-                            card1.push(row(p, t!("Disk üzerindeki boyut"), format!("{} ({} {})", format::size(d), group(d), t!("bayt"))));
+                            card1.push(row(p, t!("Disk üzerindeki boyut"), crate::preview::size_and_bytes(d)));
                         }
                     }
                 }
@@ -1104,8 +1104,8 @@ impl PropsView {
             card1.push(row(p, t!("Tür"), kind));
             card1.push(row(p, t!("Konum"), format!("{} {dir}", t!("Tümü şurada:"))));
             let suffix = if t.done { String::new() } else { format!(" — {}", t!("hesaplanıyor…")) };
-            card1.push(row(p, t!("Boyut"), format!("{} ({} {}){suffix}", format::size(t.bytes), group(t.bytes), t!("bayt"))));
-            card1.push(row(p, t!("Disk üzerindeki boyut"), format!("{} ({} {}){suffix}", format::size(t.on_disk), group(t.on_disk), t!("bayt"))));
+            card1.push(row(p, t!("Boyut"), format!("{}{suffix}", crate::preview::size_and_bytes(t.bytes))));
+            card1.push(row(p, t!("Disk üzerindeki boyut"), format!("{}{suffix}", crate::preview::size_and_bytes(t.on_disk))));
             card1.push(row(p, t!("İçerik"), format!("{} {}, {} {}", group(t.files), t!("dosya"), group(t.dirs), t!("klasör"))));
         }
         out.push(card(p, card1));
@@ -1221,7 +1221,7 @@ impl PropsView {
         };
         let used = d.total.saturating_sub(d.free);
         let frac = d.used_fraction().clamp(0.0, 1.0);
-        let bytes = |n: u64| format!("{} ({} {})", format::size(n), group(n), t!("bayt"));
+        let bytes = |n: u64| crate::preview::size_and_bytes(n);
         let swatch = |c: Hsla| div().size(px(12.)).rounded(px(3.)).bg(c).flex_shrink_0();
         let full = frac > 0.9;
         let used_color = if full { p.danger } else { p.accent };
