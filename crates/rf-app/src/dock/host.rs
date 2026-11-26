@@ -229,7 +229,8 @@ impl Insets {
     /// What a window has before the host has worked out the real numbers (the first frame): the margins the layout wants, all round,
     /// for a dock of this size factor (logical px of the window's own coordinates).
     pub fn assumed(kind: Kind, size: f32) -> Insets {
-        let (edge, head) = if layout::shadow_on() { (layout::SHADOW_MARGIN, layout::SHADOW_MARGIN) } else { (layout::EDGE_MARGIN, layout::HEADROOM) };
+        let shadow = layout::shadow_on();
+        let (edge, head) = (if shadow { layout::SHADOW_MARGIN } else { layout::EDGE_MARGIN }, layout::window_headroom(shadow));
         let (side, top) = match kind {
             Kind::Middle => (edge + layout::MIDDLE_RESERVE, head),
             _ => (edge, edge),
@@ -2230,10 +2231,10 @@ mod tests {
     fn the_assumed_margins_follow_the_size() {
         use super::Insets;
         let m = Insets::assumed(Kind::Middle, 1.0);
-        assert_eq!((m.margins, m.growth), ([44.0, 12.0, 44.0, 4.0], 40.0), "the default size is the dock as it was");
+        assert_eq!((m.margins, m.growth), ([44.0, 34.0, 44.0, 4.0], 40.0), "the default size is the dock as it was (34 above: `layout::WINDOW_HEADROOM`)");
         assert_eq!(Insets::assumed(Kind::Left, 1.0).margins, [4.0; 4]);
         let big = Insets::assumed(Kind::Middle, 1.4);
-        assert!((big.margins[0] - 61.6).abs() < 1e-4 && (big.margins[1] - 16.8).abs() < 1e-4 && (big.growth - 56.0).abs() < 1e-4, "{big:?}");
+        assert!((big.margins[0] - 61.6).abs() < 1e-4 && (big.margins[1] - 47.6).abs() < 1e-4 && (big.growth - 56.0).abs() < 1e-4, "{big:?}");
     }
 
     #[test]

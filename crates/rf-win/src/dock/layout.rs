@@ -74,6 +74,16 @@ pub const EDGE_MARGIN: f32 = 4.0;
 /// The middle island's room above its glass: an icon grown 1.55 times and standing 12 px above the island's bottom reaches 8 px over
 /// the glass's top edge, and the region keeps a pixel beyond the icon.
 pub const HEADROOM: f32 = 12.0;
+/// The middle island's WINDOW room above its glass, which is more than [`HEADROOM`] (what counts as near the dock or on it stays that):
+/// the biggest grown icon stands a line (13 px) higher when the names are shown under the icons, reaching 21.2 px over the glass, and
+/// a start bounces it 10 px more. With only `HEADROOM` the bounce of a hovered icon hit the window's top edge and was cut there
+/// (issue 190), and a grown icon with names did not fit at all. 21.2 + 10, the region's pixel and a little over.
+pub const WINDOW_HEADROOM: f32 = 34.0;
+
+/// The middle island's window room above its glass, logical px, with or without the shadow's margin.
+pub fn window_headroom(shadow: bool) -> f32 {
+    if shadow { SHADOW_MARGIN.max(WINDOW_HEADROOM) } else { WINDOW_HEADROOM }
+}
 /// Room around every glass when the dock's shadow is switched on (`shadow_on`): the shadow falls 4 px down and up to 22 px out, and a
 /// little over. It also holds the middle island's headroom.
 pub const SHADOW_MARGIN: f32 = 28.0;
@@ -199,7 +209,7 @@ fn inflate_within(glass: Rect, left: i32, right: i32, top: i32, bottom: i32, mon
 /// untouched: only the windows are bigger.
 pub fn placements(islands: &Islands, monitor: Rect, scale: f32, shadow: bool) -> Placements {
     let edge = px(if shadow { SHADOW_MARGIN } else { EDGE_MARGIN }, scale);
-    let (head, reserve) = (px(if shadow { SHADOW_MARGIN } else { HEADROOM }, scale), px(MIDDLE_RESERVE, scale));
+    let (head, reserve) = (px(window_headroom(shadow), scale), px(MIDDLE_RESERVE, scale));
     let make = |glass: Rect, side: i32, top: i32| Placement { window: inflate_within(glass, side, side, top, edge, monitor), glass };
     Placements { left: make(islands.left, edge, edge), middle: make(islands.middle, edge + reserve, head), right: make(islands.right, edge, edge) }
 }
@@ -407,18 +417,18 @@ mod tests {
         // the left island is 12 px from the screen's edge: its window stops at the edge, the other sides keep the edge margin
         assert_eq!(p.left.margins(), [4, 4, 4, 4]);
         assert_eq!(p.right.margins(), [4, 4, 4, 4]);
-        // the middle: the edge margin and 40 for the widening on each side, 12 above (growing icons), 4 below
-        assert_eq!(p.middle.margins(), [44, 12, 44, 4]);
-        assert_eq!(p.middle.window, Rect::new(660 - 44, 1028 - 72 - 12, 1260 + 44, 1028 + 4));
+        // the middle: the edge margin and 40 for the widening on each side, 34 above (growing and bouncing icons), 4 below
+        assert_eq!(p.middle.margins(), [44, 34, 44, 4]);
+        assert_eq!(p.middle.window, Rect::new(660 - 44, 1028 - 72 - 34, 1260 + 44, 1028 + 4));
         // at 150 % the margins scale like everything else
         let i15 = islands(Rect::new(0, 0, 2880, 1548), 1.5, W);
         let p15 = placements(&i15, Rect::new(0, 0, 2880, 1620), 1.5, false);
-        assert_eq!(p15.middle.margins(), [66, 18, 66, 6]);
+        assert_eq!(p15.middle.margins(), [66, 51, 66, 6]);
         // with the shadow switched on every side keeps room for it, the middle one the reserve on top
         let s = placements(&i, MONITOR, 1.0, true);
         assert_eq!(s.left.margins(), [12, 28, 28, 28], "12 px from the screen's edge: the window stops there");
         assert_eq!(s.right.margins(), [28, 28, 12, 28]);
-        assert_eq!(s.middle.margins(), [68, 28, 68, 28]);
+        assert_eq!(s.middle.margins(), [68, 34, 68, 28]);
         // a window with a margin is much smaller than one that holds a shadow: what the default saves
         let area = |r: Rect| r.width() * r.height();
         assert!(area(p.left.window) * 2 < area(s.left.window), "{} vs {}", area(p.left.window), area(s.left.window));
@@ -451,6 +461,16 @@ mod tests {
         const { assert!(EDGE_MARGIN >= 2.0 && HEADROOM <= SHADOW_MARGIN) };
         // the shadow: 4 px down and 22 px of fall-off
         const { assert!(SHADOW_MARGIN >= 4.0 + 22.0) };
+    }
+
+    /// Issue 190: the window holds the biggest icon with the names under it AND the first bounce of a start on top, with and without
+    /// the shadow (the bounce's height and the label line are the dock view's: 10 and 13).
+    #[test]
+    fn the_window_holds_a_grown_icon_with_names_bouncing() {
+        let over = 12.0 + 13.0 + ICON_REST * 1.55 + 10.0 - MIDDLE_HEIGHT;
+        for shadow in [false, true] {
+            assert!(over + 1.0 <= window_headroom(shadow), "{over} px over the glass, the window has {}", window_headroom(shadow));
+        }
     }
 
     #[test]

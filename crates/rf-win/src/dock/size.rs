@@ -123,7 +123,7 @@ mod tests {
         assert_eq!(i.middle, Rect::new(660, 1032 - 4 - 72, 1260, 1032 - 4));
         assert_eq!(layout::reserved_thickness(unit(1.0, 1.0)), 80);
         let p = layout::placements(&i, Rect::new(0, 0, 1920, 1080), unit(1.0, 1.0), false);
-        assert_eq!(p.middle.margins(), [44, 12, 44, 4]);
+        assert_eq!(p.middle.margins(), [44, 34, 44, 4]);
         assert_eq!(layout::growth_room(&i, unit(1.0, 1.0)), 40);
     }
 
@@ -161,12 +161,12 @@ mod tests {
             let u = unit(1.0, factor);
             let i = layout::islands(Rect::new(0, 0, 3000, 1032), u, W);
             // at 100 % the room the window keeps on each side of the glass and the window's margins (left, top, right, bottom), in device px,
-            // as numbers: 40 units of room, 4 of edge, 12 of headroom
+            // as numbers: 40 units of room, 4 of edge, 34 of room above (`layout::WINDOW_HEADROOM`)
             let (room, margins) = match size {
-                DockSize::Small => (34, [37, 10, 37, 3]),
-                DockSize::Medium => (40, [44, 12, 44, 4]),
-                DockSize::Large => (48, [53, 14, 53, 5]),
-                DockSize::XLarge => (56, [62, 17, 62, 6]),
+                DockSize::Small => (34, [37, 29, 37, 3]),
+                DockSize::Medium => (40, [44, 34, 44, 4]),
+                DockSize::Large => (48, [53, 41, 53, 5]),
+                DockSize::XLarge => (56, [62, 48, 62, 6]),
             };
             assert_eq!(layout::growth_room(&i, u), room, "{size:?}: plenty of room is what the window reserves");
             let p = layout::placements(&i, Rect::new(0, 0, 3000, 1080), u, false);
