@@ -661,6 +661,21 @@ fn capsule_target(hl: Option<(usize, usize)>, open: &[usize], lv: usize, items: 
     if on_level.is_some() { Capsule::Hidden } else { Capsule::Gone }
 }
 
+/// A list without separators at its ends or two in a row (what is left when a row between them goes).
+fn without_stray_separators(items: Vec<Item>) -> Vec<Item> {
+    let mut out: Vec<Item> = Vec::with_capacity(items.len());
+    for it in items {
+        if matches!(it, Item::Separator) && out.last().is_none_or(|l| matches!(l, Item::Separator)) {
+            continue;
+        }
+        out.push(it);
+    }
+    while matches!(out.last(), Some(Item::Separator)) {
+        out.pop();
+    }
+    out
+}
+
 fn level_height(items: &[Item], quick: bool, m: &Metrics) -> f32 {
     m.pad_y * 2. + if quick { QUICK_H } else { 0. } + items.iter().map(|i| i.height(m)).sum::<f32>()
 }
@@ -699,7 +714,22 @@ impl MenuView {
     }
 
     pub fn set_pending(&mut self, key: &'static str, p: Pending, cx: &mut Context<Self>) {
+        let empty = matches!(&p, Pending::Ready(v) if v.is_empty());
         self.pending.insert(key, p);
+        // Nothing came for a submenu that has nothing else to show: its row goes, rather than opening on "No other options"
+        // (issue 368: "Show more options" with nothing under it)
+        if empty {
+            let pos = self.root.iter().position(|it| matches!(it, Item::Sub { items: Sub::Pending { key: k, fallback: None }, click: None, .. } if *k == key));
+            if let Some(ix) = pos {
+                let mut root: Vec<Item> = self.root.iter().cloned().collect();
+                root.remove(ix);
+                self.root = Rc::new(without_stray_separators(root));
+                self.root_gen += 1;
+                self.open.clear();
+                self.hl = None;
+                self.glides.borrow_mut().clear();
+            }
+        }
         cx.notify();
     }
 
@@ -1253,7 +1283,17 @@ impl Render for MenuView {
 
 #[cfg(test)]
 mod tests {
-    use super::{Capsule, Item, MenuIcon, capsule_target, level_height};
+    use super::{Capsule, Item, MenuIcon, capsule_target, level_height, without_stray_separators};
+
+    /// Issue 368: when an empty "Show more options" row goes, the separators around it do not pile up.
+    #[test]
+    fn a_removed_row_leaves_no_stray_separators() {
+        let a = || Item::action("a", MenuIcon::None, |_, _| {});
+        let kinds = |v: &[Item]| v.iter().map(|i| if matches!(i, Item::Separator) { '-' } else { 'a' }).collect::<String>();
+        assert_eq!(kinds(&without_stray_separators(vec![a(), Item::Separator, Item::Separator, a()])), "a-a");
+        assert_eq!(kinds(&without_stray_separators(vec![a(), Item::Separator])), "a");
+        assert_eq!(kinds(&without_stray_separators(vec![Item::Separator, a(), Item::Separator, a()])), "a-a");
+    }
     use crate::liquid::metrics;
 
     fn rows(n: usize, seps: usize) -> Vec<Item> {
