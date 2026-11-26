@@ -73,6 +73,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if fold == "all" { list.toggleAllGroups() } else { list.toggleGroup(fold) }
             }
         }
+        // RF_DEMO_GO=<path> (development): the list scrolled to its end, then that place opened
+        if let go = ProcessInfo.processInfo.environment["RF_DEMO_GO"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let c = self?.controllers.first else { return }
+                let rows = c.list.table.numberOfRows
+                if rows > 0 { c.list.table.scrollRowToVisible(rows - 1) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { c.navigate(to: URL(fileURLWithPath: go)) }
+            }
+        }
         // RF_DEMO_DUAL (development): the window in dual pane
         if ProcessInfo.processInfo.environment["RF_DEMO_DUAL"] != nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.controllers.first?.toggleDualPane(nil) }

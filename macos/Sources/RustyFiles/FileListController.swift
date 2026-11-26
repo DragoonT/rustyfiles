@@ -778,6 +778,10 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         if !same { ThumbnailCache.shared.forget(under: url.path) }
         applyColumnWidths()
         reloadItems()
+        // the table takes its new height now, not at the next layout: a list that got shorter
+        // later would keep the old distance from its bottom, rows far below an empty view
+        // (an archive opened from far down a long folder showed nothing)
+        if viewMode == .details || viewMode == .columns { table.tile() }
         adaptLayout(for: url)
         updateMillerColumns()
         if !same { refreshGit() }
