@@ -888,15 +888,26 @@ impl FolderView {
 }
 
 fn own_new_items(me: &Me) -> Vec<Item> {
-    vec![
-        Item::action(
-            t!("Klasör"),
-            MenuIcon::Tinted(L::Folder, crate::theme::kind_color(crate::icons::Category::Folder, true)),
-            act(me, |v, _, cx| v.create_new(true, cx)),
-        )
-        .hint("Ctrl+Shift+N"),
-        Item::action(t!("Metin belgesi"), icon(L::FileText), act(me, |v, _, cx| v.create_new(false, cx))),
-    ]
+    vec![own_new_folder(me), own_new_text(me)]
+}
+
+fn own_new_folder(me: &Me) -> Item {
+    Item::action(t!("Klasör"), MenuIcon::Tinted(L::Folder, crate::theme::kind_color(crate::icons::Category::Folder, true)), act(me, |v, _, cx| v.create_new(true, cx)))
+        .hint("Ctrl+Shift+N")
+}
+
+fn own_new_text(me: &Me) -> Item {
+    Item::action(t!("Metin belgesi"), icon(L::FileText), act(me, |v, _, cx| v.create_new(false, cx)))
+}
+
+/// The order of the New menu: Folder and Shortcut first, a line, then every kind of file by its name, A to Z, ours (Text document)
+/// among them. The shell lists its templates by their extension (.bmp, .cdr ... .txt, .zip), which reads as no order at all (issue
+/// 369). `labels` are the shell templates' names; the answer is where each goes, with `None` for Text document's place.
+fn new_menu_order(labels: &[&str], text_label: &str) -> Vec<Option<usize>> {
+    let mut order: Vec<Option<usize>> = (0..labels.len()).map(Some).chain(std::iter::once(None)).collect();
+    let name = |o: &Option<usize>| o.map_or(text_label, |i| labels[i]);
+    order.sort_by(|a, b| rf_core::sort::natural_cmp(&name(a).to_lowercase(), &name(b).to_lowercase()));
+    order
 }
 
 fn tag_items(me: &Me, items: &[PathBuf], cx: &App) -> Vec<Item> {
@@ -1404,16 +1415,26 @@ fn split_shell_items(me: &Me, session: u64, shell: Vec<ShellItem>, background: b
     };
     let new = match new.filter(|_| background) {
         Some(v) => {
-            // ours for Folder and Text (inline rename), the shell for every other template
-            let rest: Vec<ShellItem> = v
+            // ours for Folder and Text (inline rename), the shell for every other template; Folder and Shortcut first, then the
+            // kinds of file by name (`new_menu_order`)
+            let mut rest: Vec<ShellItem> = v
                 .into_iter()
-                .filter(|c| !c.verb.eq_ignore_ascii_case("NewFolder") && !c.verb.eq_ignore_ascii_case(".txt"))
+                .filter(|c| !c.separator && !c.verb.eq_ignore_ascii_case("NewFolder") && !c.verb.eq_ignore_ascii_case(".txt"))
                 .collect();
-            let mut items = own_new_items(me);
-            let rest = to_items(me, session, &tidy(rest), cx);
-            if !rest.is_empty() {
-                items.push(Item::Separator);
-                items.extend(rest);
+            let link = rest.iter().position(|c| c.verb.eq_ignore_ascii_case("NewLink")).map(|i| rest.remove(i));
+            let mut items = vec![own_new_folder(me)];
+            if let Some(link) = link {
+                items.extend(to_items(me, session, std::slice::from_ref(&link), cx));
+            }
+            items.push(Item::Separator);
+            let labels: Vec<&str> = rest.iter().map(|c| c.label.as_str()).collect();
+            let order = new_menu_order(&labels, t!("Metin belgesi"));
+            let mut shell: Vec<Option<Item>> = to_items(me, session, &rest, cx).into_iter().map(Some).collect();
+            for o in order {
+                match o {
+                    Some(i) => items.extend(shell.get_mut(i).and_then(Option::take)),
+                    None => items.push(own_new_text(me)),
+                }
             }
             Pending::Ready(Rc::new(items))
         }
@@ -1586,4 +1607,19 @@ fn wallpaper_file(p: &std::path::Path) -> Option<std::path::PathBuf> {
     let to = dir.join(p.file_name()?);
     std::fs::copy(&extracted, &to).ok()?;
     Some(to)
+}
+
+#[cfg(test)]
+mod new_menu_tests {
+    /// The New menu's kinds of file go by their names, ours among the shell's (issue 369).
+    #[test]
+    fn the_new_menu_lists_kinds_of_file_by_name() {
+        use super::new_menu_order;
+        // as the shell gives them: by extension
+        let shell = ["Bit eşlem resmi", "CorelDRAW 2026 Graphic", "Google Docs", "Sıkıştırılmış Klasör", "akıllı not"];
+        let order = new_menu_order(&shell, "Metin belgesi");
+        let names: Vec<&str> = order.iter().map(|o| o.map_or("Metin belgesi", |i| shell[i])).collect();
+        assert_eq!(names, ["akıllı not", "Bit eşlem resmi", "CorelDRAW 2026 Graphic", "Google Docs", "Metin belgesi", "Sıkıştırılmış Klasör"]);
+        assert_eq!(new_menu_order(&[], "Text document"), [None], "no templates: ours alone");
+    }
 }
