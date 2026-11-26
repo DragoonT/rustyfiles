@@ -5428,9 +5428,12 @@ impl Render for Workspace {
         // (at the right this is the old rule, `viewport_w >= preview_w + LIST_MIN + sidebar`; at the bottom the height decides)
         let preview_bottom = self.preview_at_bottom(cx);
         let side_used = if show_sidebar { side_w } else { 0. };
+        // The content card keeps its outer margin on both sides when there is no sidebar.
+        let left_inset = if !windows_theme && !compact && !show_sidebar { 8. } else { 0. };
+        let content_side_used = side_used + left_inset;
         // (the height and the split's shape matter only to the bottom position: the right one reads nothing else)
         let (viewport_h, preview_stacked) = if preview_bottom { (f32::from(window.viewport_size().height), self.preview_stacked(cx)) } else { (0., false) };
-        let room_for_preview = self.preview_room(preview_bottom, preview_stacked, side_used, viewport_h);
+        let room_for_preview = self.preview_room(preview_bottom, preview_stacked, content_side_used, viewport_h);
         // Lenses (the selection pills of the sidebar and of the settings list) exist only while this window shows glass. The sidebar's
         // selected row claims its lens while it is built; a frame without a claim (no selected row, hidden sidebar, the rail) takes it
         // out. The settings lens belongs to the focused pane when that shows Settings: a split tab with Settings in both panes would
@@ -5531,7 +5534,7 @@ impl Render for Workspace {
                 .into_any_element()
         });
         // (the status bar is the content panel's: the window less the sidebar when it is shown, and the panel's margin)
-        let strip_bar_w = (surface == crate::transfer_view::Surface::Strip).then(|| (f32::from(window.viewport_size().width) - side_used - 10.0).max(0.0));
+        let strip_bar_w = (surface == crate::transfer_view::Surface::Strip).then(|| (f32::from(window.viewport_size().width) - content_side_used - 10.0).max(0.0));
         let cards = (surface == crate::transfer_view::Surface::Card)
             .then(|| crate::transfer_view::cards(&self.ops, &p, if show_statusbar { 44.0 } else { 12.0 }, cx))
             .flatten();
@@ -5791,7 +5794,7 @@ impl Render for Workspace {
         } else {
             None
         };
-        let bottom_pane = self.preview_bottom_pane(preview_dock::BottomFrame { bottom: preview_bottom, shown: pane_shown, stacked: preview_stacked, side_w: side_used, viewport_h }, &p, cx);
+        let bottom_pane = self.preview_bottom_pane(preview_dock::BottomFrame { bottom: preview_bottom, shown: pane_shown, stacked: preview_stacked, side_w: content_side_used, viewport_h }, &p, cx);
         // the file list's slot, and the row that holds it with the shelf and the preview pane (at the right, or under them)
         let list_slot = div()
             .flex_1()
@@ -6032,6 +6035,7 @@ impl Render for Workspace {
                             // (compact: no margin and no round corners at the right and the bottom, only the edges that face the
                             // sidebar and the bars)
                             .when(!windows_theme && !compact, |d| d.mr_2().rounded(theme::RADIUS).border_1().border_color(p.border))
+                            .when(left_inset > 0., |d| d.ml_2())
                             .when(!windows_theme && compact, |d| d.rounded_tl(theme::RADIUS).border_l_1().border_t_1().border_color(p.border))
                             .children(content_commandbar)
                             .children(filter_strip)
