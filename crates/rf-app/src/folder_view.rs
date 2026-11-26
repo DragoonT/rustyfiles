@@ -117,18 +117,48 @@ fn hover_media_pending() -> &'static parking_lot::Mutex<HashSet<PathBuf>> {
     PENDING.get_or_init(Default::default)
 }
 
-fn item_tooltip_text(
+/// The width of the card's column of labels ("Type", "Date modified" ...): one width, so that the values stand in a line.
+const TIP_LABEL_W: f32 = 96.;
+
+/// The card an item shows when the pointer rests on it: its name with a dot in its kind's colour, then its details as a table
+/// with the labels dimmed, so that the eye finds the value it is after, and its Git state spelled out.
+///
+/// It was plain lines of "label: value" in one colour. The owner, 2026-11-26, with a picture of it: the letters beside the names
+/// (M, U, I) should say what they mean in it, and the card should be designed, "hafiften renk, boşluklandırma". A card of
+/// title and supporting text at about 320 wide is what Material calls a rich tooltip; the rest is ordinary table typography.
+fn item_tip_card(
     entry: &Entry,
     path: Option<&PathBuf>,
     folder_size: Option<String>,
     media: &[(&'static str, String)],
-) -> String {
+    git: Option<rf_win::git::FileState>,
+    p: &Palette,
+) -> AnyElement {
+    let title = h_flex()
+        .items_start()
+        .gap_2()
+        .child(div().mt(px(6.)).size(px(8.)).flex_shrink_0().rounded_full().bg(theme::kind_color(icons::category(entry), p.dark)))
+        .child(div().flex_1().min_w_0().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(p.text).child(entry.shown().to_string()));
     let Some(path) = path else {
-        return entry.shown().to_string();
+        return title.into_any_element();
     };
-    let mut lines = vec![entry.shown().to_string()];
-    lines.extend(crate::preview::item_property_rows(path, entry, folder_size, media).into_iter().map(|(key, value)| format!("{key}: {value}")));
-    lines.join("\n")
+    let line = |label: SharedString, value: AnyElement| {
+        h_flex()
+            .items_start()
+            .gap_3()
+            .child(div().w(px(TIP_LABEL_W)).flex_shrink_0().text_color(p.text_tertiary).child(label))
+            .child(div().flex_1().min_w_0().text_color(p.text_secondary).child(value))
+    };
+    let mut table = v_flex().gap(px(4.)).text_xs().line_height(px(16.));
+    for (label, value) in crate::preview::item_property_rows(path, entry, folder_size, media) {
+        table = table.child(line(label.into(), div().child(value).into_any_element()));
+    }
+    if let Some(state) = git {
+        let (letter, color) = git_style(state);
+        let badge = div().px(px(5.)).rounded(px(3.)).bg(color.opacity(0.16)).text_color(color).font_weight(FontWeight::SEMIBOLD).child(letter);
+        table = table.child(line("Git".into(), h_flex().gap_2().child(badge).child(git_label(state)).into_any_element()));
+    }
+    v_flex().min_w(px(220.)).max_w(px(360.)).py(px(2.)).gap(px(8.)).child(title).child(div().h(px(1.)).bg(p.divider)).child(table).into_any_element()
 }
 
 /// "Today / yesterday / this week ..." of a time.
@@ -1101,6 +1131,7 @@ impl FolderView {
             let tip_entry = e.clone();
             let tip_path = self.path_of(ei);
             let tip_folder_size = tip_path.as_ref().and_then(|path| self.known_folder_size(path, on_disk));
+            let tip_git = self.git_state_of(ei);
             let item_tips = !crate::fluent_menu::is_open(cx) && !self.native_menu && !self.pointer_away && cx.global::<crate::settings::Settings>().item_hover_details;
             // the rename box, as in the Details rows (issue 319: the columns drew none, so F2 seemed to do nothing while the keys
             // went to a box that was not on the screen)
@@ -1173,10 +1204,9 @@ impl FolderView {
                     .when_some(self.path_of(ei), |d, path| file_drop_target(d, path, is_dir, &p))
                     // (not while a menu is open: the details stood behind the right-click menu, a Discord report)
                     .when(item_tips, |d| d.tooltip(move |w, cx| {
-                            let media = tip_path.as_ref().and_then(|path| hover_media_cache().lock().get(path).cloned());
-                            let media = media.as_deref().map_or(&[][..], |items| items.as_slice());
-                            let text = item_tooltip_text(&tip_entry, tip_path.as_ref(), tip_folder_size.clone(), media);
-                            gpui_kit::component::tooltip::Tooltip::new(text).build(w, cx)
+                            let media: HoverMedia = tip_path.as_ref().and_then(|path| hover_media_cache().lock().get(path).cloned()).map(|m| (*m).clone()).unwrap_or_default();
+                            let (entry, path, size) = (tip_entry.clone(), tip_path.clone(), tip_folder_size.clone());
+                            gpui_kit::component::tooltip::Tooltip::element(move |window, _| item_tip_card(&entry, path.as_ref(), size.clone(), &media, tip_git, &Palette::for_window(window))).build(w, cx)
                     }))
                     .on_hover(cx.listener(move |this, on: &bool, _, cx| {
                         this.item_hover(vi, *on, cx);
@@ -2662,6 +2692,13 @@ impl FolderView {
         self.view_mode == ViewMode::Details && !self.rows.is_empty()
     }
 
+    /// An item's Git state, when its folder is in a repository (for the hover card: the letter beside a name says little alone).
+    fn git_state_of(&self, ei: u32) -> Option<rf_win::git::FileState> {
+        let git = self.git.as_ref()?;
+        let e = self.entries.get(ei as usize)?;
+        rf_win::git::state_for_child(git, self.parent_of(ei)?, &e.name)
+    }
+
     /// The Grid with group headers (`GridUnit`).
     fn grid_grouped(&self) -> bool {
         self.view_mode == ViewMode::Grid && !self.rows.is_empty()
@@ -3340,6 +3377,7 @@ impl FolderView {
         let tip_path = self.path_of(ei);
         let on_disk = cx.global::<crate::settings::Settings>().folder_size_on_disk;
         let tip_folder_size = tip_path.as_ref().and_then(|path| self.known_folder_size(path, on_disk));
+        let tip_git = self.git_state_of(ei);
         let item_tips = !crate::fluent_menu::is_open(cx) && !self.native_menu && !self.pointer_away && cx.global::<crate::settings::Settings>().item_hover_details;
         let cell = base
             .id(("cell", vi))
@@ -3364,10 +3402,9 @@ impl FolderView {
             .when_some(self.path_of(ei), |d, path| file_drop_target(d, path, e.is_dir(), &p))
             // (not while a menu is open: the details stood behind the right-click menu, a Discord report)
             .when(item_tips, |d| d.tooltip(move |w, cx| {
-                    let media = tip_path.as_ref().and_then(|path| hover_media_cache().lock().get(path).cloned());
-                    let media = media.as_deref().map_or(&[][..], |items| items.as_slice());
-                    let text = item_tooltip_text(&tip_entry, tip_path.as_ref(), tip_folder_size.clone(), media);
-                    gpui_kit::component::tooltip::Tooltip::new(text).build(w, cx)
+                    let media: HoverMedia = tip_path.as_ref().and_then(|path| hover_media_cache().lock().get(path).cloned()).map(|m| (*m).clone()).unwrap_or_default();
+                    let (entry, path, size) = (tip_entry.clone(), tip_path.clone(), tip_folder_size.clone());
+                    gpui_kit::component::tooltip::Tooltip::element(move |window, _| item_tip_card(&entry, path.as_ref(), size.clone(), &media, tip_git, &Palette::for_window(window))).build(w, cx)
             }))
             // Settings → "Select files and folders on hover"; in a sliced row the tile's fill follows the whole tile.
             .on_hover(cx.listener(move |this, on: &bool, _, cx| {
@@ -4890,6 +4927,7 @@ impl FolderView {
             let tip_entry = e.clone();
             let tip_path = self.path_of(ei);
             let tip_folder_size = tip_path.as_ref().and_then(|path| self.known_folder_size(path, on_disk));
+            let tip_git = self.git_state_of(ei);
             let item_tips = !crate::fluent_menu::is_open(cx) && !self.native_menu && !self.pointer_away && cx.global::<crate::settings::Settings>().item_hover_details;
             let selected = self.selected.contains(&ei);
             // (the rows next to it that are selected too: the pill joins them)
@@ -5229,10 +5267,9 @@ impl FolderView {
                 .children(prop_cells)
                 // (not while a menu is open: the details stood behind the right-click menu, a Discord report)
                 .when(item_tips, |d| d.tooltip(move |w, cx| {
-                        let media = tip_path.as_ref().and_then(|path| hover_media_cache().lock().get(path).cloned());
-                        let media = media.as_deref().map_or(&[][..], |items| items.as_slice());
-                        let text = item_tooltip_text(&tip_entry, tip_path.as_ref(), tip_folder_size.clone(), media);
-                        gpui_kit::component::tooltip::Tooltip::new(text).build(w, cx)
+                        let media: HoverMedia = tip_path.as_ref().and_then(|path| hover_media_cache().lock().get(path).cloned()).map(|m| (*m).clone()).unwrap_or_default();
+                        let (entry, path, size) = (tip_entry.clone(), tip_path.clone(), tip_folder_size.clone());
+                        gpui_kit::component::tooltip::Tooltip::element(move |window, _| item_tip_card(&entry, path.as_ref(), size.clone(), &media, tip_git, &Palette::for_window(window))).build(w, cx)
                 }))
                 .on_hover(cx.listener(move |this, on: &bool, _, cx| {
                     this.item_hover(vi, *on, cx);
