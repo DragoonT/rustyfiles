@@ -831,6 +831,30 @@ mod gdi_tests {
         assert_eq!((bmp.width, bmp.height), (64, 64));
     }
 
+    /// An icon as big as an app's one 1024 x 1024 picture (what an Electron app hands over when that is all it has): read and
+    /// shrunk, not left out. It used to be refused for its size, and the tray showed a question mark in its place.
+    #[test]
+    fn a_1024_px_icon_is_read_and_shrunk() {
+        let (w, h) = (1024usize, 1024usize);
+        // left half opaque red, right half transparent
+        let mut px = vec![0u8; w * h * 4];
+        for y in 0..h {
+            for x in 0..w / 2 {
+                let o = (y * w + x) * 4;
+                px[o..o + 4].copy_from_slice(&[0, 0, 255, 255]);
+            }
+        }
+        let mask = vec![0u8; (w / 8) * h];
+        let icon = unsafe { make_icon(Some((&px, w as i32, h as i32)), &mask, w as i32, h as i32) };
+        let bmp = read_icon(icon.0 as isize).expect("the picture of a 1024 px icon");
+        unsafe {
+            let _ = DestroyIcon(icon);
+        }
+        assert_eq!((bmp.width, bmp.height), (64, 64));
+        assert_eq!(&bmp.bgra[0..4], &[0, 0, 255, 255], "left: opaque red");
+        assert_eq!(bmp.bgra[(63 * 4) + 3], 0, "right: transparent");
+    }
+
     #[test]
     fn a_monochrome_icon_is_read_back() {
         // 8x8: AND plane (top) all 1 = transparent except the first row, XOR plane (bottom) all 0. Every row of a 1-bit bitmap is

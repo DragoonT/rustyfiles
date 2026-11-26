@@ -9,9 +9,13 @@
 
 use super::model::{IconBitmap, MAX_ICON_PX};
 
-/// The largest source picture that is read at all. An icon bigger than this (a 256 x 256 one is the largest Windows normally
-/// makes) is not worth the memory of a copy; the picture is left out and the old one stays.
-pub const MAX_SOURCE_PX: u32 = 512;
+/// The largest source picture that is read at all; a bigger one is left out and the old one stays. It is read whole only for the
+/// moment it takes to shrink it to [`MAX_ICON_PX`].
+///
+/// It was 512, on the thought that 256 x 256 is the largest icon Windows normally makes. Programs make bigger ones: an Electron
+/// app whose tray picture is one 1024 x 1024 PNG hands that over as it is (the owner's own app did, 2026-11-26), and its icon
+/// showed as a question mark, the stand-in for an icon with neither a picture nor a tip.
+pub const MAX_SOURCE_PX: u32 = 2048;
 
 /// Straight-alpha BGRA from a colour bitmap and (optionally) its mask. Both are `w * h * 4` bytes (the mask as a 32-bit read: a
 /// black pixel is 0 in the blue byte, a white one 255). `None` when the sizes do not fit.
@@ -200,7 +204,10 @@ mod tests {
     fn to_icon_bitmap_bounds() {
         let b = to_icon_bitmap(vec![255; 128 * 128 * 4], 128, 128).unwrap();
         assert_eq!((b.width, b.height), (64, 64));
-        assert!(to_icon_bitmap(vec![0; 513 * 4], 513, 1).is_none(), "beyond the source limit");
+        assert!(to_icon_bitmap(vec![0; 2049 * 4], 2049, 1).is_none(), "beyond the source limit");
+        // an app's one 1024 x 1024 picture, handed over as its tray icon: taken, and shrunk to what the model keeps
+        let big = to_icon_bitmap(vec![200; 1024 * 1024 * 4], 1024, 1024).expect("a 1024 px icon is read");
+        assert!(big.width <= MAX_ICON_PX && big.height <= MAX_ICON_PX && big.width == big.height, "{}x{}", big.width, big.height);
         assert!(to_icon_bitmap(vec![], 0, 0).is_none());
         assert!(to_icon_bitmap(vec![0; 10], 4, 4).is_none());
     }
