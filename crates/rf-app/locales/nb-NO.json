@@ -2211,5 +2211,7 @@
  "8f85e23e": "Monter",
  "c808916f": "Veldig liten",
  "7625ff9e": "Rett ugyldige tegn i navn",
- "906c6ce2": "Tegn som Windows ikke tillater, rettes ved Enter: et kolon blir \" - \"; / \\ | blir en bindestrek, \" et enkelt anførselstegn; * ? < > fjernes."
+ "906c6ce2": "Tegn som Windows ikke tillater, rettes ved Enter: et kolon blir \" - \"; / \\ | blir en bindestrek, \" et enkelt anførselstegn; * ? < > fjernes.",
+ "5ee616e9": "Bruk heretter Windows' eget vindu for:",
+ "529850df": "Dette programmet får Windows' eget Åpne / Lagre-vindu."
 }

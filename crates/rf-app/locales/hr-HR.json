@@ -2211,5 +2211,7 @@
  "8f85e23e": "Montiraj",
  "c808916f": "Vrlo male",
  "7625ff9e": "Ispravi nevažeće znakove u nazivima",
- "906c6ce2": "Znakovi koje Windows ne dopušta ispravljaju se pritiskom na Enter: dvotočka postaje \" - \"; / \\ | postaju crtica, \" jednostruki navodnik; * ? < > se uklanjaju."
+ "906c6ce2": "Znakovi koje Windows ne dopušta ispravljaju se pritiskom na Enter: dvotočka postaje \" - \"; / \\ | postaju crtica, \" jednostruki navodnik; * ? < > se uklanjaju.",
+ "5ee616e9": "Od sada koristi vlastiti prozor sustava Windows za:",
+ "529850df": "Ovaj program dobiva vlastiti prozor sustava Windows za otvaranje / spremanje."
 }

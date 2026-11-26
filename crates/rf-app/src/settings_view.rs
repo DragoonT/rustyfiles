@@ -3312,6 +3312,20 @@ fn advanced(p: &Palette, s: &Settings, cx: &App) -> Vec<AnyElement> {
             }),
         ));
     }
+    // the apps whose Open / Save windows stay Windows' own (added with the dialog's own button, issue 371)
+    for (i, app) in s.dialog_windows_apps.iter().enumerate() {
+        let key = app.clone();
+        out.push(card(
+            p,
+            L::AppWindow,
+            app.trim_end_matches(".exe"),
+            Some(t!("Bu programda Windows'un Aç / Kaydet penceresi açılır.")),
+            button(("dlg-windows", i), p, t!("Kaldır"), move |_, cx| {
+                let key = key.clone();
+                crate::settings::update(cx, move |s| s.dialog_windows_apps.retain(|a| *a != key));
+            }),
+        ));
+    }
     out.extend([
         card(
             p,

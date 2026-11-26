@@ -74,7 +74,7 @@ impl Drop for PickSession {
     /// Whatever closed the window, the app must not wait forever: an unanswered request is
     /// cancelled.
     fn drop(&mut self) {
-        self.answer(Response { ok: false, paths: Vec::new(), filter_index: self.filter_ix.get() });
+        self.answer(Response { ok: false, paths: Vec::new(), filter_index: self.filter_ix.get(), windows: false });
     }
 }
 
@@ -111,6 +111,69 @@ pub(crate) fn folder_choice(takes: bool, sel: &[(PathBuf, bool)], typed: &str, d
         [] if typed.trim().is_empty() => dir.map(Path::to_path_buf),
         _ => None,
     }
+}
+
+/// Writes `Settings::dialog_windows_apps` to the file the dialog DLL reads (issue 371). Off the interface's thread.
+pub(crate) fn mirror_windows_apps(apps: Vec<String>) {
+    std::thread::spawn(move || {
+        let Some(path) = rustyfiles_dialog::proto::windows_apps_path() else { return };
+        if apps.is_empty() && !path.exists() {
+            return;
+        }
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if let Err(e) = std::fs::write(&path, rustyfiles_dialog::proto::windows_apps_text(&apps)) {
+            log::warn!("dialog app list: {e}");
+        }
+    });
+}
+
+/// "Use Windows' dialog for this app" (issue 371): the app is remembered, and this dialog is handed to Windows' own at once, set
+/// up as the app asked.
+fn use_windows_dialog(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
+    let Some(s) = ws.picker() else { return };
+    let key = app_key(&s.req);
+    if !key.is_empty() {
+        crate::settings::update(cx, move |st| {
+            if !st.dialog_windows_apps.contains(&key) {
+                st.dialog_windows_apps.push(key);
+                st.dialog_windows_apps.sort();
+            }
+        });
+    }
+    s.answer(Response { ok: false, paths: Vec::new(), filter_index: s.filter_ix.get(), windows: true });
+    Workspace::release_preview_host(window);
+    window.remove_window();
+}
+
+/// The button for it, beside the pin; only when the dialog named its app.
+fn windows_dialog_button(s: &PickSession, p: &Palette, cx: &mut Context<Workspace>) -> Option<AnyElement> {
+    use gpui_kit::assets::IconName as L;
+    if app_key(&s.req).is_empty() {
+        return None;
+    }
+    let app = s.req.app.trim().trim_end_matches(".exe").trim_end_matches(".EXE").to_string();
+    let tip: SharedString = format!("{} {app}", t!("Bundan sonra Windows'un penceresini kullan:")).into();
+    Some(
+        div()
+            .id("pick-windows-dialog")
+            .size(px(36.))
+            .flex()
+            .flex_shrink_0()
+            .items_center()
+            .justify_center()
+            .rounded(theme::RADIUS_SM)
+            .cursor_pointer()
+            .border_1()
+            .border_color(p.border)
+            .bg(p.card_bg)
+            .hover(|d| d.bg(p.hover))
+            .child(Icon::new(L::AppWindow).size(px(16.)).text_color(p.text_secondary))
+            .tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(w, cx))
+            .on_click(cx.listener(|ws, _, window, cx| use_windows_dialog(ws, window, cx)))
+            .into_any_element(),
+    )
 }
 
 /// The app's key in `Settings::dialog_folders`: its program name in lower case (empty when the dialog did not say).
@@ -445,7 +508,7 @@ fn sync_name(ws: &Workspace, s: &PickSession, window: &mut Window, cx: &mut App)
 
 fn finish(ws: &mut Workspace, paths: Vec<PathBuf>, window: &mut Window) {
     if let Some(s) = ws.picker() {
-        s.answer(Response { ok: true, paths: paths.iter().map(|p| p.to_string_lossy().into_owned()).collect(), filter_index: s.filter_ix.get() });
+        s.answer(Response { ok: true, paths: paths.iter().map(|p| p.to_string_lossy().into_owned()).collect(), filter_index: s.filter_ix.get(), windows: false });
     }
     Workspace::release_preview_host(window);
     window.remove_window();
@@ -460,7 +523,7 @@ pub(crate) fn cancel(ws: &mut Workspace, window: &mut Window) {
 /// The window is closing anyway (X, Alt+F4): just tell the app.
 pub(crate) fn answer_cancel(ws: &mut Workspace) {
     if let Some(s) = ws.picker() {
-        s.answer(Response { ok: false, paths: Vec::new(), filter_index: s.filter_ix.get() });
+        s.answer(Response { ok: false, paths: Vec::new(), filter_index: s.filter_ix.get(), windows: false });
     }
 }
 
@@ -665,6 +728,7 @@ pub(crate) fn footer(ws: &mut Workspace, s: &Rc<PickSession>, p: &Palette, windo
         // over glass this strip (name field, file type, buttons) has a wash of its own, as the window's layers are thin there
         .bg(p.bar_bg)
         .children(start_pin(ws, s, p, cx))
+        .children(windows_dialog_button(s, p, cx))
         .child(
             // the same field look as the select box next to it
             h_flex()

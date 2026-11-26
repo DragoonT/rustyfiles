@@ -2211,5 +2211,7 @@
  "8f85e23e": "Zamontuj",
  "c808916f": "Bardzo małe",
  "7625ff9e": "Poprawiaj niedozwolone znaki w nazwach",
- "906c6ce2": "Znaki, na które Windows nie pozwala, są poprawiane po naciśnięciu Enter: dwukropek zmienia się w \" - \"; / \\ | w łącznik, \" w pojedynczy cudzysłów; * ? < > są usuwane."
+ "906c6ce2": "Znaki, na które Windows nie pozwala, są poprawiane po naciśnięciu Enter: dwukropek zmienia się w \" - \"; / \\ | w łącznik, \" w pojedynczy cudzysłów; * ? < > są usuwane.",
+ "5ee616e9": "Od teraz używaj własnego okna systemu Windows dla:",
+ "529850df": "Ten program dostaje własne okno Otwórz / Zapisz systemu Windows."
 }

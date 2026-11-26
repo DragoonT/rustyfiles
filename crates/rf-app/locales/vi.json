@@ -2211,5 +2211,7 @@
  "8f85e23e": "Gắn",
  "c808916f": "Rất nhỏ",
  "7625ff9e": "Sửa ký tự không hợp lệ trong tên",
- "906c6ce2": "Các ký tự Windows không cho phép được sửa khi nhấn Enter: dấu hai chấm thành \" - \"; / \\ | thành gạch nối, \" thành dấu nháy đơn; * ? < > bị bỏ đi."
+ "906c6ce2": "Các ký tự Windows không cho phép được sửa khi nhấn Enter: dấu hai chấm thành \" - \"; / \\ | thành gạch nối, \" thành dấu nháy đơn; * ? < > bị bỏ đi.",
+ "5ee616e9": "Từ nay, dùng cửa sổ riêng của Windows cho:",
+ "529850df": "Chương trình này dùng cửa sổ Mở / Lưu riêng của Windows."
 }

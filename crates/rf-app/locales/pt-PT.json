@@ -2211,5 +2211,7 @@
  "8f85e23e": "Montar",
  "c808916f": "Muito pequeno",
  "7625ff9e": "Corrigir caracteres inválidos nos nomes",
- "906c6ce2": "Os caracteres que o Windows não permite são corrigidos ao premir Enter: os dois pontos passam a \" - \"; / \\ | passam a hífen, \" a plica; * ? < > são removidos."
+ "906c6ce2": "Os caracteres que o Windows não permite são corrigidos ao premir Enter: os dois pontos passam a \" - \"; / \\ | passam a hífen, \" a plica; * ? < > são removidos.",
+ "5ee616e9": "A partir de agora, usar a janela do próprio Windows para:",
+ "529850df": "Este programa usa a janela Abrir / Guardar do próprio Windows."
 }

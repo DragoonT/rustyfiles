@@ -2211,5 +2211,7 @@
  "8f85e23e": "I-mount",
  "c808916f": "Napakaliit",
  "7625ff9e": "Itama ang mga di-wastong character sa mga pangalan",
- "906c6ce2": "Itinatama sa Enter ang mga character na hindi pinapayagan ng Windows: nagiging \" - \" ang tutuldok; nagiging gitling ang / \\ |, nagiging isahang panipi ang \"; inaalis ang * ? < >."
+ "906c6ce2": "Itinatama sa Enter ang mga character na hindi pinapayagan ng Windows: nagiging \" - \" ang tutuldok; nagiging gitling ang / \\ |, nagiging isahang panipi ang \"; inaalis ang * ? < >.",
+ "5ee616e9": "Mula ngayon, gamitin ang sariling window ng Windows para sa:",
+ "529850df": "Ang program na ito ay gumagamit ng sariling Open / Save window ng Windows."
 }

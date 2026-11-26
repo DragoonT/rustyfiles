@@ -2211,5 +2211,7 @@
  "8f85e23e": "Monteer",
  "c808916f": "Baie klein",
  "7625ff9e": "Korrigeer ongeldige karakters in name",
- "906c6ce2": "Karakters wat Windows nie toelaat nie, word met Enter reggemaak: 'n dubbelpunt word \" - \"; / \\ | word 'n koppelteken, \" 'n enkele aanhalingsteken; * ? < > word verwyder."
+ "906c6ce2": "Karakters wat Windows nie toelaat nie, word met Enter reggemaak: 'n dubbelpunt word \" - \"; / \\ | word 'n koppelteken, \" 'n enkele aanhalingsteken; * ? < > word verwyder.",
+ "5ee616e9": "Gebruik voortaan Windows se eie venster vir:",
+ "529850df": "Hierdie program kry Windows se eie Oop / Stoor-venster."
 }

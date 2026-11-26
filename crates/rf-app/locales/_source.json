@@ -13346,5 +13346,17 @@
   "key": "Windows'un kabul etmediği karakterler Enter'da düzeltilir: iki nokta \" - \" olur; / \\ | tire, \" tek tırnak olur; * ? < > çıkarılır.",
   "tr": "Windows'un kabul etmediği karakterler Enter'da düzeltilir: iki nokta \" - \" olur; / \\ | tire, \" tek tırnak olur; * ? < > çıkarılır.",
   "en": "Characters Windows does not allow are corrected on Enter: a colon becomes \" - \"; / \\ | become a dash, \" a single quote; * ? < > are taken out."
+ },
+ {
+  "id": "5ee616e9",
+  "key": "Bundan sonra Windows'un penceresini kullan:",
+  "tr": "Bundan sonra Windows'un penceresini kullan:",
+  "en": "From now on, use Windows' own window for"
+ },
+ {
+  "id": "529850df",
+  "key": "Bu programda Windows'un Aç / Kaydet penceresi açılır.",
+  "tr": "Bu programda Windows'un Aç / Kaydet penceresi açılır.",
+  "en": "This program gets Windows' own Open / Save window."
  }
 ]

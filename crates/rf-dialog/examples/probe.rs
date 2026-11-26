@@ -77,9 +77,9 @@ fn stand_in_picker(pipe: &str) {
     println!("PICKER mode {:?}, ok label {:?}, folder label {:?}", req.mode, req.ok_label, req.folder_label);
     let answer = std::env::var("RF_PROBE_ANSWER").unwrap_or_default();
     let resp = match answer.as_str() {
-        "folder" => Response { ok: true, paths: req.folder.clone().into_iter().collect(), filter_index: req.filter_index },
-        a if a.starts_with("file:") => Response { ok: true, paths: vec![a["file:".len()..].to_string()], filter_index: req.filter_index },
-        _ => Response { ok: false, paths: Vec::new(), filter_index: req.filter_index },
+        "folder" => Response { ok: true, paths: req.folder.clone().into_iter().collect(), filter_index: req.filter_index, windows: false },
+        a if a.starts_with("file:") => Response { ok: true, paths: vec![a["file:".len()..].to_string()], filter_index: req.filter_index, windows: false },
+        _ => Response { ok: false, paths: Vec::new(), filter_index: req.filter_index, windows: false },
     };
     write_msg(&mut f, &resp).expect("the answer");
 }

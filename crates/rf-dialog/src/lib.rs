@@ -341,6 +341,11 @@ mod com {
                 crate::log(&format!("show: no answer from rustyfiles ({:?}), Windows' dialog", req.mode));
                 return unsafe { self.real.Show(Some(owner)) };
             };
+            if resp.windows {
+                // "Use Windows' dialog for this app": this time already (later ones are not wrapped at all, see the factory)
+                crate::log("show: the user chose Windows' dialog for this app");
+                return unsafe { self.real.Show(Some(owner)) };
+            }
             if !resp.ok || resp.paths.is_empty() {
                 crate::log("show: cancelled");
                 return Err(ERROR_CANCELLED.to_hresult().into());
@@ -921,7 +926,7 @@ mod com {
             let temp = std::env::temp_dir();
             let temp = temp.canonicalize().map(|p| std::path::PathBuf::from(p.to_string_lossy().trim_start_matches(r"\\?\"))).unwrap_or(temp);
             let picked = temp.join("rf-dialog-wpf-test.mp4").to_string_lossy().into_owned();
-            CANNED.with(|c| *c.borrow_mut() = Some(crate::proto::Response { ok: true, paths: vec![picked.clone()], filter_index: 1 }));
+            CANNED.with(|c| *c.borrow_mut() = Some(crate::proto::Response { ok: true, paths: vec![picked.clone()], filter_index: 1, windows: false }));
             // (no owner window: the "dialog window" is then the null window, as the app's own would be)
             unsafe { dialog.Show(None).unwrap() };
             let (_, path) = got.borrow().clone().expect("OnFileOk ran and read the result");
@@ -953,8 +958,12 @@ mod com {
             if outer.is_some() {
                 return Err(CLASS_E_NOAGGREGATION.into());
             }
-            // some apps need Windows' own dialog object (see UNTOUCHED)
-            if let Some(app) = UNTOUCHED.iter().find(|a| exe_name().eq_ignore_ascii_case(a)) {
+            // some apps need Windows' own dialog object (see UNTOUCHED), and the user may have chosen it for others (issue 371)
+            let exe = exe_name();
+            let listed = || {
+                crate::proto::windows_apps_path().and_then(|p| std::fs::read_to_string(p).ok()).is_some_and(|t| crate::proto::windows_app_listed(&t, &exe))
+            };
+            if let Some(app) = UNTOUCHED.iter().copied().find(|a| exe.eq_ignore_ascii_case(a)).or_else(|| listed().then_some("listed by the user")) {
                 crate::log(&format!("create: {app}, Windows' dialog"));
                 let real = real_dialog(if self.save { &FileSaveDialog } else { &FileOpenDialog })?;
                 return unsafe { real.query(iid, object).ok() };

@@ -2211,5 +2211,7 @@
  "8f85e23e": "Připojit",
  "c808916f": "Velmi malé",
  "7625ff9e": "Opravovat neplatné znaky v názvech",
- "906c6ce2": "Znaky, které Windows nepovoluje, se po stisknutí Enter opraví: dvojtečka se změní na \" - \"; / \\ | na pomlčku, \" na jednoduchou uvozovku; * ? < > se odstraní."
+ "906c6ce2": "Znaky, které Windows nepovoluje, se po stisknutí Enter opraví: dvojtečka se změní na \" - \"; / \\ | na pomlčku, \" na jednoduchou uvozovku; * ? < > se odstraní.",
+ "5ee616e9": "Od teď používat vlastní okno Windows pro:",
+ "529850df": "Tento program dostává vlastní okno Windows Otevřít / Uložit."
 }

@@ -2211,5 +2211,7 @@
  "8f85e23e": "Monter",
  "c808916f": "Meget lille",
  "7625ff9e": "Ret ugyldige tegn i navne",
- "906c6ce2": "Tegn, som Windows ikke tillader, rettes ved Enter: et kolon bliver til \" - \"; / \\ | bliver til en bindestreg, \" til et enkelt anførselstegn; * ? < > fjernes."
+ "906c6ce2": "Tegn, som Windows ikke tillader, rettes ved Enter: et kolon bliver til \" - \"; / \\ | bliver til en bindestreg, \" til et enkelt anførselstegn; * ? < > fjernes.",
+ "5ee616e9": "Brug fremover Windows' eget vindue til:",
+ "529850df": "Dette program får Windows' eget Åbn / Gem-vindue."
 }

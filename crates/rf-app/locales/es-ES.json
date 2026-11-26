@@ -2211,5 +2211,7 @@
  "8f85e23e": "Montar",
  "c808916f": "Muy pequeño",
  "7625ff9e": "Corregir caracteres no válidos en los nombres",
- "906c6ce2": "Los caracteres que Windows no admite se corrigen al pulsar Intro: los dos puntos pasan a ser \" - \"; / \\ | pasan a ser un guion, \" una comilla simple; * ? < > se eliminan."
+ "906c6ce2": "Los caracteres que Windows no admite se corrigen al pulsar Intro: los dos puntos pasan a ser \" - \"; / \\ | pasan a ser un guion, \" una comilla simple; * ? < > se eliminan.",
+ "5ee616e9": "A partir de ahora, usar la ventana propia de Windows para:",
+ "529850df": "Este programa usa la ventana Abrir / Guardar propia de Windows."
 }

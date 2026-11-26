@@ -2211,5 +2211,7 @@
  "8f85e23e": "Csatolás",
  "c808916f": "Nagyon kicsi",
  "7625ff9e": "Érvénytelen karakterek javítása a nevekben",
- "906c6ce2": "A Windows által nem engedélyezett karakterek Enterre javulnak: a kettőspontból \" - \" lesz; a / \\ | kötőjellé, a \" aposztróffá válik; a * ? < > törlődik."
+ "906c6ce2": "A Windows által nem engedélyezett karakterek Enterre javulnak: a kettőspontból \" - \" lesz; a / \\ | kötőjellé, a \" aposztróffá válik; a * ? < > törlődik.",
+ "5ee616e9": "Mostantól a Windows saját ablakát használja ennél:",
+ "529850df": "Ez a program a Windows saját Megnyitás / Mentés ablakát kapja."
 }

@@ -560,6 +560,9 @@ pub struct Settings {
     /// case ("firefox.exe") to the folder. Set and cleared with the pin button of the dialog itself; listed in Settings › Advanced.
     /// A user on Discord, 2026-11-21: "per program default ... Say I use firefox ... open default storage location where i set it".
     pub dialog_folders: std::collections::BTreeMap<String, String>,
+    /// Programs (lower-case names, "myapp.exe") whose Open / Save windows stay Windows' own (issue 371). Added with the dialog's
+    /// own button, removed in Settings › Advanced; mirrored to the file the dialog DLL reads (`rf_dialog::proto::windows_apps_path`).
+    pub dialog_windows_apps: Vec<String>,
     /// Last window placement: [x, y, width, height, maximized (0/1)].
     pub window: Option<[f32; 5]>,
     /// Display UUID and the normal window's origin relative to that display.
@@ -983,6 +986,7 @@ impl Default for Settings {
             show_extensions: true,
             keybindings: Default::default(),
             dialog_folders: Default::default(),
+            dialog_windows_apps: Vec::new(),
             window: None,
             window_display: None,
             date_format: DatePref::Application,
@@ -1594,6 +1598,10 @@ pub fn update(cx: &mut App, f: impl FnOnce(&mut Settings)) {
     let s = cx.global::<Settings>().clone();
     // (DirectLook reads both from the file: the explorer theme, and background mode for whether it shows its own tray icon)
     let directlook_reload = s.windows_file_explorer_theme != explorer_theme_before || s.run_in_background != old.run_in_background;
+    // the dialog DLL reads its per-app list from a file of its own (issue 371)
+    if s.dialog_windows_apps != old.dialog_windows_apps {
+        crate::picker::mirror_windows_apps(s.dialog_windows_apps.clone());
+    }
     s.apply_side_effects();
     apply_component_theme(cx);
     let icon_pack_changed = s.icon_theme != old.icon_theme || s.icon_theme_pack != old.icon_theme_pack;

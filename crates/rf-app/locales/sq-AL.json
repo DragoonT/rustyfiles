@@ -2211,5 +2211,7 @@
  "8f85e23e": "Monto",
  "c808916f": "Shumë e vogël",
  "7625ff9e": "Korrigjo karakteret e pavlefshme në emra",
- "906c6ce2": "Karakteret që Windows nuk i lejon korrigjohen me Enter: dy pikat bëhen \" - \"; / \\ | bëhen vizë, \" thonjëz e vetme; * ? < > hiqen."
+ "906c6ce2": "Karakteret që Windows nuk i lejon korrigjohen me Enter: dy pikat bëhen \" - \"; / \\ | bëhen vizë, \" thonjëz e vetme; * ? < > hiqen.",
+ "5ee616e9": "Tani e tutje, përdor dritaren e vetë Windows për:",
+ "529850df": "Ky program merr dritaren Hap / Ruaj të vetë Windows."
 }

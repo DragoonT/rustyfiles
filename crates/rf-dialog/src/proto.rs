@@ -66,6 +66,39 @@ pub struct Response {
     pub ok: bool,
     pub paths: Vec<String>,
     pub filter_index: u32,
+    /// The user chose Windows' own dialog for this app ("Use Windows' dialog for this app", issue 371): the DLL shows it now, set
+    /// up as the app asked. (A rustyfiles older than this field does not send it.)
+    #[serde(default)]
+    pub windows: bool,
+}
+
+/// The programs whose Open / Save windows stay Windows' own (issue 371: "a per-app blacklist ... One incompatible app wouldn't
+/// force the feature off for everyone"): one program name per line ("myapp.exe"), in `%LOCALAPPDATA%\rustyfiles`. rustyfiles
+/// writes it from its settings (`Settings::dialog_windows_apps`); the DLL, loaded in the app that asks, only reads it. A test
+/// copy (`RUSTYFILES_CONFIG_DIR`) keeps its own.
+pub fn windows_apps_path() -> Option<std::path::PathBuf> {
+    if let Some(dir) = std::env::var_os("RUSTYFILES_CONFIG_DIR") {
+        return Some(std::path::PathBuf::from(dir).join(WINDOWS_APPS_FILE));
+    }
+    std::env::var_os("LOCALAPPDATA").map(|base| std::path::PathBuf::from(base).join("rustyfiles").join(WINDOWS_APPS_FILE))
+}
+
+pub const WINDOWS_APPS_FILE: &str = "dialog-windows-apps.txt";
+
+/// Whether the list file's text names `exe` (any case; blank lines and lines starting with '#' are not names). Pure.
+pub fn windows_app_listed(text: &str, exe: &str) -> bool {
+    let exe = exe.trim();
+    !exe.is_empty() && text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).any(|l| l.eq_ignore_ascii_case(exe))
+}
+
+/// The list file's text for these programs.
+pub fn windows_apps_text(apps: &[String]) -> String {
+    let mut out = String::from("# Programs whose Open / Save windows stay Windows' own. Written by rustyfiles from Settings > Advanced.\n");
+    for a in apps {
+        out.push_str(a.trim());
+        out.push('\n');
+    }
+    out
 }
 
 pub fn write_msg<T: Serialize>(w: &mut impl Write, msg: &T) -> std::io::Result<()> {
@@ -129,6 +162,17 @@ pub fn first_ext(spec: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    /// Issue 371: the per-app list, as the DLL reads it.
+    #[test]
+    fn the_windows_dialog_list_names_programs_in_any_case() {
+        let text = super::windows_apps_text(&["MyApp.exe".into(), "other.exe".into()]);
+        assert!(super::windows_app_listed(&text, "myapp.exe"));
+        assert!(super::windows_app_listed(&text, "OTHER.EXE"));
+        assert!(!super::windows_app_listed(&text, "notepad.exe"));
+        assert!(!super::windows_app_listed(&text, ""), "an app that did not say its name is never listed");
+        assert!(!super::windows_app_listed("# myapp.exe\n", "myapp.exe"), "a comment is not a name");
+    }
+
     use super::*;
 
     #[test]

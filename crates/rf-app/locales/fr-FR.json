@@ -2211,5 +2211,7 @@
  "8f85e23e": "Monter",
  "c808916f": "Très petite",
  "7625ff9e": "Corriger les caractères non valides des noms",
- "906c6ce2": "Les caractères que Windows n'autorise pas sont corrigés à la validation : les deux-points deviennent \" - \" ; / \\ | deviennent un tiret, \" une apostrophe ; * ? < > sont retirés."
+ "906c6ce2": "Les caractères que Windows n'autorise pas sont corrigés à la validation : les deux-points deviennent \" - \" ; / \\ | deviennent un tiret, \" une apostrophe ; * ? < > sont retirés.",
+ "5ee616e9": "Désormais, utiliser la fenêtre de Windows pour :",
+ "529850df": "Ce programme utilise la fenêtre Ouvrir / Enregistrer de Windows."
 }

@@ -2211,5 +2211,7 @@
  "8f85e23e": "Prijungti",
  "c808916f": "Labai maža",
  "7625ff9e": "Taisyti neleistinus simbolius pavadinimuose",
- "906c6ce2": "Simboliai, kurių Windows neleidžia, pataisomi paspaudus Enter: dvitaškis tampa \" - \"; / \\ | tampa brūkšneliu, \" – viengubomis kabutėmis; * ? < > pašalinami."
+ "906c6ce2": "Simboliai, kurių Windows neleidžia, pataisomi paspaudus Enter: dvitaškis tampa \" - \"; / \\ | tampa brūkšneliu, \" – viengubomis kabutėmis; * ? < > pašalinami.",
+ "5ee616e9": "Nuo šiol naudoti paties Windows langą programai:",
+ "529850df": "Ši programa gauna paties Windows atidarymo / įrašymo langą."
 }

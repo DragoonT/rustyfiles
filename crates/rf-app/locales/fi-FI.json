@@ -2211,5 +2211,7 @@
  "8f85e23e": "Liitä levyksi",
  "c808916f": "Erittäin pieni",
  "7625ff9e": "Korjaa nimien virheelliset merkit",
- "906c6ce2": "Merkit, joita Windows ei salli, korjataan Enterillä: kaksoispisteestä tulee \" - \"; / \\ | muuttuvat yhdysmerkiksi, \" yksinkertaiseksi lainausmerkiksi; * ? < > poistetaan."
+ "906c6ce2": "Merkit, joita Windows ei salli, korjataan Enterillä: kaksoispisteestä tulee \" - \"; / \\ | muuttuvat yhdysmerkiksi, \" yksinkertaiseksi lainausmerkiksi; * ? < > poistetaan.",
+ "5ee616e9": "Käytä tästä lähtien Windowsin omaa ikkunaa ohjelmalle:",
+ "529850df": "Tämä ohjelma saa Windowsin oman Avaa / Tallenna -ikkunan."
 }

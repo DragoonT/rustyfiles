@@ -2211,5 +2211,7 @@
  "8f85e23e": "Kaitkan",
  "c808916f": "Sangat kecil",
  "7625ff9e": "Perbaiki karakter tidak valid dalam nama",
- "906c6ce2": "Karakter yang tidak diizinkan Windows diperbaiki saat Enter: titik dua menjadi \" - \"; / \\ | menjadi tanda hubung, \" menjadi tanda kutip tunggal; * ? < > dihapus."
+ "906c6ce2": "Karakter yang tidak diizinkan Windows diperbaiki saat Enter: titik dua menjadi \" - \"; / \\ | menjadi tanda hubung, \" menjadi tanda kutip tunggal; * ? < > dihapus.",
+ "5ee616e9": "Mulai sekarang, gunakan jendela milik Windows untuk:",
+ "529850df": "Program ini mendapat jendela Buka / Simpan milik Windows."
 }
