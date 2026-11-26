@@ -2213,5 +2213,7 @@
  "7625ff9e": "Opravovať neplatné znaky v názvoch",
  "906c6ce2": "Znaky, ktoré Windows nepovoľuje, sa po stlačení Enter opravia: dvojbodka sa zmení na \" - \"; / \\ | na pomlčku, \" na jednoduchú úvodzovku; * ? < > sa odstránia.",
  "5ee616e9": "Odteraz používať vlastné okno Windows pre:",
- "529850df": "Tento program dostáva vlastné okno Windows Otvoriť / Uložiť."
+ "529850df": "Tento program dostáva vlastné okno Windows Otvoriť / Uložiť.",
+ "d59927ac": "Materiál kontextových ponúk",
+ "338db07f": "Určuje pozadie kontextových ponúk a rozbaľovacích zoznamov. Farby sa riadia zvoleným motívom."
 }

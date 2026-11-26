@@ -2213,5 +2213,7 @@
  "7625ff9e": "Corrigir caracteres inválidos nos nomes",
  "906c6ce2": "Caracteres que o Windows não permite são corrigidos ao pressionar Enter: dois-pontos viram \" - \"; / \\ | viram hífen, \" vira aspa simples; * ? < > são removidos.",
  "5ee616e9": "De agora em diante, usar a janela do próprio Windows para:",
- "529850df": "Este programa usa a janela Abrir / Salvar do próprio Windows."
+ "529850df": "Este programa usa a janela Abrir / Salvar do próprio Windows.",
+ "d59927ac": "Material dos menus pop-up",
+ "338db07f": "Define o fundo dos menus de contexto e das listas suspensas. As cores seguem o tema escolhido."
 }

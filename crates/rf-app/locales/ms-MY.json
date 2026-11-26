@@ -2213,5 +2213,7 @@
  "7625ff9e": "Betulkan aksara tidak sah dalam nama",
  "906c6ce2": "Aksara yang tidak dibenarkan oleh Windows dibetulkan apabila Enter ditekan: titik bertindih menjadi \" - \"; / \\ | menjadi sengkang, \" menjadi tanda petik tunggal; * ? < > dibuang.",
  "5ee616e9": "Mulai sekarang, gunakan tetingkap Windows sendiri untuk:",
- "529850df": "Program ini mendapat tetingkap Buka / Simpan Windows sendiri."
+ "529850df": "Program ini mendapat tetingkap Buka / Simpan Windows sendiri.",
+ "d59927ac": "Bahan menu timbul",
+ "338db07f": "Menetapkan latar belakang menu konteks dan senarai juntai bawah. Warna mengikut tema yang dipilih."
 }

@@ -2213,5 +2213,7 @@
  "7625ff9e": "Korrigjo karakteret e pavlefshme në emra",
  "906c6ce2": "Karakteret që Windows nuk i lejon korrigjohen me Enter: dy pikat bëhen \" - \"; / \\ | bëhen vizë, \" thonjëz e vetme; * ? < > hiqen.",
  "5ee616e9": "Tani e tutje, përdor dritaren e vetë Windows për:",
- "529850df": "Ky program merr dritaren Hap / Ruaj të vetë Windows."
+ "529850df": "Ky program merr dritaren Hap / Ruaj të vetë Windows.",
+ "d59927ac": "Materiali i menyve që shfaqen",
+ "338db07f": "Përcakton sfondin e menyve të kontekstit dhe të listave rënëse. Ngjyrat ndjekin temën e zgjedhur."
 }

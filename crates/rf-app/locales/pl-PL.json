@@ -2213,5 +2213,7 @@
  "7625ff9e": "Poprawiaj niedozwolone znaki w nazwach",
  "906c6ce2": "Znaki, na które Windows nie pozwala, są poprawiane po naciśnięciu Enter: dwukropek zmienia się w \" - \"; / \\ | w łącznik, \" w pojedynczy cudzysłów; * ? < > są usuwane.",
  "5ee616e9": "Od teraz używaj własnego okna systemu Windows dla:",
- "529850df": "Ten program dostaje własne okno Otwórz / Zapisz systemu Windows."
+ "529850df": "Ten program dostaje własne okno Otwórz / Zapisz systemu Windows.",
+ "d59927ac": "Materiał menu podręcznych",
+ "338db07f": "Określa tło menu kontekstowych i list rozwijanych. Kolory zależą od wybranego motywu."
 }

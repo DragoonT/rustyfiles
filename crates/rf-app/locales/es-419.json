@@ -2213,5 +2213,7 @@
  "7625ff9e": "Corregir caracteres no válidos en los nombres",
  "906c6ce2": "Los caracteres que Windows no admite se corrigen al presionar Enter: los dos puntos se convierten en \" - \"; / \\ | en un guion, \" en una comilla simple; * ? < > se quitan.",
  "5ee616e9": "De ahora en adelante, usar la ventana propia de Windows para:",
- "529850df": "Este programa usa la ventana Abrir / Guardar propia de Windows."
+ "529850df": "Este programa usa la ventana Abrir / Guardar propia de Windows.",
+ "d59927ac": "Material de los menús emergentes",
+ "338db07f": "Define el fondo de los menús contextuales y las listas desplegables. Los colores siguen el tema elegido."
 }

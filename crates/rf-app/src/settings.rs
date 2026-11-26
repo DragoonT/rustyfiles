@@ -216,6 +216,38 @@ pub enum BackdropPref {
     Glass,
 }
 
+/// The material for the app's popup menus. Colors come from the theme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum MenuMaterial {
+    #[default]
+    #[serde(alias = "auto")]
+    Automatic,
+    Mica,
+    Solid,
+    MicaAlt,
+    Acrylic,
+    Glass,
+}
+
+impl MenuMaterial {
+    /// Whether to draw HyperGlass and what backdrop the popup requests before OS fallback.
+    pub fn resolve(self, auto_liquid: bool, auto_opaque: bool, materials: bool) -> (bool, WindowBackgroundAppearance) {
+        use WindowBackgroundAppearance::{Blurred, MicaAltBackdrop, MicaBackdrop, Opaque, Transparent};
+        match self {
+            Self::Automatic if auto_opaque => (false, Opaque),
+            Self::Automatic if auto_liquid => (true, Transparent),
+            // Keep the legacy popup fill on systems that fall back from Acrylic.
+            Self::Automatic => (false, Blurred),
+            Self::Mica if materials => (false, MicaBackdrop),
+            Self::MicaAlt if materials => (false, MicaAltBackdrop),
+            Self::Acrylic if materials => (false, Blurred),
+            Self::Glass if materials => (true, Transparent),
+            _ => (false, Opaque),
+        }
+    }
+}
+
 /// Hızlı Bakış penceresinin arka planı.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -607,6 +639,7 @@ pub struct Settings {
     pub animations: AnimPref,
     /// Extend the Windows File Explorer look to the navigation, toolbar, and file-list appearance.
     pub windows_file_explorer_theme: bool,
+    pub menu_material: MenuMaterial,
     /// "Compact window": the tab row, the address bar and the command bar are thinner and the content card has no margin or round
     /// corners at its right and bottom; icons and text keep their size (a Discord request, 2026-11-22: room on small laptop screens).
     #[serde(default)]
@@ -1008,6 +1041,7 @@ impl Default for Settings {
             icon_theme_pack: String::new(),
             animations: AnimPref::System,
             windows_file_explorer_theme: false,
+            menu_material: MenuMaterial::default(),
             compact_window: false,
             compact_items: false,
             props_size: None,
@@ -1790,6 +1824,39 @@ pub fn app_dir() -> Option<std::path::PathBuf> {
 #[cfg(test)]
 mod lenient_tests {
     use super::{DEFAULT_EXPLORER_SIDEBAR_WIDTH, DEFAULT_SIDEBAR_WIDTH, Settings};
+
+    #[test]
+    fn popup_material_defaults_to_automatic_and_parses_saved_choices() {
+        use super::MenuMaterial;
+        assert_eq!(Settings::parse_lenient("").unwrap().menu_material, MenuMaterial::Automatic);
+        for (stored, expected) in [
+            ("auto", MenuMaterial::Automatic),
+            ("automatic", MenuMaterial::Automatic),
+            ("mica", MenuMaterial::Mica),
+            ("micaalt", MenuMaterial::MicaAlt),
+            ("acrylic", MenuMaterial::Acrylic),
+            ("solid", MenuMaterial::Solid),
+            ("glass", MenuMaterial::Glass),
+        ] {
+            assert_eq!(Settings::parse_lenient(&format!("menu_material = \"{stored}\"")).unwrap().menu_material, expected);
+        }
+    }
+
+    #[test]
+    fn popup_material_automatic_preserves_host_and_explorer_appearance() {
+        use super::MenuMaterial::{Automatic, Glass, Mica, Solid};
+        use super::WindowBackgroundAppearance::{Blurred, MicaBackdrop, Opaque, Transparent};
+
+        assert_eq!(Automatic.resolve(false, false, true), (false, Blurred));
+        assert_eq!(Automatic.resolve(true, false, true), (true, Transparent));
+        assert_eq!(Automatic.resolve(true, true, true), (false, Opaque));
+        assert_eq!(Automatic.resolve(false, true, false), (false, Opaque));
+        assert_eq!(Automatic.resolve(false, false, false), (false, Blurred));
+        assert_eq!(Mica.resolve(true, true, true), (false, MicaBackdrop));
+        assert_eq!(Solid.resolve(true, false, true), (false, Opaque));
+        assert_eq!(Glass.resolve(false, true, true), (true, Transparent));
+        assert_eq!(Glass.resolve(true, false, false), (false, Opaque));
+    }
 
     #[test]
     fn windows_file_explorer_theme_defaults_off_and_round_trips() {

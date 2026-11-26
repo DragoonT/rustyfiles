@@ -2213,5 +2213,7 @@
  "7625ff9e": "Érvénytelen karakterek javítása a nevekben",
  "906c6ce2": "A Windows által nem engedélyezett karakterek Enterre javulnak: a kettőspontból \" - \" lesz; a / \\ | kötőjellé, a \" aposztróffá válik; a * ? < > törlődik.",
  "5ee616e9": "Mostantól a Windows saját ablakát használja ennél:",
- "529850df": "Ez a program a Windows saját Megnyitás / Mentés ablakát kapja."
+ "529850df": "Ez a program a Windows saját Megnyitás / Mentés ablakát kapja.",
+ "d59927ac": "Előugró menük anyaga",
+ "338db07f": "A helyi menük és legördülő listák hátterét állítja be. A színek a választott témát követik."
 }

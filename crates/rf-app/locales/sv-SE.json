@@ -2213,5 +2213,7 @@
  "7625ff9e": "Rätta ogiltiga tecken i namn",
  "906c6ce2": "Tecken som Windows inte tillåter rättas vid Retur: ett kolon blir \" - \"; / \\ | blir ett bindestreck, \" ett enkelt citattecken; * ? < > tas bort.",
  "5ee616e9": "Använd hädanefter Windows eget fönster för:",
- "529850df": "Det här programmet får Windows eget Öppna / Spara-fönster."
+ "529850df": "Det här programmet får Windows eget Öppna / Spara-fönster.",
+ "d59927ac": "Material för snabbmenyer",
+ "338db07f": "Anger bakgrunden för snabbmenyer och listrutor. Färgerna följer det valda temat."
 }

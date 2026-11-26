@@ -2213,5 +2213,7 @@
  "7625ff9e": "Korrigeer ongeldige karakters in name",
  "906c6ce2": "Karakters wat Windows nie toelaat nie, word met Enter reggemaak: 'n dubbelpunt word \" - \"; / \\ | word 'n koppelteken, \" 'n enkele aanhalingsteken; * ? < > word verwyder.",
  "5ee616e9": "Gebruik voortaan Windows se eie venster vir:",
- "529850df": "Hierdie program kry Windows se eie Oop / Stoor-venster."
+ "529850df": "Hierdie program kry Windows se eie Oop / Stoor-venster.",
+ "d59927ac": "Materiaal van opspringkieslyste",
+ "338db07f": "Bepaal die agtergrond van kontekskieslyste en aftreklyste. Kleure volg die gekose tema."
 }

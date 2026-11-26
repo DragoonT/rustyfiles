@@ -2213,5 +2213,7 @@
  "7625ff9e": "Ret ugyldige tegn i navne",
  "906c6ce2": "Tegn, som Windows ikke tillader, rettes ved Enter: et kolon bliver til \" - \"; / \\ | bliver til en bindestreg, \" til et enkelt anførselstegn; * ? < > fjernes.",
  "5ee616e9": "Brug fremover Windows' eget vindue til:",
- "529850df": "Dette program får Windows' eget Åbn / Gem-vindue."
+ "529850df": "Dette program får Windows' eget Åbn / Gem-vindue.",
+ "d59927ac": "Materiale for pop op-menuer",
+ "338db07f": "Bestemmer baggrunden for genvejsmenuer og rullelister. Farverne følger det valgte tema."
 }

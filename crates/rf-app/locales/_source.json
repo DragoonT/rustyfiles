@@ -13358,5 +13358,17 @@
   "key": "Bu programda Windows'un Aç / Kaydet penceresi açılır.",
   "tr": "Bu programda Windows'un Aç / Kaydet penceresi açılır.",
   "en": "This program gets Windows' own Open / Save window."
+ },
+ {
+  "id": "d59927ac",
+  "key": "Açılır menü malzemesi",
+  "tr": "Açılır menü malzemesi",
+  "en": "Popup menu material"
+ },
+ {
+  "id": "338db07f",
+  "key": "Bağlam menülerinin ve açılır listelerin arka planını belirler. Renkler seçili temayı izler.",
+  "tr": "Bağlam menülerinin ve açılır listelerin arka planını belirler. Renkler seçili temayı izler.",
+  "en": "Sets the background of context menus and dropdown lists. Colors follow the selected theme."
  }
 ]

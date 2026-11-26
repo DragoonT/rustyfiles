@@ -2213,5 +2213,7 @@
  "7625ff9e": "Ungültige Zeichen in Namen korrigieren",
  "906c6ce2": "Zeichen, die Windows nicht erlaubt, werden bei Eingabe korrigiert: Ein Doppelpunkt wird zu \" - \"; / \\ | werden zu einem Bindestrich, \" zu einem einfachen Anführungszeichen; * ? < > werden entfernt.",
  "5ee616e9": "Ab jetzt das Windows-eigene Fenster verwenden für:",
- "529850df": "Dieses Programm bekommt das Windows-eigene Öffnen-/Speichern-Fenster."
+ "529850df": "Dieses Programm bekommt das Windows-eigene Öffnen-/Speichern-Fenster.",
+ "d59927ac": "Material der Popupmenüs",
+ "338db07f": "Legt den Hintergrund von Kontextmenüs und Dropdownlisten fest. Die Farben folgen dem gewählten Design."
 }

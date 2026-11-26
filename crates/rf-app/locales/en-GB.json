@@ -2213,5 +2213,7 @@
  "7625ff9e": "Correct characters names cannot have",
  "906c6ce2": "Characters Windows does not allow are corrected on Enter: a colon becomes \" - \"; / \\ | become a dash, \" a single quote; * ? < > are taken out.",
  "5ee616e9": "From now on, use Windows' own window for",
- "529850df": "This program gets Windows' own Open / Save window."
+ "529850df": "This program gets Windows' own Open / Save window.",
+ "d59927ac": "Popup menu material",
+ "338db07f": "Sets the background of context menus and drop-down lists. Colours follow the selected theme."
 }

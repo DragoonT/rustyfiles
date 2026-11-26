@@ -2213,5 +2213,7 @@
  "7625ff9e": "Corregeix els caràcters no vàlids dels noms",
  "906c6ce2": "Els caràcters que Windows no admet es corregeixen en prémer Retorn: els dos punts passen a ser \" - \"; / \\ | passen a ser un guionet, \" una cometa simple; * ? < > s'eliminen.",
  "5ee616e9": "A partir d'ara, fes servir la finestra pròpia de Windows per a:",
- "529850df": "Aquest programa obté la finestra Obre / Desa pròpia de Windows."
+ "529850df": "Aquest programa obté la finestra Obre / Desa pròpia de Windows.",
+ "d59927ac": "Material dels menús emergents",
+ "338db07f": "Defineix el fons dels menús contextuals i de les llistes desplegables. Els colors segueixen el tema triat."
 }

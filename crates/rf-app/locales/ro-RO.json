@@ -2213,5 +2213,7 @@
  "7625ff9e": "Corectează caracterele nevalide din nume",
  "906c6ce2": "Caracterele pe care Windows nu le permite sunt corectate la Enter: două puncte devin \" - \"; / \\ | devin cratimă, \" un apostrof; * ? < > sunt eliminate.",
  "5ee616e9": "De acum înainte, folosește fereastra proprie Windows pentru:",
- "529850df": "Acest program primește fereastra Deschidere / Salvare proprie Windows."
+ "529850df": "Acest program primește fereastra Deschidere / Salvare proprie Windows.",
+ "d59927ac": "Materialul meniurilor pop-up",
+ "338db07f": "Stabilește fundalul meniurilor contextuale și al listelor derulante. Culorile urmează tema aleasă."
 }
