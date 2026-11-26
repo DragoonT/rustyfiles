@@ -11,6 +11,12 @@
 //! changes. Its window carries a transparent shadow margin, so the banner then stands about 15 px above the dock, as on Windows' own
 //! taskbar. Tried by hand on the owner's PC with a test banner: moved by 56 px, it stood just above the dock. Nothing is done while
 //! the work area is the whole screen (the dock reserves no space: the banner would cover it).
+//!
+//! A BANNER THAT HANGS BELOW (the owner, 2026-11-26, with a picture of an Adobe Creative Cloud banner whose top stood 9 px above the
+//! dock's band and whose rest was under the dock and off the screen: "bildirim alta gitmiş"). The banner's window opens as a sliver
+//! and grows downward to its height. Moved while it was a sliver, its bottom was put on the work area's bottom, and what it grew
+//! by afterwards hung below: the rule only ever moved a banner DOWN. Now a window lower than `MIN_H` is left alone (it is still
+//! opening), and a banner whose bottom is below the work area's while its top is above it is moved UP to stand on it.
 
 use std::sync::OnceLock;
 
@@ -27,16 +33,19 @@ const MAX_W: i32 = 700;
 const MAX_H: i32 = 900;
 /// How far above the work area's bottom a banner may stand and still be moved (Windows' own margin was 56 px at 100 %).
 const MAX_LIFT: i32 = 160;
+/// A banner's window is at least this high (the lowest measured was 152 px); lower, it is still opening.
+const MIN_H: i32 = 48;
 
-/// How far down a banner window at `win` goes for a work area that ends at `work_bottom` on a screen that ends at `screen_bottom`;
-/// 0: it is left alone (not a banner, already in place, or no reserved band to stand on).
+/// How far a banner window at `win` is moved for a work area that ends at `work_bottom` on a screen that ends at `screen_bottom`:
+/// down (more than 0) when it stands a little above the work area's bottom, up (less than 0) when it hangs below it; 0: it is left
+/// alone (not a banner, still opening, already in place, or no reserved band to stand on).
 pub fn lift_for(win: RECT, work_bottom: i32, screen_bottom: i32) -> i32 {
     let (w, h) = (win.right - win.left, win.bottom - win.top);
-    if work_bottom >= screen_bottom || w <= 0 || h <= 0 || w > MAX_W || h > MAX_H {
+    if work_bottom >= screen_bottom || w <= 0 || h < MIN_H || w > MAX_W || h > MAX_H {
         return 0;
     }
     let gap = work_bottom - win.bottom;
-    if (1..=MAX_LIFT).contains(&gap) { gap } else { 0 }
+    if (1..=MAX_LIFT).contains(&gap) || (gap < 0 && win.top < work_bottom) { gap } else { 0 }
 }
 
 fn is_core_window(hwnd: HWND) -> bool {
@@ -74,10 +83,10 @@ fn place(hwnd: HWND) {
         return;
     }
     let dy = lift_for(win, info.rcWork.bottom, info.rcMonitor.bottom);
-    if dy > 0 {
+    if dy != 0 {
         // (its own move comes back as a location change, which then finds it in place)
         let _ = unsafe { SetWindowPos(hwnd, None, win.left, win.top + dy, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE) };
-        log::debug!("dock: Windows' notification banner moved down {dy} px, above the dock");
+        log::debug!("dock: Windows' notification banner moved {} px {}, to stand above the dock", dy.abs(), if dy > 0 { "down" } else { "up" });
     }
 }
 
@@ -128,5 +137,18 @@ mod tests {
         assert_eq!(lift_for(r(2164, 1184, 2560, 1336), 1440, 1440), 0, "no reserved band: the banner would cover the dock");
         assert_eq!(lift_for(r(1900, 300, 2560, 1380), 1392, 1440), 0, "the notification centre is no banner");
         assert_eq!(lift_for(r(2164, 600, 2560, 900), 1392, 1440), 0, "far above: not a banner Windows put there");
+    }
+
+    /// The owner's picture, 2026-11-26: the banner's top 9 px above the dock's band, the rest under the dock and off the screen.
+    #[test]
+    fn a_banner_that_hangs_below_the_work_area_comes_up_to_it() {
+        // its window while it opens: a sliver, which is not moved (moving it is what left the grown banner hanging)
+        assert_eq!(lift_for(r(2164, 1327, 2560, 1336), 1392, 1440), 0, "9 px high: still opening");
+        // grown downward from where the sliver had been put: 250 px from 1383
+        assert_eq!(lift_for(r(2164, 1383, 2560, 1633), 1392, 1440), -241, "back up, to stand on the work area's bottom");
+        assert_eq!(lift_for(r(2164, 1142, 2560, 1392), 1392, 1440), 0, "and then it is in place");
+        assert_eq!(lift_for(r(2164, 1300, 2560, 1420), 1392, 1440), -28, "hanging into the dock's band only");
+        assert_eq!(lift_for(r(2164, 1400, 2560, 1500), 1392, 1440), 0, "wholly in the band and below: nothing Windows shows as a banner");
+        assert_eq!(lift_for(r(2164, 1383, 2560, 1633), 1440, 1440), 0, "no reserved band: left alone, as before");
     }
 }
