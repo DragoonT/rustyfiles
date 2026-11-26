@@ -39,14 +39,51 @@ jobs:
       - name: Scan on VirusTotal
         id: vt
         if: ${{ env.VT_API_KEY != '' }}
-        # v5.0.0, pinned to its commit. Outside a release event it only uploads and gives the links as `analysis`
-        # ("path=url,path=url"); the next step writes them into the notes.
-        uses: crazy-max/ghaction-virustotal@936d8c5c00afe97d3d9a1af26d017cfdf26800a2
-        with:
-          vt_api_key: ${{ secrets.VT_API_KEY }}
-          files: |
-            vt/*
-          request_rate: 4
+        # Each file is looked up by its SHA-256 first: one VirusTotal already has (sent by the release run, or the same bytes as
+        # before) gets its existing report, and only unknown files are uploaded. Uploading a file again while its first analysis
+        # was pending answered 409 and stopped the whole step, so a second run never reached the Mac zip. The links go out as
+        # `analysis` ("path=url,path=url"), as the action used before gave them. The free API allows 4 requests a minute.
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import glob, hashlib, json, os, sys, time, urllib.error, urllib.request, uuid
+          KEY = os.environ["VT_API_KEY"]
+          API = "https://www.virustotal.com/api/v3"
+          def call(url, data=None, headers=None):
+              time.sleep(16)  # 4 requests a minute
+              req = urllib.request.Request(url, data=data, headers={"x-apikey": KEY, **(headers or {})})
+              try:
+                  with urllib.request.urlopen(req, timeout=600) as r:
+                      return r.status, json.load(r)
+              except urllib.error.HTTPError as e:
+                  return e.code, None
+          def upload(path):
+              size = os.path.getsize(path)
+              url = f"{API}/files"
+              if size > 32 << 20:
+                  code, j = call(f"{API}/files/upload_url")
+                  if code != 200:
+                      return code, None
+                  url = j["data"]
+              b = uuid.uuid4().hex
+              head = f'--{b}\r\nContent-Disposition: form-data; name="file"; filename="{os.path.basename(path)}"\r\nContent-Type: application/octet-stream\r\n\r\n'.encode()
+              body = head + open(path, "rb").read() + f"\r\n--{b}--\r\n".encode()
+              return call(url, body, {"Content-Type": f"multipart/form-data; boundary={b}"})
+          links = []
+          for path in sorted(glob.glob("vt/*")):
+              sha = hashlib.sha256(open(path, "rb").read()).hexdigest()
+              code, _ = call(f"{API}/files/{sha}")
+              if code == 200:
+                  links.append(f"{path}=https://www.virustotal.com/gui/file/{sha}/detection")
+                  continue
+              code, j = upload(path)
+              if code == 200 and j:
+                  links.append(f"{path}=https://www.virustotal.com/gui/file-analysis/{j['data']['id']}/detection")
+              elif code == 409:
+                  links.append(f"{path}=https://www.virustotal.com/gui/file/{sha}/detection")
+              else:
+                  print(f"{path}: VirusTotal answered {code}", file=sys.stderr)
+          print("analysis=" + ",".join(links))
+          PY
       - name: The report shown under Deployments
         id: report
         if: ${{ env.VT_API_KEY != '' && steps.vt.outputs.analysis != '' }}
