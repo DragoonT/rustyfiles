@@ -106,6 +106,53 @@ pub fn battery_levels() -> Vec<(String, u8)> {
     out
 }
 
+// ------------------------------------------------------------------ the version of the adapter
+
+/// The radio's LMP version (a byte), on the node of the Bluetooth adapter itself. It is not in Windows' published headers: it is the
+/// value Device Manager shows on the adapter's Advanced tab, and the one tools that tell a PC's Bluetooth version read (checked on the
+/// owner's PC, 2026-11-26: 13 on a Qualcomm FastConnect 7800, a Bluetooth 5.4 adapter).
+const LMP_VERSION: DEVPROPKEY = DEVPROPKEY { fmtid: GUID::from_u128(0xa92f26ca_eda7_4b1d_9db2_27b68aa5a2eb), pid: 4 };
+
+/// The LMP version of the Bluetooth adapter that is there: the first node of the Bluetooth class that carries one.
+pub fn adapter_lmp_version() -> Option<u8> {
+    unsafe {
+        let set = SetupDiGetClassDevsW(Some(&GUID_DEVCLASS_BLUETOOTH), PCWSTR::null(), None, DIGCF_PRESENT).ok()?;
+        let set = DevInfo(set);
+        for index in 0.. {
+            let mut dev = SP_DEVINFO_DATA { cbSize: size_of::<SP_DEVINFO_DATA>() as u32, ..Default::default() };
+            if SetupDiEnumDeviceInfo(set.0, index, &mut dev).is_err() {
+                break;
+            }
+            let (mut kind, mut v) = (DEVPROPTYPE::default(), [0u8; 1]);
+            if SetupDiGetDevicePropertyW(set.0, &dev, &LMP_VERSION, &mut kind, Some(&mut v), None, 0).is_ok() && kind == DEVPROP_TYPE_BYTE {
+                return Some(v[0]);
+            }
+        }
+    }
+    None
+}
+
+/// The Bluetooth version an LMP version stands for (the core specification's own table): 6 is 4.0, 9 is 5.0, 13 is 5.4, 14 is 6.0.
+/// Older and unknown numbers give `None`.
+pub fn version_of_lmp(lmp: u8) -> Option<&'static str> {
+    Some(match lmp {
+        3 => "2.0",
+        4 => "2.1",
+        5 => "3.0",
+        6 => "4.0",
+        7 => "4.1",
+        8 => "4.2",
+        9 => "5.0",
+        10 => "5.1",
+        11 => "5.2",
+        12 => "5.3",
+        13 => "5.4",
+        14 => "6.0",
+        15 => "6.1",
+        _ => return None,
+    })
+}
+
 // ------------------------------------------------------------------ the sound of a device
 
 const BT_AUDIO: GUID = GUID::from_u128(0x7fa06c40_b8f6_4c7e_8556_e8c33a12e54d);
@@ -169,6 +216,14 @@ pub fn set_connected(address: &str, connect: bool) -> Result<usize, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The core specification's table of LMP versions (the control centre's Bluetooth title, 2026-11-26).
+    #[test]
+    fn an_lmp_version_names_its_bluetooth_version() {
+        use super::version_of_lmp;
+        assert_eq!([6, 9, 12, 13, 14].map(version_of_lmp), [Some("4.0"), Some("5.0"), Some("5.3"), Some("5.4"), Some("6.0")]);
+        assert_eq!([0, 2, 16, 255].map(version_of_lmp), [None; 4]);
+    }
 
     #[test]
     fn the_address_is_found_in_every_name_windows_gives_a_device() {

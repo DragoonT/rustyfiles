@@ -83,6 +83,19 @@ pub struct BluetoothSnapshot {
     pub connected: Vec<String>,
     /// The paired devices, the connected ones first (`devices_of`). Empty while the radio is off.
     pub devices: Vec<Device>,
+    /// The adapter's Bluetooth version ("5.4"), when Windows tells its LMP version.
+    pub version: Option<&'static str>,
+}
+
+/// The adapter's version, kept once it is known (the adapter does not change while it is there; one plugged in later is read when
+/// it first answers).
+fn adapter_version() -> Option<&'static str> {
+    static KNOWN: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+    if let Some(v) = KNOWN.get() {
+        return Some(v);
+    }
+    let v = super::btaudio::adapter_lmp_version().and_then(super::btaudio::version_of_lmp)?;
+    Some(KNOWN.get_or_init(|| v))
 }
 
 enum Msg {
@@ -149,8 +162,9 @@ fn radio() -> Option<Radio> {
 fn read() -> BluetoothSnapshot {
     let Some(radio) = radio() else { return BluetoothSnapshot::default() };
     let power = super::radio::power_of(&radio);
+    let version = adapter_version();
     if power != Power::On {
-        return BluetoothSnapshot { available: true, power, ..Default::default() };
+        return BluetoothSnapshot { available: true, power, version, ..Default::default() };
     }
     let (connected, mut addresses) = found(selectors());
     let (paired, more) = found(paired_selectors());
@@ -158,7 +172,7 @@ fn read() -> BluetoothSnapshot {
     let devices = with_details(devices_of(paired, &connected), &addresses, &super::btaudio::battery_levels(), &super::btaudio::audio_addresses());
     // (the names the tile tells are the rows' own: a device listed twice is told once, by the name its row has)
     let connected = devices.iter().filter(|d| d.connected).map(|d| d.name.clone()).collect();
-    BluetoothSnapshot { available: true, power, connected, devices }
+    BluetoothSnapshot { available: true, power, connected, devices, version }
 }
 
 fn paired_selectors() -> Vec<windows::core::HSTRING> {

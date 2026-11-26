@@ -35,7 +35,8 @@ use windows::Win32::NetworkManagement::WiFi::{
     DOT11_AUTH_ALGO_RSNA_PSK, DOT11_AUTH_ALGO_WPA3_SAE, DOT11_SSID, WLAN_PROFILE_USER, WlanDeleteProfile, WlanSetProfile, L2_NOTIFICATION_DATA, WLAN_AVAILABLE_NETWORK, WLAN_AVAILABLE_NETWORK_CONNECTED, WLAN_AVAILABLE_NETWORK_HAS_PROFILE, WLAN_AVAILABLE_NETWORK_LIST, WLAN_CONNECTION_PARAMETERS,
     WLAN_INTERFACE_INFO, WLAN_INTERFACE_INFO_LIST, WLAN_NOTIFICATION_SOURCE_ACM, WLAN_NOTIFICATION_SOURCE_MSM, WLAN_NOTIFICATION_SOURCE_NONE, WlanCloseHandle, WlanConnect, WlanDisconnect,
     WlanEnumInterfaces, WlanFreeMemory, WlanGetAvailableNetworkList, WlanOpenHandle, WlanRegisterNotification, WlanScan, dot11_BSS_type_infrastructure, wlan_connection_mode_discovery_unsecure,
-    wlan_connection_mode_profile, wlan_interface_state_connected,
+    wlan_connection_mode_profile, wlan_interface_state_connected, WLAN_BSS_ENTRY, WLAN_BSS_LIST, WLAN_CONNECTION_ATTRIBUTES, WlanGetNetworkBssList, WlanQueryInterface,
+    wlan_intf_opcode_current_connection,
 };
 use windows::core::{GUID, PCWSTR};
 
@@ -93,6 +94,43 @@ pub enum Listing {
     Denied,
 }
 
+/// The standard of the connection in use: its Wi-Fi generation (4 to 7), and whether it runs on 6 GHz, which makes a Wi-Fi 6 link a
+/// Wi-Fi 6E one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Standard {
+    pub generation: u8,
+    pub six_ghz: bool,
+}
+
+impl Standard {
+    /// The name the Wi-Fi Alliance gives it, as Windows' own network properties say it: "Wi-Fi 6E", "Wi-Fi 7".
+    pub fn name(self) -> String {
+        format!("Wi-Fi {}", self.short())
+    }
+
+    /// The name without "Wi-Fi": "6E", "7".
+    pub fn short(self) -> String {
+        format!("{}{}", self.generation, if self.generation == 6 && self.six_ghz { "E" } else { "" })
+    }
+}
+
+/// The Wi-Fi generation of a radio type Windows reports (`DOT11_PHY_TYPE`): 802.11n is Wi-Fi 4, ac 5, ax 6, be 7. The older types
+/// (a, b, g) have no generation name and give `None`, as does 802.11ad's 60 GHz.
+pub fn generation_of_phy(phy: i32) -> Option<u8> {
+    match phy {
+        7 => Some(4),
+        8 => Some(5),
+        10 => Some(6),
+        11 => Some(7),
+        _ => None,
+    }
+}
+
+/// Whether a channel's centre frequency (kHz, as Windows gives it) is in the 6 GHz band (5925 to 7125 MHz).
+pub fn is_six_ghz(khz: u32) -> bool {
+    (5_925_000..=7_125_000).contains(&khz)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct WifiSnapshot {
     /// The machine has a Wi-Fi radio.
@@ -101,6 +139,8 @@ pub struct WifiSnapshot {
     /// The networks in range: the connected one first, then the saved ones, then by signal.
     pub networks: Vec<Network>,
     pub listing: Listing,
+    /// The standard of the connection in use; `None` while there is none, or when Windows does not tell it.
+    pub standard: Option<Standard>,
 }
 
 impl WifiSnapshot {
@@ -223,6 +263,43 @@ impl Wlan {
         Ok(out)
     }
 
+    /// The standard of the connection in use on the interface: the radio type of the association and, from the access point it is
+    /// with, the band (the channel's centre frequency). `None` when it is not connected or Windows does not tell.
+    fn standard(&self, interface: &GUID) -> Option<Standard> {
+        let (mut size, mut data): (u32, *mut c_void) = (0, std::ptr::null_mut());
+        if unsafe { WlanQueryInterface(self.0, interface, wlan_intf_opcode_current_connection, None, &mut size, &mut data, None) } != 0 || data.is_null() {
+            return None;
+        }
+        // SAFETY: for this opcode Windows hands back one WLAN_CONNECTION_ATTRIBUTES, ours until it is freed below
+        let (state, phy, bssid, ssid) = unsafe {
+            let c = &*(data as *const WLAN_CONNECTION_ATTRIBUTES);
+            let a = &c.wlanAssociationAttributes;
+            (c.isState, a.dot11PhyType.0, a.dot11Bssid, a.dot11Ssid)
+        };
+        unsafe { WlanFreeMemory(data as *const c_void) };
+        if state != wlan_interface_state_connected {
+            return None;
+        }
+        let generation = generation_of_phy(phy)?;
+        Some(Standard { generation, six_ghz: self.frequency_of(interface, &ssid, &bssid).is_some_and(is_six_ghz) })
+    }
+
+    /// The channel's centre frequency (kHz) of the access point `bssid` of the network `ssid`, as Windows last saw it.
+    fn frequency_of(&self, interface: &GUID, ssid: &DOT11_SSID, bssid: &[u8; 6]) -> Option<u32> {
+        let mut list: *mut WLAN_BSS_LIST = std::ptr::null_mut();
+        // (the security flag only filters when no SSID is given; with one, every entry of that name is listed)
+        if unsafe { WlanGetNetworkBssList(self.0, interface, Some(ssid), dot11_BSS_type_infrastructure, false, None, &mut list) } != 0 || list.is_null() {
+            return None;
+        }
+        // SAFETY: Windows wrote `dwNumberOfItems` entries after the header and the block is ours until it is freed below
+        let found = unsafe {
+            let items: &[WLAN_BSS_ENTRY] = std::slice::from_raw_parts((*list).wlanBssEntries.as_ptr(), (*list).dwNumberOfItems as usize);
+            items.iter().find(|e| e.dot11Bssid == *bssid).map(|e| e.ulChCenterFrequency)
+        };
+        unsafe { WlanFreeMemory(list as *const c_void) };
+        found
+    }
+
     fn scan(&self, interface: &GUID) {
         unsafe {
             WlanScan(self.0, interface, None, None, None);
@@ -242,6 +319,7 @@ fn read(wlan: Option<&Wlan>) -> WifiSnapshot {
     if power == Power::On
         && let Some((wlan, guid)) = interface
     {
+        snap.standard = wlan.standard(&guid);
         match wlan.networks(&guid) {
             Ok(raw) => snap.networks = merged(raw),
             Err(code) if code == ERROR_ACCESS_DENIED.0 => snap.listing = Listing::Denied,
@@ -547,6 +625,20 @@ pub fn disconnect() {
 mod tests {
     use super::*;
 
+    /// The generation of a radio type, the 6 GHz band and the names (the control centre's Wi-Fi title, 2026-11-26).
+    #[test]
+    fn a_link_is_named_by_its_generation_and_six_ghz_makes_6e() {
+        use super::{Standard, generation_of_phy, is_six_ghz};
+        assert_eq!([7, 8, 10, 11].map(generation_of_phy), [Some(4), Some(5), Some(6), Some(7)]);
+        assert_eq!([4, 5, 6, 9, 0].map(generation_of_phy), [None; 5], "a, b, g and 802.11ad have no generation name");
+        assert!(!is_six_ghz(2_437_000) && !is_six_ghz(5_745_000) && is_six_ghz(5_955_000) && is_six_ghz(6_415_000) && !is_six_ghz(7_200_000));
+        assert_eq!(Standard { generation: 6, six_ghz: true }.name(), "Wi-Fi 6E");
+        assert_eq!(Standard { generation: 6, six_ghz: false }.name(), "Wi-Fi 6");
+        assert_eq!(Standard { generation: 7, six_ghz: true }.name(), "Wi-Fi 7", "only Wi-Fi 6 has an E for 6 GHz");
+        assert_eq!(Standard { generation: 5, six_ghz: false }.name(), "Wi-Fi 5");
+        assert_eq!(Standard { generation: 6, six_ghz: true }.short(), "6E");
+    }
+
     fn net(ssid: &str, bars: u8, secured: bool, profile: Option<&str>, connected: bool) -> Network {
         Network { ssid: ssid.into(), bars, secured, profile: profile.map(str::to_string), connected, auth: if secured { Auth::Wpa2 } else { Auth::Other } }
     }
@@ -618,7 +710,7 @@ mod tests {
         assert_eq!(kinds[0].auth, Auth::Wpa3);
         assert!(merged(Vec::new()).is_empty());
         // the snapshot's connected network is the list's
-        let snap = WifiSnapshot { available: true, power: Power::On, networks: list, listing: Listing::Ok };
+        let snap = WifiSnapshot { available: true, power: Power::On, networks: list, listing: Listing::Ok, standard: None };
         assert_eq!(snap.connected().map(|n| n.ssid.as_str()), Some("Ev"));
         assert_eq!(WifiSnapshot::default().connected(), None);
     }

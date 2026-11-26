@@ -701,6 +701,29 @@ pub fn wifi_text(s: &WifiSnapshot, net: Option<&NetworkSnapshot>, w: Words) -> T
     TileText { title: "Wi-Fi".into(), subtitle, active: s.power == Power::On }
 }
 
+/// The standard of the Wi-Fi connection in use, short: "6E", "7". Only the connection's, never the adapter's best: Windows'
+/// network properties and the quick settings of phones show it so, for the link in use (the owner, 2026-11-26: "wifi ve
+/// bluetooth'un yanına sürümlerini yazabilir miyiz? wi-fi 6E gibi"). The tile writes it small beside its name; the detail's head,
+/// which has the room, in the name (`wifi_title`).
+pub fn wifi_tag(s: &WifiSnapshot) -> Option<String> {
+    s.standard.filter(|_| s.power == Power::On).map(|st| st.short())
+}
+
+/// "Wi-Fi 6E", or "Wi-Fi" when no standard is known.
+pub fn wifi_title(s: &WifiSnapshot) -> String {
+    wifi_tag(s).map_or_else(|| "Wi-Fi".into(), |t| format!("Wi-Fi {t}"))
+}
+
+/// The Bluetooth adapter's version, when Windows tells it: "5.4".
+pub fn bluetooth_tag(s: &BluetoothSnapshot) -> Option<String> {
+    s.version.map(str::to_string)
+}
+
+/// "Bluetooth 5.4", or "Bluetooth".
+pub fn bluetooth_title(s: &BluetoothSnapshot) -> String {
+    bluetooth_tag(s).map_or_else(|| "Bluetooth".into(), |t| format!("Bluetooth {t}"))
+}
+
 /// One row of the network tile's detail: a name, what it is, and for the modem the address of its own pages (a click opens them).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NetRow {
@@ -949,7 +972,7 @@ mod tests {
 
     fn bt(power: Power, connected: &[&str]) -> BluetoothSnapshot {
         let connected: Vec<String> = connected.iter().map(|s| s.to_string()).collect();
-        BluetoothSnapshot { available: true, power, devices: rf_win::sysstatus::bluetooth::devices_of(Vec::new(), &connected), connected }
+        BluetoothSnapshot { available: true, power, devices: rf_win::sysstatus::bluetooth::devices_of(Vec::new(), &connected), connected, version: None }
     }
 
     fn bat(percent: Option<u8>, charging: bool, on_ac: bool, saver: bool) -> BatterySnapshot {
@@ -958,7 +981,26 @@ mod tests {
 
     fn wifi(power: Power, nets: &[(&str, u8, bool)]) -> WifiSnapshot {
         let networks = nets.iter().map(|(ssid, bars, connected)| rf_win::sysstatus::wifi::Network { ssid: ssid.to_string(), bars: *bars, secured: true, profile: None, connected: *connected, auth: rf_win::sysstatus::wifi::Auth::Wpa2 }).collect();
-        WifiSnapshot { available: true, power, networks, listing: Listing::Ok }
+        WifiSnapshot { available: true, power, networks, listing: Listing::Ok, standard: None }
+    }
+
+    /// The tiles name the Wi-Fi standard of the connection in use and the Bluetooth adapter's version (the owner, 2026-11-26).
+    #[test]
+    fn the_titles_name_the_wifi_standard_in_use_and_the_bluetooth_version() {
+        use rf_win::sysstatus::wifi::Standard;
+        let mut w = wifi(Power::On, &[("Ev", 5, true)]);
+        assert_eq!((wifi_tag(&w), wifi_title(&w)), (None, "Wi-Fi".into()), "the standard not known: the plain name");
+        w.standard = Some(Standard { generation: 6, six_ghz: true });
+        assert_eq!((wifi_tag(&w), wifi_title(&w)), (Some("6E".into()), "Wi-Fi 6E".into()));
+        assert_eq!(wifi_text(&w, None, TR).title, "Wi-Fi", "the tile's name stays short: the tag stands beside it");
+        w.power = Power::Off;
+        assert_eq!(wifi_tag(&w), None, "off: no standard, whatever was last read");
+        let mut b = bt(Power::On, &[]);
+        assert_eq!((bluetooth_tag(&b), bluetooth_title(&b)), (None, "Bluetooth".into()));
+        b.version = Some("5.4");
+        assert_eq!((bluetooth_tag(&b), bluetooth_title(&b)), (Some("5.4".into()), "Bluetooth 5.4".into()));
+        b.power = Power::Off;
+        assert_eq!(bluetooth_tag(&b), Some("5.4".into()), "the adapter's version, whether it is on or not");
     }
 
     #[test]
