@@ -35,6 +35,8 @@ pub struct PickSession {
     /// The selection the name box was last filled from.
     last_selection: RefCell<Vec<PathBuf>>,
     _sub: RefCell<Option<Subscription>>,
+    /// Where the Open / Save button was last drawn, for Windows' "Snap To" (issue 148).
+    pub ok_at: Rc<Cell<Option<Bounds<Pixels>>>>,
 }
 
 impl PickSession {
@@ -278,6 +280,7 @@ fn open_window(pipe: File, req: Request, cx: &mut App) {
                 name: name.clone(),
                 last_selection: RefCell::new(Vec::new()),
                 _sub: RefCell::new(None),
+                ok_at: Rc::new(Cell::new(None)),
             });
             let sub = cx.subscribe_in(&name, window, |ws: &mut Workspace, _, ev: &InputEvent, window, cx| {
                 if let InputEvent::PressEnter { .. } = ev {
@@ -286,7 +289,25 @@ fn open_window(pipe: File, req: Request, cx: &mut App) {
             });
             *session._sub.borrow_mut() = Some(sub);
             let save = session.req.mode == Mode::Save;
+            let ok_at = session.ok_at.clone();
             ws.set_picker(session, window, cx);
+            // Windows' "Snap To" (Mouse settings: "Automatically move pointer to the default button in a dialog box"): its own Open
+            // and Save dialogs put the pointer on their Open / Save button, and a browser's "Save as" through ours did not (issue 148,
+            // "this works for deleting or renaming items, but not ... when the save download window appears"). Once the dialog is
+            // drawn and in place, as the app's own questions do (`prompt::show`).
+            if rf_win::sysparams::snap_to_default_button() {
+                window
+                    .spawn(cx, async move |cx| {
+                        cx.background_executor().timer(std::time::Duration::from_millis(300)).await;
+                        let _ = cx.update(|window, _| {
+                            let Some(b) = ok_at.get() else { return };
+                            let k = window.scale_factor();
+                            let c = b.center();
+                            rf_win::sysparams::put_pointer_in(crate::look::window::hwnd_of(window), (f32::from(c.x) * k).round() as i32, (f32::from(c.y) * k).round() as i32);
+                        });
+                    })
+                    .detach();
+            }
             // Save: the name is what the user came to type, so the box has the keyboard with the name selected up to its extension,
             // as in Windows' own dialog; nothing had it, and typing went nowhere (Discord, 2026-11-23). On the next frame: a focus
             // target that is not part of the frame being drawn is dropped by GPUI.
@@ -659,7 +680,14 @@ pub(crate) fn footer(ws: &mut Workspace, s: &Rc<PickSession>, p: &Palette, windo
                 .child(div().flex_1().min_w_0().child(Input::new(&s.name).appearance(false).prefix(prefix))),
         )
         .children(filter)
-        .child(button("pick-ok", ok, true).on_click(cx.listener(|ws, _, window, cx| accept(ws, window, cx))))
+        .child({
+            // (where it is drawn, for "Snap To")
+            let at = s.ok_at.clone();
+            button("pick-ok", ok, true)
+                .relative()
+                .child(canvas(move |b, _, _| at.set(Some(b)), |_, _, _, _| {}).absolute().top_0().left_0().size_full())
+                .on_click(cx.listener(|ws, _, window, cx| accept(ws, window, cx)))
+        })
         .child(button("pick-cancel", t!("İptal").into(), false).on_click(cx.listener(|ws, _, window, _| cancel(ws, window))))
         .into_any_element()
 }
