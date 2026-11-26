@@ -701,12 +701,15 @@ pub fn wifi_text(s: &WifiSnapshot, net: Option<&NetworkSnapshot>, w: Words) -> T
     TileText { title: "Wi-Fi".into(), subtitle, active: s.power == Power::On }
 }
 
-/// The standard of the Wi-Fi connection in use, short: "6E", "7". Only the connection's, never the adapter's best: Windows'
-/// network properties and the quick settings of phones show it so, for the link in use (the owner, 2026-11-26: "wifi ve
-/// bluetooth'un yanına sürümlerini yazabilir miyiz? wi-fi 6E gibi"). The tile writes it small beside its name; the detail's head,
-/// which has the room, in the name (`wifi_title`).
+/// The Wi-Fi version, short ("6E", "7"): the standard of the connection in use while there is one, else the highest the card
+/// supports. (The owner, 2026-11-26: "wifi ve bluetooth'un yanına sürümlerini yazabilir miyiz? wi-fi 6E gibi"; at first it was the
+/// connection's alone, as Windows' network properties and the quick settings of phones show it, and on a PC on Ethernet the tile then
+/// said nothing: "wifi sürümü yazmıyor". macOS's detailed Wi-Fi menu also tells the card's supported modes while not connected.)
 pub fn wifi_tag(s: &WifiSnapshot) -> Option<String> {
-    s.standard.filter(|_| s.power == Power::On).map(|st| st.short())
+    match s.standard {
+        Some(st) if s.power == Power::On => Some(st.short()),
+        _ => s.card_generation.map(|g| g.to_string()),
+    }
 }
 
 /// "Wi-Fi 6E", or "Wi-Fi" when no standard is known.
@@ -981,7 +984,7 @@ mod tests {
 
     fn wifi(power: Power, nets: &[(&str, u8, bool)]) -> WifiSnapshot {
         let networks = nets.iter().map(|(ssid, bars, connected)| rf_win::sysstatus::wifi::Network { ssid: ssid.to_string(), bars: *bars, secured: true, profile: None, connected: *connected, auth: rf_win::sysstatus::wifi::Auth::Wpa2 }).collect();
-        WifiSnapshot { available: true, power, networks, listing: Listing::Ok, standard: None }
+        WifiSnapshot { available: true, power, networks, listing: Listing::Ok, standard: None, card_generation: None }
     }
 
     /// The tiles name the Wi-Fi standard of the connection in use and the Bluetooth adapter's version (the owner, 2026-11-26).
@@ -995,6 +998,10 @@ mod tests {
         assert_eq!(wifi_text(&w, None, TR).title, "Wi-Fi", "the tile's name stays short: the tag stands beside it");
         w.power = Power::Off;
         assert_eq!(wifi_tag(&w), None, "off: no standard, whatever was last read");
+        w.card_generation = Some(7);
+        assert_eq!((wifi_tag(&w), wifi_title(&w)), (Some("7".into()), "Wi-Fi 7".into()), "off or not connected: the card's best");
+        w.power = Power::On;
+        assert_eq!(wifi_tag(&w), Some("6E".into()), "connected: the connection's, not the card's");
         let mut b = bt(Power::On, &[]);
         assert_eq!((bluetooth_tag(&b), bluetooth_title(&b)), (None, "Bluetooth".into()));
         b.version = Some("5.4");

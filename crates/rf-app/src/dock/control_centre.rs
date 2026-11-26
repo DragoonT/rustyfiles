@@ -1143,15 +1143,6 @@ impl CcView {
     /// A round button with a glyph; `lit` fills it with the accent (the thing is on). `focus` makes it a keyboard stop (it shows a ring
     /// while it has the focus by key), `tip` names it for the pointer.
     fn round_button(&self, id: impl Into<ElementId>, icon: L, size: f32, lit: bool, look: &Look, (focus, tip): (Option<&FocusHandle>, Option<&'static str>)) -> Stateful<Div> {
-        self.round_button_tagged(id, icon, size, lit, None, look, (focus, tip))
-    }
-
-    /// `round_button` with `tag` written small in the circle's own top right corner, in the glyph's colour and with no plate of its
-    /// own. The glyph then stands a little smaller and lower left, so that the corner it leaves is the tag's alone: at the usual size
-    /// the Wi-Fi glyph's top arc reached into it. (40 px button: the glyph 16 px, its box 8..24 across and 17..33 down; the tag's
-    /// line 5..15 down, ending 6 px short of the right edge.)
-    #[allow(clippy::too_many_arguments)]
-    fn round_button_tagged(&self, id: impl Into<ElementId>, icon: L, size: f32, lit: bool, tag: Option<String>, look: &Look, (focus, tip): (Option<&FocusHandle>, Option<&'static str>)) -> Stateful<Div> {
         let (hover, pressed) = (look.pal.hover_fill().hsla(), look.pal.pressed_fill().hsla());
         let glyph = if lit { look.on_accent } else { look.pal.text().hsla() };
         let ring = if lit { look.on_accent } else { look.accent };
@@ -1170,13 +1161,7 @@ impl CcView {
             .when_some(tip, |d, tip| d.tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(tip).build(w, cx)))
             .when(lit, |d| d.bg(look.accent))
             .when(!lit, |d| d.bg(look.pal.field_fill().hsla()).hover(move |s| s.bg(hover)).active(move |s| s.bg(pressed)))
-            .when(tag.is_none(), |d| d.child(Icon::new(icon).size(px(size * 0.45)).text_color(glyph)))
-            .when_some(tag, |d, t| {
-                d.relative()
-                    .child(div().mt(px(size * 0.125)).ml(px(-size * 0.1)).child(Icon::new(icon).size(px(size * 0.4)).text_color(glyph)))
-                    // (a child of the button: a press on the tag is the button's press)
-                    .child(div().absolute().top(px(size * 0.125)).right(px(size * 0.15)).text_size(px(8.5)).line_height(px(10.)).font_weight(FontWeight::BOLD).text_color(glyph).child(t))
-            })
+            .child(Icon::new(icon).size(px(size * 0.45)).text_color(glyph))
     }
 
     fn card(&self, look: &Look) -> Div {
@@ -1186,9 +1171,11 @@ impl CcView {
     /// One tile. Its round button is the radio's switch when the tile has a radio (`radio`), else only the tile's picture; the tile
     /// itself opens its detail or a page of Windows (`act`). Two keyboard stops when there is a switch: the tile, then the button.
     ///
-    /// `tag` is written small in the round button's own top right corner, inside the circle, in the glyph's colour and with no plate
-    /// of its own: the Wi-Fi standard in use ("6E"), the Bluetooth version ("5.4"). (The owner, 2026-11-26: "sürümler ikonun sağ
-    /// üstünde yazsın ... kendi negatif alanının içinde yazsın". Beside the name it was cut short: the tile is half the panel wide.)
+    /// `tag` is the version that belongs to the name: "Wi-Fi 7", "Bluetooth 5.4" are what these are called. It is set as part of the
+    /// name, in the same size and a lighter weight and colour, so that the name reads first and the number as its qualifier. It never
+    /// gives way: when the two do not fit, the name is the one cut short. (On 2026-11-26 it stood small in the round button's corner
+    /// first, at the owner's word; at 8.5 px it was hard to read on the accent, and the glyph had to shrink off centre to make room.
+    /// The owner then asked for a better place: "bence sürüm yerlerini daha iyi yapabiliriz".)
     #[allow(clippy::too_many_arguments)]
     fn tile(&self, id: &'static str, icon: L, text: cc_model::TileText, tag: Option<String>, look: &Look, act: TileAct, radio: Option<RadioKind>, cx: &mut Context<Self>) -> AnyElement {
         let pressed = look.pal.pressed_fill().hsla();
@@ -1200,13 +1187,13 @@ impl CcView {
             Some(kind) => {
                 let stop = self.stop(id, 1, cx);
                 let tip = if text.active { t!("Kapat") } else { t!("Aç") };
-                self.round_button_tagged((id, 1usize), icon, 40.0, text.active, tag, look, (Some(&stop), Some(tip))).on_click(cx.listener(move |this, _, _, cx| {
+                self.round_button((id, 1usize), icon, 40.0, text.active, look, (Some(&stop), Some(tip))).on_click(cx.listener(move |this, _, _, cx| {
                     // (the press is the button's: the tile under it does not open)
                     cx.stop_propagation();
                     this.press_radio(kind, cx);
                 }))
             }
-            None => self.round_button_tagged((id, 1usize), icon, 40.0, text.active, tag, look, (None, None)),
+            None => self.round_button((id, 1usize), icon, 40.0, text.active, look, (None, None)),
         };
         h_flex()
             .id(id)
@@ -1229,7 +1216,15 @@ impl CcView {
                 v_flex()
                     .flex_1()
                     .min_w_0()
-                    .child(div().truncate().text_sm().font_weight(FontWeight::SEMIBOLD).child(text.title))
+                    .child(
+                        h_flex()
+                            .items_baseline()
+                            .gap(px(5.))
+                            .min_w_0()
+                            .text_sm()
+                            .child(div().min_w_0().truncate().font_weight(FontWeight::SEMIBOLD).child(text.title))
+                            .children(tag.map(|t| div().flex_shrink_0().font_weight(FontWeight::NORMAL).text_color(secondary).child(t))),
+                    )
                     .child(div().truncate().text_xs().text_color(secondary).child(text.subtitle)),
             )
             // (a tile that opens out says so, and which way it is now)

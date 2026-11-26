@@ -36,7 +36,7 @@ use windows::Win32::NetworkManagement::WiFi::{
     WLAN_INTERFACE_INFO, WLAN_INTERFACE_INFO_LIST, WLAN_NOTIFICATION_SOURCE_ACM, WLAN_NOTIFICATION_SOURCE_MSM, WLAN_NOTIFICATION_SOURCE_NONE, WlanCloseHandle, WlanConnect, WlanDisconnect,
     WlanEnumInterfaces, WlanFreeMemory, WlanGetAvailableNetworkList, WlanOpenHandle, WlanRegisterNotification, WlanScan, dot11_BSS_type_infrastructure, wlan_connection_mode_discovery_unsecure,
     wlan_connection_mode_profile, wlan_interface_state_connected, WLAN_BSS_ENTRY, WLAN_BSS_LIST, WLAN_CONNECTION_ATTRIBUTES, WlanGetNetworkBssList, WlanQueryInterface,
-    wlan_intf_opcode_current_connection,
+    wlan_intf_opcode_current_connection, WLAN_INTERFACE_CAPABILITY, WlanGetInterfaceCapability,
 };
 use windows::core::{GUID, PCWSTR};
 
@@ -141,6 +141,9 @@ pub struct WifiSnapshot {
     pub listing: Listing,
     /// The standard of the connection in use; `None` while there is none, or when Windows does not tell it.
     pub standard: Option<Standard>,
+    /// The highest Wi-Fi generation the card itself supports, whether it is connected or on at all. (Which bands it supports is not
+    /// in what Windows tells here, so a card that can do 6 GHz is "6", not "6E", until it is connected on 6 GHz.)
+    pub card_generation: Option<u8>,
 }
 
 impl WifiSnapshot {
@@ -284,6 +287,21 @@ impl Wlan {
         Some(Standard { generation, six_ghz: self.frequency_of(interface, &ssid, &bssid).is_some_and(is_six_ghz) })
     }
 
+    /// The highest Wi-Fi generation among the radio types the card supports.
+    fn card_generation(&self, interface: &GUID) -> Option<u8> {
+        let mut cap: *mut WLAN_INTERFACE_CAPABILITY = std::ptr::null_mut();
+        if unsafe { WlanGetInterfaceCapability(self.0, interface, None, &mut cap) } != 0 || cap.is_null() {
+            return None;
+        }
+        // SAFETY: one WLAN_INTERFACE_CAPABILITY, ours until it is freed below; at most its 64 entries are read
+        let best = unsafe {
+            let c = &*cap;
+            c.dot11PhyTypes[..(c.dwNumberOfSupportedPhys as usize).min(c.dot11PhyTypes.len())].iter().filter_map(|t| generation_of_phy(t.0)).max()
+        };
+        unsafe { WlanFreeMemory(cap as *const c_void) };
+        best
+    }
+
     /// The channel's centre frequency (kHz) of the access point `bssid` of the network `ssid`, as Windows last saw it.
     fn frequency_of(&self, interface: &GUID, ssid: &DOT11_SSID, bssid: &[u8; 6]) -> Option<u32> {
         let mut list: *mut WLAN_BSS_LIST = std::ptr::null_mut();
@@ -316,6 +334,7 @@ fn read(wlan: Option<&Wlan>) -> WifiSnapshot {
     }
     let power = power.unwrap_or(Power::On);
     let mut snap = WifiSnapshot { available: true, power, ..Default::default() };
+    snap.card_generation = interface.and_then(|(wlan, guid)| wlan.card_generation(&guid));
     if power == Power::On
         && let Some((wlan, guid)) = interface
     {
@@ -710,7 +729,7 @@ mod tests {
         assert_eq!(kinds[0].auth, Auth::Wpa3);
         assert!(merged(Vec::new()).is_empty());
         // the snapshot's connected network is the list's
-        let snap = WifiSnapshot { available: true, power: Power::On, networks: list, listing: Listing::Ok, standard: None };
+        let snap = WifiSnapshot { available: true, power: Power::On, networks: list, listing: Listing::Ok, standard: None, card_generation: None };
         assert_eq!(snap.connected().map(|n| n.ssid.as_str()), Some("Ev"));
         assert_eq!(WifiSnapshot::default().connected(), None);
     }
