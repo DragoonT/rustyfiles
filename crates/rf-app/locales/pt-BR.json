@@ -2209,5 +2209,7 @@
  "0884e8a7": "Iniciar uma caixa de seleção a partir do espaço vazio de uma linha",
  "1f5380d9": "Nas exibições Detalhes e Colunas. Desativado: um item é arrastado de qualquer ponto da sua linha.",
  "8f85e23e": "Montar",
- "c808916f": "Muito pequeno"
+ "c808916f": "Muito pequeno",
+ "7625ff9e": "Corrigir caracteres inválidos nos nomes",
+ "906c6ce2": "Caracteres que o Windows não permite são corrigidos ao pressionar Enter: dois-pontos viram \" - \"; / \\ | viram hífen, \" vira aspa simples; * ? < > são removidos."
 }

@@ -2209,5 +2209,7 @@
  "0884e8a7": "Magsimula ng selection box mula sa bakanteng bahagi ng row",
  "1f5380d9": "Sa mga view na Mga detalye at Mga hanay. Naka-off: nada-drag ang item mula saanman sa row nito.",
  "8f85e23e": "I-mount",
- "c808916f": "Napakaliit"
+ "c808916f": "Napakaliit",
+ "7625ff9e": "Itama ang mga di-wastong character sa mga pangalan",
+ "906c6ce2": "Itinatama sa Enter ang mga character na hindi pinapayagan ng Windows: nagiging \" - \" ang tutuldok; nagiging gitling ang / \\ |, nagiging isahang panipi ang \"; inaalis ang * ? < >."
 }

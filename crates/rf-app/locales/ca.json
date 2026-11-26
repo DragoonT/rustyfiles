@@ -2209,5 +2209,7 @@
  "0884e8a7": "Inicia un quadre de selecció des de l'espai buit d'una fila",
  "1f5380d9": "A les vistes Detalls i Columnes. Desactivat: un element s'arrossega des de qualsevol punt de la seva fila.",
  "8f85e23e": "Munta",
- "c808916f": "Molt petita"
+ "c808916f": "Molt petita",
+ "7625ff9e": "Corregeix els caràcters no vàlids dels noms",
+ "906c6ce2": "Els caràcters que Windows no admet es corregeixen en prémer Retorn: els dos punts passen a ser \" - \"; / \\ | passen a ser un guionet, \" una cometa simple; * ? < > s'eliminen."
 }

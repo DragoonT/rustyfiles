@@ -2274,6 +2274,13 @@ fn files(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         ),
     ));
     v.push(card(p, L::TriangleAlert, t!("Uzantı değişince uyar"), None, sw("ext-warn", p, s.warn_extension_change, |s, v| s.warn_extension_change = v)));
+    v.push(card(
+        p,
+        L::Wand,
+        t!("Adlardaki geçersiz karakterleri düzelt"),
+        Some(t!("Windows'un kabul etmediği karakterler Enter'da düzeltilir: iki nokta \" - \" olur; / \\ | tire, \" tek tırnak olur; * ? < > çıkarılır.")),
+        sw("fix-names", p, s.fix_name_characters, |s, v| s.fix_name_characters = v),
+    ));
     v.push(card(p, L::MousePointer, t!("Üzerine gelince seç"), None, sw("hover-sel", p, s.select_on_hover, |s, v| s.select_on_hover = v)));
     v.push(card(
         p,

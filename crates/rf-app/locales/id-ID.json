@@ -2209,5 +2209,7 @@
  "0884e8a7": "Mulai kotak pilihan dari ruang kosong baris",
  "1f5380d9": "Pada tampilan Rincian dan Kolom. Nonaktif: item diseret dari mana saja di barisnya.",
  "8f85e23e": "Kaitkan",
- "c808916f": "Sangat kecil"
+ "c808916f": "Sangat kecil",
+ "7625ff9e": "Perbaiki karakter tidak valid dalam nama",
+ "906c6ce2": "Karakter yang tidak diizinkan Windows diperbaiki saat Enter: titik dua menjadi \" - \"; / \\ | menjadi tanda hubung, \" menjadi tanda kutip tunggal; * ? < > dihapus."
 }

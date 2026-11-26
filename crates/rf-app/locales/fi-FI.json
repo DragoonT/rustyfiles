@@ -2209,5 +2209,7 @@
  "0884e8a7": "Aloita valintakehys rivin tyhjästä kohdasta",
  "1f5380d9": "Tiedot- ja Sarakkeet-näkymissä. Pois päältä: kohdetta vedetään mistä tahansa sen riviltä.",
  "8f85e23e": "Liitä levyksi",
- "c808916f": "Erittäin pieni"
+ "c808916f": "Erittäin pieni",
+ "7625ff9e": "Korjaa nimien virheelliset merkit",
+ "906c6ce2": "Merkit, joita Windows ei salli, korjataan Enterillä: kaksoispisteestä tulee \" - \"; / \\ | muuttuvat yhdysmerkiksi, \" yksinkertaiseksi lainausmerkiksi; * ? < > poistetaan."
 }

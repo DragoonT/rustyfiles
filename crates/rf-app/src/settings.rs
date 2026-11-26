@@ -661,6 +661,9 @@ pub struct Settings {
     pub open_folders_in_new_tab: bool,
     pub confirm_delete: DeletePref,
     pub warn_extension_change: bool,
+    /// A name typed with characters Windows does not allow is tidied on Enter (`rf_core::rename::tidy_name`) instead of refused with
+    /// what was typed lost (issue 370). On by default.
+    pub fix_name_characters: bool,
     pub select_on_hover: bool,
     /// Each tab as wide as its name (within the usual limits) instead of all tabs equally wide. Issue 119.
     pub tabs_fit_names: bool,
@@ -1035,6 +1038,7 @@ impl Default for Settings {
             open_folders_in_new_tab: false,
             confirm_delete: DeletePref::PermanentOnly,
             warn_extension_change: true,
+            fix_name_characters: true,
             select_on_hover: false,
             tabs_fit_names: false,
             list_columns_first: false,

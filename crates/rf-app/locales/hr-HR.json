@@ -2209,5 +2209,7 @@
  "0884e8a7": "Započni okvir odabira s praznog mjesta retka",
  "1f5380d9": "U prikazima Detalji i Stupci. Isključeno: stavka se povlači s bilo kojeg mjesta u svom retku.",
  "8f85e23e": "Montiraj",
- "c808916f": "Vrlo male"
+ "c808916f": "Vrlo male",
+ "7625ff9e": "Ispravi nevažeće znakove u nazivima",
+ "906c6ce2": "Znakovi koje Windows ne dopušta ispravljaju se pritiskom na Enter: dvotočka postaje \" - \"; / \\ | postaju crtica, \" jednostruki navodnik; * ? < > se uklanjaju."
 }

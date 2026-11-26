@@ -2209,5 +2209,7 @@
  "0884e8a7": "Inizia un riquadro di selezione dallo spazio vuoto di una riga",
  "1f5380d9": "Nelle viste Dettagli e Colonne. Disattivato: un elemento si trascina da qualsiasi punto della sua riga.",
  "8f85e23e": "Monta",
- "c808916f": "Molto piccole"
+ "c808916f": "Molto piccole",
+ "7625ff9e": "Correggi i caratteri non validi nei nomi",
+ "906c6ce2": "I caratteri che Windows non consente vengono corretti con Invio: i due punti diventano \" - \"; / \\ | diventano un trattino, \" un apice singolo; * ? < > vengono rimossi."
 }

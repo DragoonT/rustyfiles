@@ -2209,5 +2209,7 @@
  "0884e8a7": "Začať výberový rámček z prázdneho miesta riadka",
  "1f5380d9": "V zobrazeniach Detaily a Stĺpce. Vyp.: položku možno ťahať z ľubovoľného miesta jej riadka.",
  "8f85e23e": "Pripojiť",
- "c808916f": "Veľmi malé"
+ "c808916f": "Veľmi malé",
+ "7625ff9e": "Opravovať neplatné znaky v názvoch",
+ "906c6ce2": "Znaky, ktoré Windows nepovoľuje, sa po stlačení Enter opravia: dvojbodka sa zmení na \" - \"; / \\ | na pomlčku, \" na jednoduchú úvodzovku; * ? < > sa odstránia."
 }

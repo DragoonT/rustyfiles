@@ -13334,5 +13334,17 @@
   "key": "Çok küçük",
   "tr": "Çok küçük",
   "en": "Extra small"
+ },
+ {
+  "id": "7625ff9e",
+  "key": "Adlardaki geçersiz karakterleri düzelt",
+  "tr": "Adlardaki geçersiz karakterleri düzelt",
+  "en": "Correct characters names cannot have"
+ },
+ {
+  "id": "906c6ce2",
+  "key": "Windows'un kabul etmediği karakterler Enter'da düzeltilir: iki nokta \" - \" olur; / \\ | tire, \" tek tırnak olur; * ? < > çıkarılır.",
+  "tr": "Windows'un kabul etmediği karakterler Enter'da düzeltilir: iki nokta \" - \" olur; / \\ | tire, \" tek tırnak olur; * ? < > çıkarılır.",
+  "en": "Characters Windows does not allow are corrected on Enter: a colon becomes \" - \"; / \\ | become a dash, \" a single quote; * ? < > are taken out."
  }
 ]

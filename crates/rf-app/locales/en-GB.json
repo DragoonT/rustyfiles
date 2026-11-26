@@ -2209,5 +2209,7 @@
  "0884e8a7": "Start a selection box from a row's empty space",
  "1f5380d9": "In the Details and Columns views. Off: an item is dragged from anywhere on its row.",
  "8f85e23e": "Mount",
- "c808916f": "Extra small"
+ "c808916f": "Extra small",
+ "7625ff9e": "Correct characters names cannot have",
+ "906c6ce2": "Characters Windows does not allow are corrected on Enter: a colon becomes \" - \"; / \\ | become a dash, \" a single quote; * ? < > are taken out."
 }

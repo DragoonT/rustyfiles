@@ -278,8 +278,52 @@ pub fn plan(pairs: &[(String, String)], tmp: impl Fn(usize) -> String) -> Vec<St
     out
 }
 
+/// A name typed or pasted with characters Windows does not allow, made into one it does, the way a person would have written it:
+/// a colon becomes " - " ("Episode 1: The Beginning" is "Episode 1 - The Beginning"), a slash, a backslash and a bar become "-" (so
+/// "1/2" stays readable as "1-2" instead of turning into "12"), a double quote becomes a single one, and `* ? < >` and control
+/// characters go. Runs of spaces are made one, and the spaces and dots Windows takes off a name's end go too. A name that is fine is
+/// given back as it is.
+///
+/// Issue 370: a single such character made the rename fail, and what had been typed was lost. Explorer only says the name is wrong.
+pub fn tidy_name(name: &str) -> String {
+    let mut out = String::with_capacity(name.len() + 8);
+    for c in name.chars() {
+        match c {
+            ':' => out.push_str(if out.ends_with(' ') { "- " } else { " - " }),
+            '/' | '\\' | '|' => out.push('-'),
+            '"' => out.push('\''),
+            '*' | '?' | '<' | '>' => {}
+            c if (c as u32) < 0x20 => {}
+            c => out.push(c),
+        }
+    }
+    let mut single = String::with_capacity(out.len());
+    for c in out.chars() {
+        if !(c == ' ' && single.ends_with(' ')) {
+            single.push(c);
+        }
+    }
+    single.trim_start().trim_end_matches([' ', '.']).to_string()
+}
+
 #[cfg(test)]
 mod tests {
+    /// Issue 370's own examples, and the rest of the characters.
+    #[test]
+    fn a_name_with_characters_windows_refuses_is_tidied_as_written() {
+        use super::tidy_name;
+        assert_eq!(tidy_name("Report: draft 2026?.txt"), "Report - draft 2026.txt");
+        assert_eq!(tidy_name("Notes: Q4 \"final\""), "Notes - Q4 'final'");
+        assert_eq!(tidy_name("Episode 1: The Beginning"), "Episode 1 - The Beginning");
+        assert_eq!(tidy_name("Episode 1 : The Beginning"), "Episode 1 - The Beginning", "no double spaces around the dash");
+        assert_eq!(tidy_name("AC/DC 1\\2 | live"), "AC-DC 1-2 - live");
+        assert_eq!(tidy_name("what? <why>*"), "what why");
+        assert_eq!(tidy_name("trailing dots..  "), "trailing dots");
+        assert_eq!(tidy_name("a\tb"), "ab", "control characters go");
+        assert_eq!(tidy_name("fine name.txt"), "fine name.txt", "a good name is left as it is");
+        assert_eq!(tidy_name("???"), "", "nothing left: the caller says so");
+    }
+
     use super::*;
 
     fn items(n: &[&str]) -> Vec<RenameItem> {

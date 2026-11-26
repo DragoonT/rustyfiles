@@ -834,6 +834,8 @@ impl FolderView {
     pub fn commit_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some((ei, input)) = self.renaming.take() else { return };
         let typed = input.read(cx).value().trim().to_string();
+        // characters Windows does not allow: tidied rather than refused, so that what was typed is not lost (issue 370)
+        let typed = if cx.global::<crate::settings::Settings>().fix_name_characters { rf_core::rename::tidy_name(&typed) } else { typed };
         let new_name = match self.hidden_extension(ei, cx) {
             Some(ext) if !typed.is_empty() => format!("{typed}{ext}"),
             _ => typed,

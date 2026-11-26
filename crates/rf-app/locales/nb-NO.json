@@ -2209,5 +2209,7 @@
  "0884e8a7": "Start en merkeramme fra det tomme området i en rad",
  "1f5380d9": "I visningene Detaljer og Kolonner. Av: et element dras fra hvor som helst på raden sin.",
  "8f85e23e": "Monter",
- "c808916f": "Veldig liten"
+ "c808916f": "Veldig liten",
+ "7625ff9e": "Rett ugyldige tegn i navn",
+ "906c6ce2": "Tegn som Windows ikke tillater, rettes ved Enter: et kolon blir \" - \"; / \\ | blir en bindestrek, \" et enkelt anførselstegn; * ? < > fjernes."
 }

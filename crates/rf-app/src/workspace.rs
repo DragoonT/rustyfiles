@@ -3050,6 +3050,8 @@ impl Workspace {
             vec![
                 crate::prompt::Button::new(t!("Yeniden adlandır"), crate::prompt::Kind::Primary, move |text, _, cx| {
                     let name = text.unwrap_or_default().trim().to_string();
+                    // (as in the list's own rename: tidied when the setting is on, issue 370)
+                    let name = if cx.global::<crate::settings::Settings>().fix_name_characters { rf_core::rename::tidy_name(&name) } else { name };
                     const INVALID: &[char] = &['\\', '/', ':', '*', '?', '"', '<', '>', '|'];
                     if name.is_empty() || name.contains(INVALID) || name.ends_with('.') {
                         return Err(t!("Dosya adı şu karakterleri içeremez: \\ / : * ? \" < > | ve nokta ile bitemez.").to_string());

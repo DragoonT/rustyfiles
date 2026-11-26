@@ -2209,5 +2209,7 @@
  "0884e8a7": "Bắt đầu khung chọn từ khoảng trống của một hàng",
  "1f5380d9": "Trong chế độ xem Chi tiết và Cột. Tắt: mục được kéo từ bất kỳ đâu trên hàng của nó.",
  "8f85e23e": "Gắn",
- "c808916f": "Rất nhỏ"
+ "c808916f": "Rất nhỏ",
+ "7625ff9e": "Sửa ký tự không hợp lệ trong tên",
+ "906c6ce2": "Các ký tự Windows không cho phép được sửa khi nhấn Enter: dấu hai chấm thành \" - \"; / \\ | thành gạch nối, \" thành dấu nháy đơn; * ? < > bị bỏ đi."
 }

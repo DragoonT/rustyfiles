@@ -2209,5 +2209,7 @@
  "0884e8a7": "Commencer un cadre de sélection depuis l'espace vide d'une ligne",
  "1f5380d9": "Dans les vues Détails et Colonnes. Désactivé : un élément se fait glisser depuis n'importe quel endroit de sa ligne.",
  "8f85e23e": "Monter",
- "c808916f": "Très petite"
+ "c808916f": "Très petite",
+ "7625ff9e": "Corriger les caractères non valides des noms",
+ "906c6ce2": "Les caractères que Windows n'autorise pas sont corrigés à la validation : les deux-points deviennent \" - \" ; / \\ | deviennent un tiret, \" une apostrophe ; * ? < > sont retirés."
 }

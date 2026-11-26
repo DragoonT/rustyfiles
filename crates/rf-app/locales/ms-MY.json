@@ -2209,5 +2209,7 @@
  "0884e8a7": "Mulakan kotak pemilihan dari ruang kosong baris",
  "1f5380d9": "Dalam paparan Butiran dan Kolum. Mati: item diseret dari mana-mana tempat pada barisnya.",
  "8f85e23e": "Lekap",
- "c808916f": "Sangat kecil"
+ "c808916f": "Sangat kecil",
+ "7625ff9e": "Betulkan aksara tidak sah dalam nama",
+ "906c6ce2": "Aksara yang tidak dibenarkan oleh Windows dibetulkan apabila Enter ditekan: titik bertindih menjadi \" - \"; / \\ | menjadi sengkang, \" menjadi tanda petik tunggal; * ? < > dibuang."
 }

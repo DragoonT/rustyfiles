@@ -2209,5 +2209,7 @@
  "0884e8a7": "Auswahlrahmen im leeren Bereich einer Zeile beginnen",
  "1f5380d9": "In den Ansichten Details und Spalten. Aus: Ein Element wird von jeder Stelle seiner Zeile aus gezogen.",
  "8f85e23e": "Einbinden",
- "c808916f": "Sehr klein"
+ "c808916f": "Sehr klein",
+ "7625ff9e": "Ungültige Zeichen in Namen korrigieren",
+ "906c6ce2": "Zeichen, die Windows nicht erlaubt, werden bei Eingabe korrigiert: Ein Doppelpunkt wird zu \" - \"; / \\ | werden zu einem Bindestrich, \" zu einem einfachen Anführungszeichen; * ? < > werden entfernt."
 }

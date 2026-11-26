@@ -2209,5 +2209,7 @@
  "0884e8a7": "Starta en markeringsram från det tomma utrymmet på en rad",
  "1f5380d9": "I vyerna Information och Kolumner. Av: ett objekt dras från var som helst på sin rad.",
  "8f85e23e": "Montera",
- "c808916f": "Mycket små"
+ "c808916f": "Mycket små",
+ "7625ff9e": "Rätta ogiltiga tecken i namn",
+ "906c6ce2": "Tecken som Windows inte tillåter rättas vid Retur: ett kolon blir \" - \"; / \\ | blir ett bindestreck, \" ett enkelt citattecken; * ? < > tas bort."
 }

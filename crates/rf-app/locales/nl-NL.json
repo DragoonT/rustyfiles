@@ -2209,5 +2209,7 @@
  "0884e8a7": "Een selectiekader starten vanuit de lege ruimte van een rij",
  "1f5380d9": "In de weergaven Details en Kolommen. Uit: een item wordt vanaf elke plek op zijn rij gesleept.",
  "8f85e23e": "Koppelen",
- "c808916f": "Zeer klein"
+ "c808916f": "Zeer klein",
+ "7625ff9e": "Ongeldige tekens in namen corrigeren",
+ "906c6ce2": "Tekens die Windows niet toestaat, worden bij Enter gecorrigeerd: een dubbele punt wordt \" - \"; / \\ | worden een streepje, \" een enkel aanhalingsteken; * ? < > worden verwijderd."
 }

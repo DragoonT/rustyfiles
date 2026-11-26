@@ -2209,5 +2209,7 @@
  "0884e8a7": "Kijelölőkeret indítása a sor üres területéről",
  "1f5380d9": "A Részletek és az Oszlopok nézetben. Ki: az elem a sora bármely pontjáról húzható.",
  "8f85e23e": "Csatolás",
- "c808916f": "Nagyon kicsi"
+ "c808916f": "Nagyon kicsi",
+ "7625ff9e": "Érvénytelen karakterek javítása a nevekben",
+ "906c6ce2": "A Windows által nem engedélyezett karakterek Enterre javulnak: a kettőspontból \" - \" lesz; a / \\ | kötőjellé, a \" aposztróffá válik; a * ? < > törlődik."
 }

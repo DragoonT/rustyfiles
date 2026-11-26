@@ -863,6 +863,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Klasörleri yeni sekmede aç", "Open folders in a new tab"),
     ("Silmeden önce onay iste", "Confirm before deleting"),
     ("Yalnızca kalıcı silmede", "Only for permanent deletion"),
+    ("Adlardaki geçersiz karakterleri düzelt", "Correct characters names cannot have"),
+    ("Windows'un kabul etmediği karakterler Enter'da düzeltilir: iki nokta \" - \" olur; / \\ | tire, \" tek tırnak olur; * ? < > çıkarılır.", "Characters Windows does not allow are corrected on Enter: a colon becomes \" - \"; / \\ | become a dash, \" a single quote; * ? < > are taken out."),
     ("Uzantı değişince uyar", "Warn when the extension changes"),
     ("Üzerine gelince seç", "Select on hover"),
     ("Dock'u otomatik gizle", "Hide the dock automatically"),

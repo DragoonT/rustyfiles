@@ -2209,5 +2209,7 @@
  "0884e8a7": "Fillo një kuti përzgjedhjeje nga hapësira bosh e një rreshti",
  "1f5380d9": "Në pamjet Detajet dhe Kolonat. Joaktiv: një element tërhiqet nga çdo vend i rreshtit të tij.",
  "8f85e23e": "Monto",
- "c808916f": "Shumë e vogël"
+ "c808916f": "Shumë e vogël",
+ "7625ff9e": "Korrigjo karakteret e pavlefshme në emra",
+ "906c6ce2": "Karakteret që Windows nuk i lejon korrigjohen me Enter: dy pikat bëhen \" - \"; / \\ | bëhen vizë, \" thonjëz e vetme; * ? < > hiqen."
 }

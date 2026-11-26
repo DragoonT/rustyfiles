@@ -2209,5 +2209,7 @@
  "0884e8a7": "Začít výběrový rámeček z prázdného místa řádku",
  "1f5380d9": "V zobrazeních Podrobnosti a Sloupce. Vypnuto: položku lze táhnout odkudkoli na jejím řádku.",
  "8f85e23e": "Připojit",
- "c808916f": "Velmi malé"
+ "c808916f": "Velmi malé",
+ "7625ff9e": "Opravovat neplatné znaky v názvech",
+ "906c6ce2": "Znaky, které Windows nepovoluje, se po stisknutí Enter opraví: dvojtečka se změní na \" - \"; / \\ | na pomlčku, \" na jednoduchou uvozovku; * ? < > se odstraní."
 }

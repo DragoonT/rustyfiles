@@ -2209,5 +2209,7 @@
  "0884e8a7": "Începe un cadru de selecție din spațiul gol al unui rând",
  "1f5380d9": "În vizualizările Detalii și Coloane. Dezactivat: un element este tras din orice punct al rândului său.",
  "8f85e23e": "Montare",
- "c808916f": "Foarte mici"
+ "c808916f": "Foarte mici",
+ "7625ff9e": "Corectează caracterele nevalide din nume",
+ "906c6ce2": "Caracterele pe care Windows nu le permite sunt corectate la Enter: două puncte devin \" - \"; / \\ | devin cratimă, \" un apostrof; * ? < > sunt eliminate."
 }

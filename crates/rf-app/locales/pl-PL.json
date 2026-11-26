@@ -2209,5 +2209,7 @@
  "0884e8a7": "Rozpoczynaj ramkę zaznaczenia z pustego miejsca wiersza",
  "1f5380d9": "W widokach Szczegóły i Kolumny. Wyłączone: element można przeciągać z dowolnego miejsca jego wiersza.",
  "8f85e23e": "Zamontuj",
- "c808916f": "Bardzo małe"
+ "c808916f": "Bardzo małe",
+ "7625ff9e": "Poprawiaj niedozwolone znaki w nazwach",
+ "906c6ce2": "Znaki, na które Windows nie pozwala, są poprawiane po naciśnięciu Enter: dwukropek zmienia się w \" - \"; / \\ | w łącznik, \" w pojedynczy cudzysłów; * ? < > są usuwane."
 }
