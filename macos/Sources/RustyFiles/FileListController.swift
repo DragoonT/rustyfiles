@@ -184,7 +184,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         table.action = #selector(singleClicked(_:))
         table.setDraggingSourceOperationMask([.copy, .move], forLocal: false)
         table.setDraggingSourceOperationMask([.copy, .move], forLocal: true)
-        table.registerForDraggedTypes([.fileURL])
+        table.registerForDraggedTypes([.fileURL] + ArchiveDrag.draggedTypes)
 
         scroll.documentView = table
         // under the rows (their own drawing is clear where the lens is)
@@ -212,7 +212,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         tiles.list = self
         tiles.setDraggingSourceOperationMask([.copy, .move], forLocal: false)
         tiles.setDraggingSourceOperationMask([.copy, .move], forLocal: true)
-        tiles.registerForDraggedTypes([.fileURL])
+        tiles.registerForDraggedTypes([.fileURL] + ArchiveDrag.draggedTypes)
         tileScroll.documentView = tiles
         tileScroll.drawsBackground = false
         tileScroll.hasVerticalScroller = true
@@ -2101,8 +2101,31 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     }
 
     func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
-        guard archive == nil else { return nil }
+        dragWriter(row: row)
+    }
+
+    func tableView(_ tableView: NSTableView, draggingSession session: NSDraggingSession, willBeginAt screenPoint: NSPoint, forRowIndexes rowIndexes: IndexSet) {
+        dragBegan(rows: Array(rowIndexes))
+    }
+
+    func tableView(_ tableView: NSTableView, draggingSession session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        ArchiveDrag.current = nil
+    }
+
+    /// A row as it is dragged: its file, or, inside an archive, a promise of the member.
+    fileprivate func dragWriter(row: Int) -> NSPasteboardWriting? {
+        if let archive {
+            guard let item = folder?.item(row: UInt32(row)) else { return nil }
+            return ArchiveDrag.provider(archive.archive, inner: archive.place.child(item.name), isDir: item.isDir)
+        }
         return folder?.childPath(row: UInt32(row)).map { URL(fileURLWithPath: $0) as NSURL }
+    }
+
+    /// Inside an archive, the members dragged, for a drop elsewhere in the app.
+    fileprivate func dragBegan(rows: [Int]) {
+        guard let archive, let folder else { return ArchiveDrag.current = nil }
+        let inner = rows.compactMap { folder.item(row: UInt32($0)).map { archive.place.child($0.name) } }
+        ArchiveDrag.current = inner.isEmpty ? nil : ArchiveDrag.Members(archive: archive.archive, inner: inner)
     }
 
     // MARK: Quick Look
@@ -2338,8 +2361,15 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     func collectionView(_ collectionView: NSCollectionView, canDragItemsAt indexPaths: Set<IndexPath>, with event: NSEvent) -> Bool { true }
 
     func collectionView(_ collectionView: NSCollectionView, pasteboardWriterForItemAt indexPath: IndexPath) -> NSPasteboardWriting? {
-        guard archive == nil else { return nil }
-        return folder?.childPath(row: UInt32(gridRow(indexPath))).map { URL(fileURLWithPath: $0) as NSURL }
+        dragWriter(row: gridRow(indexPath))
+    }
+
+    func collectionView(_ collectionView: NSCollectionView, draggingSession session: NSDraggingSession, willBeginAt screenPoint: NSPoint, forItemsAt indexPaths: Set<IndexPath>) {
+        dragBegan(rows: indexPaths.map { gridRow($0) }.sorted())
+    }
+
+    func collectionView(_ collectionView: NSCollectionView, draggingSession session: NSDraggingSession, endedAt screenPoint: NSPoint, dragOperation operation: NSDragOperation) {
+        ArchiveDrag.current = nil
     }
 }
 
@@ -2412,6 +2442,8 @@ extension FileListController {
             return archiveEditable && !fromHere && !Self.droppedURLs(info).isEmpty ? .copy : []
         }
         guard let dest else { return [] }
+        // out of an archive: written out, then copied here
+        if ArchiveDrag.carries(info) { return .copy }
         let urls = Self.droppedURLs(info)
         // nothing into itself, nothing back where it already is
         let d = dest.standardizedFileURL.path
@@ -2430,6 +2462,10 @@ extension FileListController {
             return true
         }
         guard let dest, validate(info, into: dest) != [] else { return false }
+        if ArchiveDrag.carries(info) {
+            ArchiveDrag.drop(into: dest, window: card.window)
+            return true
+        }
         let urls = Self.droppedURLs(info)
         transfer(urls, into: dest, kind: Self.dropKind(info, urls, into: dest), selectHere: dest == url)
         return true

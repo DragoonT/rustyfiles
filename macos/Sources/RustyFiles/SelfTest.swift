@@ -11,6 +11,12 @@ enum SelfTest {
         if !ok { failures += 1 }
     }
 
+    private static func finish(_ root: URL) {
+        try? FileManager.default.removeItem(at: root)
+        print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
+        exit(failures == 0 ? 0 : 1)
+    }
+
     static func run() {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("rf-selftest-\(UUID().uuidString)")
@@ -80,9 +86,32 @@ enum SelfTest {
                         paused.paused = true
                         paused.start(window: nil) { made in
                             check(made.count == 1 && fm.fileExists(atPath: c.appendingPathComponent("big.bin").path), "a resumed copy finishes")
-                            try? fm.removeItem(at: root)
-                            print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
-                            exit(failures == 0 ? 0 : 1)
+                            // 11. dragged out of an archive: to another app (a promise) and within the app
+                            let zip = root.appendingPathComponent("drag.zip")
+                            let p = Process()
+                            p.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+                            p.arguments = ["-c", "-k", a.appendingPathComponent("folder").path, zip.path]
+                            try? p.run()
+                            p.waitUntilExit()
+                            guard let arc = try? Archive.open(path: zip.path, password: nil) else {
+                                check(false, "a test archive opens")
+                                return finish(root)
+                            }
+                            let out = root.appendingPathComponent("out"), d = root.appendingPathComponent("d")
+                            try? fm.createDirectory(at: out, withIntermediateDirectories: true)
+                            try? fm.createDirectory(at: d, withIntermediateDirectories: true)
+                            let promise = ArchiveDrag.provider(arc, inner: "inner/note.txt", isDir: false)
+                            var promiseError: Error? = CocoaError(.fileWriteUnknown)
+                            ArchivePromises.shared.filePromiseProvider(promise, writePromiseTo: out.appendingPathComponent("note.txt")) { promiseError = $0 }
+                            check(promiseError == nil && (try? String(contentsOf: out.appendingPathComponent("note.txt"), encoding: .utf8)) == "hello",
+                                  "a member dragged to another app is written there")
+                            ArchiveDrag.current = .init(archive: arc, inner: ["inner"])
+                            ArchiveDrag.drop(into: d, window: nil)
+                            ArchiveDrag.current = nil
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                check(fm.fileExists(atPath: d.appendingPathComponent("inner/note.txt").path), "a folder dragged out of an archive arrives whole")
+                                finish(root)
+                            }
                         }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                             check(!fm.fileExists(atPath: c.appendingPathComponent("big.bin").path), "a paused copy writes nothing")

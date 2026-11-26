@@ -301,7 +301,7 @@ final class SidebarListView: HoverView {
 
     override func viewDidMoveToSuperview() {
         super.viewDidMoveToSuperview()
-        registerForDraggedTypes([.fileURL])
+        registerForDraggedTypes([.fileURL] + ArchiveDrag.draggedTypes)
     }
 
     /// Where files dropped on item `i` go (a folder, a drive), or nil (Home, Settings).
@@ -332,6 +332,11 @@ final class SidebarListView: HoverView {
             return dropIndex == nil ? [] : .link
         }
         dropIndex = index(at: pt).flatMap { dropURL($0) != nil ? $0 : nil }
+        // out of an archive: into folders and drives only
+        if ArchiveDrag.carries(info) {
+            if let i = dropIndex, items[i].kind == .trash || items[i].kind == .tag { dropIndex = nil }
+            return dropIndex == nil ? [] : .copy
+        }
         guard let i = dropIndex, let dest = dropURL(i), !urls.isEmpty else { return [] }
         if items[i].kind == .trash { return .delete }
         if items[i].kind == .tag { return .link }
@@ -363,6 +368,11 @@ final class SidebarListView: HoverView {
         defer {
             dropIndex = nil
             fileDrag = false
+        }
+        if ArchiveDrag.carries(sender) {
+            guard let i = dropIndex, let dest = dropURL(i) else { return false }
+            ArchiveDrag.drop(into: dest, window: window)
+            return true
         }
         let urls = FileListController.droppedURLs(sender)
         if let i = dropIndex, items[i].pinHeader {

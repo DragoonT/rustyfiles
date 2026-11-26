@@ -207,13 +207,14 @@ final class TabStripView: HoverView, NSViewToolTipOwner {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        registerForDraggedTypes([.fileURL])
+        registerForDraggedTypes([.fileURL] + ArchiveDrag.draggedTypes)
     }
 
     private func dropOperation(_ info: NSDraggingInfo) -> NSDragOperation {
         let pt = convert(info.draggingLocation, from: nil)
         dropTab = tab(at: pt).flatMap { dropFolder?($0) != nil ? $0 : nil }
         guard let i = dropTab, let dest = dropFolder?(i) else { return [] }
+        if ArchiveDrag.carries(info) { return .copy }
         let urls = FileListController.droppedURLs(info)
         guard !urls.isEmpty, !urls.allSatisfy({ $0.deletingLastPathComponent().standardizedFileURL == dest.standardizedFileURL }) else { return [] }
         return FileListController.dropKind(info, urls, into: dest) == .copy ? .copy : .move

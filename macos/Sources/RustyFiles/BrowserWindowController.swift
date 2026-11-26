@@ -416,6 +416,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         }
         titleBar.strip.onDropFiles = { [weak self] i, info in
             guard let self, let t = self.tabs[safe: i] else { return false }
+            if ArchiveDrag.carries(info) {
+                ArchiveDrag.drop(into: t.url, window: self.window)
+                return true
+            }
             let urls = FileListController.droppedURLs(info)
             self.list.transfer(urls, into: t.url, kind: FileListController.dropKind(info, urls, into: t.url), selectHere: false)
             return true
