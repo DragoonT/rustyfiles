@@ -1,4 +1,6 @@
 {
+"Icons": "İkonlar",
+"macOS: Apple's symbols, as in Finder. rustyfiles: the set the Windows app draws.": "macOS: Apple'ın sembolleri, Finder'daki gibi. rustyfiles: Windows uygulamasının çizdiği set.",
 "The password for “%@” is not right.": "“%@” için parola doğru değil.",
 "“%@” is protected by a password.": "“%@” parolayla korunuyor.",
 "Enter the password to open it.": "Açmak için parolayı girin.",

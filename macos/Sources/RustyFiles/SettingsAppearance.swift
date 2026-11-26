@@ -14,6 +14,16 @@ extension AppSettings {
         NotificationCenter.default.post(name: .rfSettingsChanged, object: nil, userInfo: ["key": key])
     }
 
+    /// The icon set: "macos" (Apple's SF Symbols, as Finder draws them) or "rustyfiles" (the
+    /// Lucide set the Windows app draws).
+    static var iconStyle: String {
+        get { d.string(forKey: "iconStyle") ?? "macos" }
+        set {
+            MainActor.assumeIsolated { Icons.forget() }
+            store(newValue, "iconStyle")
+        }
+    }
+
     /// Short movements: lenses gliding, switches sliding. Off: everything jumps into place.
     static var animations: Bool {
         get { flag("animations", true) }
@@ -221,6 +231,12 @@ extension AppSettings {
 extension SettingsContent {
     static func appearanceExtraRows() -> [SettingsRow] {
         var rows: [SettingsRow] = [
+            .card(
+                title: String(localized: "Icons"),
+                detail: String(localized: "macOS: Apple's symbols, as in Finder. rustyfiles: the set the Windows app draws."), icon: "layout-grid",
+                control: .choice(
+                    options: [("macos", "macOS"), ("rustyfiles", "rustyfiles")],
+                    get: { AppSettings.iconStyle }, set: { AppSettings.iconStyle = $0 })),
             .card(
                 title: String(localized: "Animations"), detail: String(localized: "Selections glide and switches slide. Nothing waits for them."), icon: "sparkles",
                 control: .toggle(get: { AppSettings.animations }, set: { AppSettings.animations = $0 })),

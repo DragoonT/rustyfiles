@@ -1,4 +1,6 @@
 {
+"Icons": "아이콘",
+"macOS: Apple's symbols, as in Finder. rustyfiles: the set the Windows app draws.": "macOS: Finder에 있는 것과 같은 Apple 기호. rustyfiles: Windows 앱이 그리는 세트.",
 "Create archive": "압축 파일 만들기",
 "Create": "만들기",
 "Cancel": "취소",

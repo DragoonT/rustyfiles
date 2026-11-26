@@ -157,6 +157,18 @@ final class SidebarView: FlippedView {
 
     @objc private func volumesChanged() { reload() }
 
+    /// A pinned folder's icon: the known folders have their own (on macOS icons), as in Finder.
+    static func placeIcon(_ url: URL) -> String {
+        let fm = FileManager.default
+        let known: [(FileManager.SearchPathDirectory, String)] = [
+            (.desktopDirectory, "place-desktop"), (.downloadsDirectory, "place-downloads"), (.documentDirectory, "place-documents"),
+            (.picturesDirectory, "place-pictures"), (.musicDirectory, "place-music"), (.moviesDirectory, "place-movies"),
+        ]
+        let path = url.standardizedFileURL.path
+        for (dir, icon) in known where fm.urls(for: dir, in: .userDomainMask).first?.standardizedFileURL.path == path { return icon }
+        return path == fm.homeDirectoryForCurrentUser.standardizedFileURL.path ? "place-home" : "folder"
+    }
+
     func reload() {
         let fm = FileManager.default
         var items: [Item] = [Item(kind: .home, title: String(localized: "Home"), icon: "house", url: BrowserTab.homeURL)]
@@ -172,7 +184,7 @@ final class SidebarView: FlippedView {
         if AppSettings.showsSection(.pinned) {
             items.append(Item(kind: .header, title: String(localized: "Pinned"), icon: "", url: nil, pinHeader: true))
             for url in Pins.load() {
-                items.append(Item(kind: .pinned, title: fm.displayName(atPath: url.path), icon: "folder", url: url))
+                items.append(Item(kind: .pinned, title: fm.displayName(atPath: url.path), icon: Self.placeIcon(url), url: url))
             }
         }
         // iCloud Drive and the File Provider folders (Dropbox, Google Drive, OneDrive, Box…)

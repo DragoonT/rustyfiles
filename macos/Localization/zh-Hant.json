@@ -1,4 +1,6 @@
 {
+"Icons": "圖示",
+"macOS: Apple's symbols, as in Finder. rustyfiles: the set the Windows app draws.": "macOS：與 Finder 相同的 Apple 符號。rustyfiles：Windows 版 App 繪製的圖示組。",
 "Create archive": "建立壓縮檔案",
 "Create": "新增",
 "Cancel": "取消",
