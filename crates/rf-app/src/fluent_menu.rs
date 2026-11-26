@@ -489,6 +489,7 @@ fn open_level(
     background: WindowBackgroundAppearance,
     cx: &mut App,
 ) -> Option<AnyWindowHandle> {
+    let opaque = matches!(background, WindowBackgroundAppearance::Opaque);
     let opts = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         display_id: display,
@@ -499,11 +500,10 @@ fn open_level(
         is_movable: false,
         is_resizable: false,
         is_minimizable: false,
-        // Solid menus paint their own surface.
-        window_background: theme::window_material(background),
+        // The panel is opaque. Its rounded corners must clear to transparent instead of white.
+        window_background: if opaque { WindowBackgroundAppearance::Transparent } else { theme::window_material(background) },
         ..Default::default()
     };
-    let opaque = matches!(background, WindowBackgroundAppearance::Opaque);
     let r = cx.open_window(opts, move |w, cx| {
         use raw_window_handle::{HasWindowHandle, RawWindowHandle};
         if let Ok(h) = w.window_handle() {
