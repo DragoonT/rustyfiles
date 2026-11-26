@@ -365,6 +365,8 @@ const NAME_COL: usize = 11;
 #[derive(Clone)]
 struct ColumnResize;
 struct ColumnGhost;
+/// The Details list's sideways scrollbar thumb in the hand.
+struct SidewaysDrag;
 impl Render for ColumnGhost {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
@@ -577,6 +579,12 @@ pub struct FolderView {
     grid_units_for: (usize, usize, usize, usize),
     /// The Name column's width while a divider is dragged (`NAME_COL`), before it is saved.
     name_live: Option<f32>,
+    /// How far the Details columns after Name are scrolled sideways, px (issues 342, 372: the columns that do not fit the pane are
+    /// scrolled to, with the Name column standing still, rather than left out). Kept within `sideways_most` where it is used.
+    h_off: f32,
+    /// The sideways bar: its track's left edge and width (measured where it is drawn) and where in the thumb the pointer took it.
+    hbar_track: std::rc::Rc<std::cell::Cell<(f32, f32)>>,
+    hbar_grab: std::rc::Rc<std::cell::Cell<f32>>,
     /// At the start of a column drag: the Name column's width and the room left over at the right end.
     drag_room: (f32, f32),
     /// The columns dragged since the last save, one bit each: only these get a stored width (the others stay automatic).
@@ -836,6 +844,9 @@ impl FolderView {
             grid_units: Default::default(),
             grid_units_for: (0, 0, 0, 0),
             name_live: None,
+            h_off: 0.,
+            hbar_track: std::rc::Rc::new(std::cell::Cell::new((0., 0.))),
+            hbar_grab: std::rc::Rc::new(std::cell::Cell::new(0.)),
             drag_room: (0., 0.),
             col_live: None,
             col_dragged: 0,
@@ -4560,16 +4571,10 @@ impl FolderView {
             }
         };
         let w = self.col_widths(cx);
-        // the property columns the user added are placed first: the fixed columns share what is left
-        let mut free = f32::from(self.content_width) - self.name_fixed(cx).unwrap_or(180.) - 24. - self.gutter() - self.props_used_width(cx);
-        let mut take = |want: bool, width: f32| -> bool {
-            if want && width <= free {
-                free -= width;
-                true
-            } else {
-                false
-            }
-        };
+        // Every column that is on and makes sense here is shown: what does not fit the pane is scrolled to sideways, with the Name
+        // column standing still (issues 342, 372). Columns that did not fit were left out, without a word, and widening the Name
+        // column made the ones after it go.
+        let take = |want: bool, _width: f32| -> bool { want };
         let size = take(c.size, w[3]);
         let modified = take(c.modified, w[0]);
         let kind = take(c.kind, f32::from(self.type_col_w(cx)));
@@ -4584,6 +4589,127 @@ impl FolderView {
         let author = take(c.git_author && repo, w[8]);
         let hash = take(c.git_hash && repo, w[10]);
         Cols { modified, created, kind, size, tags, git, sync, commit: [message, author, date, hash] }
+    }
+
+    /// The Details columns after Name, sideways: how wide they are together, and how much of that the pane shows beside the Name
+    /// column. More than it shows is scrolled to (`h_off`).
+    fn sideways_room(&self, cx: &App) -> (f32, f32) {
+        let used = self.used_width(cx);
+        let avail = f32::from(self.content_width) - 20. - self.gutter();
+        (used, (avail - self.name_now(cx)).max(0.).min(used))
+    }
+
+    /// How far the columns after Name can be scrolled sideways (0: they all fit).
+    fn sideways_most(&self, cx: &App) -> f32 {
+        let (used, shown) = self.sideways_room(cx);
+        (used - shown).max(0.)
+    }
+
+    /// The columns after Name are scrolled sideways by `dx` more (a wheel, the bar).
+    fn scroll_sideways_to(&mut self, x: f32, cx: &mut Context<Self>) {
+        let x = x.clamp(0., self.sideways_most(cx)).round();
+        if (x - self.h_off).abs() >= 0.5 {
+            self.h_off = x;
+            cx.notify();
+        }
+    }
+
+    /// Width the visible Details columns after Name take together.
+    fn used_width(&self, cx: &App) -> f32 {
+        let vis = self.visible_cols(cx);
+        let w = self.col_widths(cx);
+        let mut used = 0.;
+        for (on, width) in [(vis.modified, w[0]), (vis.created, w[1]), (vis.size, w[3]), (vis.tags, w[4]), (vis.git, w[5]), (vis.sync, w[6])] {
+            if on {
+                used += width;
+            }
+        }
+        if vis.kind {
+            used += f32::from(self.type_col_w(cx));
+        }
+        used += self.props_used_width(cx);
+        for (i, on) in vis.commit.iter().enumerate() {
+            if *on {
+                used += w[7 + i];
+            }
+        }
+        used
+    }
+
+    /// The Details list's sideways scrollbar, under the columns after Name, while they do not all fit (issues 342, 372). Its thumb is
+    /// dragged; a click on the track puts the thumb's middle there. As the folder tree's (`sidebar_tree::tree_sideways_bar`).
+    fn sideways_bar(&self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
+        use crate::workspace::sidebar_tree::{BAR_H, bar_thumb};
+        let (used, shown) = self.sideways_room(cx);
+        let most = (used - shown).max(0.);
+        if most < 1. {
+            return None;
+        }
+        let (start, share) = bar_thumb(self.h_off.clamp(0., most), most, shown);
+        let (track, grab) = (self.hbar_track.clone(), self.hbar_grab.clone());
+        let probe = canvas(
+            {
+                let track = track.clone();
+                move |b, _, _| track.set((f32::from(b.origin.x), f32::from(b.size.width)))
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .size_full();
+        let (thumb, thumb_hover) = (p.text_tertiary.opacity(0.55), p.text_secondary.opacity(0.8));
+        let thumb_el = div()
+            .id("list-sideways-thumb")
+            .group("list-sideways-thumb")
+            .absolute()
+            .top_0()
+            .h_full()
+            .left(relative(start))
+            .w(relative(share))
+            .flex()
+            .items_center()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_drag(SidewaysDrag, move |_, at: Point<Pixels>, _, cx| {
+                grab.set(f32::from(at.x));
+                cx.new(|_| ColumnGhost)
+            })
+            .child(div().w_full().h(px(4.)).rounded_full().bg(thumb).group_hover("list-sideways-thumb", move |s| s.h(px(6.)).bg(thumb_hover)));
+        Some(
+            div()
+                .id("list-sideways-bar")
+                .absolute()
+                .left(px(10. + self.name_now(cx)))
+                .right(px(10. + self.gutter()))
+                .bottom_0()
+                .h(px(BAR_H))
+                .occlude()
+                .child(probe)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, ev: &MouseDownEvent, _, cx| {
+                        cx.stop_propagation();
+                        let (left, wide) = track.get();
+                        if wide > 1. {
+                            let at = f32::from(ev.position.x) - left - wide * share / 2.;
+                            this.slide_sideways_bar(at, wide, cx);
+                        }
+                    }),
+                )
+                .on_drag_move(cx.listener(|this, ev: &DragMoveEvent<SidewaysDrag>, _, cx| {
+                    let (left, wide) = (f32::from(ev.bounds.origin.x), f32::from(ev.bounds.size.width));
+                    let at = f32::from(ev.event.position.x) - left - this.hbar_grab.get();
+                    this.slide_sideways_bar(at, wide, cx);
+                }))
+                .child(thumb_el)
+                .into_any_element(),
+        )
+    }
+
+    /// The bar's thumb was put `left` pixels into its track `track` wide: the columns go there.
+    fn slide_sideways_bar(&mut self, left: f32, track: f32, cx: &mut Context<Self>) {
+        let (used, shown) = self.sideways_room(cx);
+        let most = (used - shown).max(0.);
+        let to = crate::workspace::sidebar_tree::bar_slide(left, track, most, shown);
+        self.scroll_sideways_to(to, cx);
     }
 
     /// Width the visible Details columns leave unused (what [`Self::visible_cols`] still had free).
@@ -4705,21 +4831,14 @@ impl FolderView {
             .on_drag_move(cx.listener(|this, e: &DragMoveEvent<ColumnResize>, _, cx| {
                 let Some((ix, sx, sw)) = this.col_drag else { return };
                 let dx = f32::from(e.event.position.x) - sx;
-                // no wider than the room left at the right end: a column that no longer fits is hidden, so widening one past it would
-                // make the last one vanish under the pointer
-                let (name0, spare0) = this.drag_room;
+                // The columns after Name scroll sideways (issues 342, 372): a column may grow past the pane's edge, and the Name column
+                // may take the pane up to a strip of the others. Nothing is hidden any more for being too wide.
                 if ix == NAME_COL {
-                    // the Name column may take the whole width: the columns that no longer fit after it are hidden, as in a narrow
-                    // window (Explorer scrolls sideways instead; this list has no sideways scrolling)
-                    let most = f32::from(this.content_width) - 24. - this.gutter() - this.props_used_width(cx);
+                    let most = f32::from(this.content_width) - 20. - this.gutter() - 60.;
                     this.name_live = Some((sw + dx).clamp(120., most.max(120.)).round());
                 } else {
                     let mut w = this.col_widths(cx);
-                    // into the room at the right end first, then the Name column gives way, down to 180 px
-                    let most = (sw + spare0 + (name0 - 180.).max(0.)).clamp(sw.min(600.), 600.);
-                    w[ix] = (sw + dx).clamp(70., most.max(70.)).round();
-                    let past = (w[ix] - sw - spare0).max(0.);
-                    this.name_live = Some((name0 - past).max(180.).min(name0).round());
+                    w[ix] = (sw + dx).clamp(70., 1000.).round();
                     this.col_live = Some(w);
                     this.col_dragged |= 1 << ix;
                 }
@@ -4730,10 +4849,13 @@ impl FolderView {
             .on_mouse_down(MouseButton::Right, cx.listener(|this, ev: &MouseDownEvent, window, cx| this.show_header_menu(ev.position, window, cx)))
             .child(
                 col("h-name", t!("Ad"), SortKey::Name, self.name_fixed(cx).map(px), false, cx)
+                    .when(self.name_fixed(cx).is_none(), |d| d.min_w(px(180.)))
                     .when(cx.global::<crate::settings::Settings>().windows_file_explorer_theme, |d| d.pl(px(38.)))
                     .relative()
                     .child(handle(NAME_COL, cx)),
             )
+            // the columns after Name: clipped to what the pane shows and scrolled sideways as the rows are (issues 342, 372)
+            .child(div().h_full().flex().flex_shrink(1.).min_w_0().overflow_hidden().child(h_flex().h_full().flex_shrink_0().relative().left(px(-self.h_off))
             .children(show_tags.then(|| self.sortx_header("h-tags", t!("Dosya etiketi"), w[4], SortKey::Tag, p, cx).child(handle(4, cx))))
             .children(show_git.then(|| plain("h-git", t!("Git durumu"), w[5]).child(handle(5, cx))))
             .children(show_sync.then(|| self.sortx_header("h-sync", t!("Eşitleme durumu"), w[6], SortKey::Sync, p, cx).child(handle(6, cx))))
@@ -4757,7 +4879,7 @@ impl FolderView {
                     .relative()
                     .child(handle(3, cx))
             }))
-            .children(self.props_header_cells(p, cx))
+            .children(self.props_header_cells(p, cx))))
             // (the room left over, once the Name column has a width of its own)
             .when(self.name_fixed(cx).is_some(), |d| d.child(div().flex_1()))
     }
@@ -4787,7 +4909,7 @@ impl FolderView {
         let checkbox = if cx.global::<crate::settings::Settings>().show_checkboxes { 24. } else { 0. };
         // icon 16 + gap 8 + the cell's padding 16, and a little air
         let want = (widest + 16. + 8. + 16. + checkbox + 12.).round();
-        let most = self.name_now(cx) + self.spare_width(cx);
+        let most = f32::from(self.content_width) - 20. - self.gutter() - 60.;
         let w = want.clamp(120., most.max(120.));
         self.name_live = None;
         crate::settings::update(cx, |s| s.columns.name_width = w as u16);
@@ -4861,6 +4983,7 @@ impl FolderView {
         let type_w = self.type_col_w(cx);
         let cw = self.col_widths(cx);
         let name_w = self.name_fixed(cx);
+        let h_off = self.h_off;
         let grouped = self.grouped();
         let row_h = self.row_h();
         let (col_tags, col_git, col_sync) = (vis.tags, vis.git, vis.sync);
@@ -5106,7 +5229,7 @@ impl FolderView {
                 // end, as in Explorer: what is right of them is the list's empty space, where a double click goes up and a press
                 // draws a selection box. It ran the list's whole width, and with few columns there was almost no empty space left
                 // to press (issue 239).
-                .map(|d| if name_w.is_some() { d.self_start() } else { d.w_full() })
+                .map(|d| if name_w.is_some() { d.self_start().max_w_full() } else { d.w_full() })
                 .px(px(4.))
                 .rounded(theme::RADIUS_SM)
                 .items_center()
@@ -5134,7 +5257,7 @@ impl FolderView {
                     h_flex()
                         .map(|d| match name_w {
                             Some(w) => d.w(px(w)).flex_shrink_0(),
-                            None => d.flex_1().min_w(px(120.)),
+                            None => d.flex_1().min_w(px(180.)),
                         })
                         .when(cx.global::<crate::settings::Settings>().windows_file_explorer_theme, |d| d.pl(px(22.)).pr_2().gap_1p5())
                         .when(!cx.global::<crate::settings::Settings>().windows_file_explorer_theme, |d| d.px_2().gap_2())
@@ -5191,6 +5314,8 @@ impl FolderView {
                         .child(div().flex_1())
                         .children(cloud_badge),
                 )
+                // the columns after Name: clipped to what the pane shows and scrolled sideways together (issues 342, 372)
+                .child(div().h_full().flex().items_center().flex_shrink(1.).min_w_0().overflow_hidden().child(h_flex().h_full().items_center().flex_shrink_0().relative().left(px(-h_off))
                 .children(tag_cell)
                 .children(git_cell)
                 .children(sync_cell)
@@ -5264,7 +5389,7 @@ impl FolderView {
                     };
                     row.child(cell)
                 })
-                .children(prop_cells)
+                .children(prop_cells)))
                 // (not while a menu is open: the details stood behind the right-click menu, a Discord report)
                 .when(item_tips, |d| d.tooltip(move |w, cx| {
                         let media: HoverMedia = tip_path.as_ref().and_then(|path| hover_media_cache().lock().get(path).cloned()).map(|m| (*m).clone()).unwrap_or_default();
@@ -5349,6 +5474,10 @@ impl FolderView {
         )
         .absolute()
         .size_full();
+        // (the pane got wider, a column narrower: the sideways offset stays within what there is to scroll to)
+        let details = self.view_mode == ViewMode::Details && list_body;
+        self.h_off = if details { self.h_off.clamp(0., self.sideways_most(cx)) } else { 0. };
+        let sideways = if details { self.sideways_bar(p, cx) } else { None };
         let header = (self.view_mode == ViewMode::Details).then(|| self.render_header(p, cx));
         v_flex()
             .size_full()
@@ -5469,6 +5598,35 @@ impl FolderView {
                                         }
                                     });
                                 });
+                                // Shift and the wheel, or a sideways wheel (a touchpad): the Details columns after Name scroll sideways
+                                // (issues 342, 372), when there is somewhere to go
+                                let side = me.clone();
+                                window.on_mouse_event(move |ev: &ScrollEvent, phase, _, cx| {
+                                    if phase != DispatchPhase::Capture || ev.modifiers.control || !bounds.contains(&ev.position) {
+                                        return;
+                                    }
+                                    let (x, y) = match ev.delta {
+                                        ScrollDelta::Lines(p) => (p.x * 40., p.y * 40.),
+                                        ScrollDelta::Pixels(p) => (f32::from(p.x), f32::from(p.y)),
+                                    };
+                                    let dx = if x != 0. { x } else if ev.modifiers.shift { y } else { 0. };
+                                    if dx == 0. {
+                                        return;
+                                    }
+                                    let used = side
+                                        .update(cx, |v, cx| {
+                                            if v.view_mode != ViewMode::Details || v.sideways_most(cx) < 1. {
+                                                return false;
+                                            }
+                                            let to = v.h_off - dx;
+                                            v.scroll_sideways_to(to, cx);
+                                            true
+                                        })
+                                        .unwrap_or(false);
+                                    if used {
+                                        cx.stop_propagation();
+                                    }
+                                });
                                 let me = me.clone();
                                 window.on_mouse_event(move |ev: &ScrollEvent, phase, _, cx| {
                                     if phase != DispatchPhase::Capture || !ev.modifiers.control || !bounds.contains(&ev.position) {
@@ -5538,7 +5696,8 @@ impl FolderView {
                     .when(side_bar && cx.global::<crate::settings::Settings>().show_scrollbar, |d| {
                         let base = self.scroll.0.borrow().base_handle.clone();
                         d.child(Scrollbar::horizontal(&base).id("list-hscrollbar").mode(scrollbar_mode()))
-                    }),
+                    })
+                    .children(sideways),
             )
             .into_any_element()
     }

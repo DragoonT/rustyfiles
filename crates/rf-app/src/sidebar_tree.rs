@@ -65,13 +65,13 @@ fn sideways_most(deepest: u16, width: f32) -> f32 {
 }
 
 /// Height of the strip the sideways bar stands in, at the sidebar's bottom edge (the bar itself is thinner).
-const BAR_H: f32 = 12.;
+pub(crate) const BAR_H: f32 = 12.;
 /// The least the bar's thumb takes of its track, so that it can always be grabbed.
 const BAR_THUMB_LEAST: f32 = 0.15;
 
 /// The sideways bar's thumb for a tree `width` wide that stands moved `x` of at most `most`: where it starts and how wide it is,
 /// both as a share of the track. It is as much of the track as the tree's width is of all there is to see sideways.
-fn bar_thumb(x: f32, most: f32, width: f32) -> (f32, f32) {
+pub(crate) fn bar_thumb(x: f32, most: f32, width: f32) -> (f32, f32) {
     if most <= 0.0 || width <= 0.0 {
         return (0.0, 1.0);
     }
@@ -80,7 +80,7 @@ fn bar_thumb(x: f32, most: f32, width: f32) -> (f32, f32) {
 }
 
 /// The other way round: where the tree stands when the thumb's left edge is `left` pixels into a track `track` pixels wide.
-fn bar_slide(left: f32, track: f32, most: f32, width: f32) -> f32 {
+pub(crate) fn bar_slide(left: f32, track: f32, most: f32, width: f32) -> f32 {
     let room = track * (1.0 - bar_thumb(0.0, most, width).1);
     if room <= 0.0 { 0.0 } else { most * (left / room).clamp(0.0, 1.0) }
 }

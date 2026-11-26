@@ -256,9 +256,8 @@ impl FolderView {
         if chosen.is_empty() {
             return Vec::new();
         }
-        let room = f32::from(self.content_width) - self.name_fixed(cx).unwrap_or(180.) - 24. - self.gutter();
-        let n = pc::fit_count(chosen.iter().map(|c| c.width), room);
-        chosen.iter().take(n).cloned().enumerate().collect()
+        // every one: what does not fit the pane is scrolled to sideways (issues 342, 372)
+        chosen.iter().cloned().enumerate().collect()
     }
 
     /// Pixels the visible property columns take; the fixed columns share what is left.

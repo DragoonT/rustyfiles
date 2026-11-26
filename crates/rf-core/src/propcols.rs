@@ -21,7 +21,7 @@ use crate::sort::{SortDir, SortSpec, lower, natural_cmp};
 // ------------------------------------------------------------------ the chosen columns
 
 /// More columns than this would leave no room for the name in any window.
-pub const MAX_COLUMNS: usize = 8;
+pub const MAX_COLUMNS: usize = 20;
 pub const DEFAULT_WIDTH: u16 = 130;
 pub const MIN_WIDTH: u16 = 70;
 pub const MAX_WIDTH: u16 = 600;

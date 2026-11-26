@@ -20,7 +20,7 @@ use crate::theme::{self, Palette};
 
 // the sidebar's folder tree (setting `sidebar_tree`): the view and the window's hooks for it
 #[path = "sidebar_tree.rs"]
-mod sidebar_tree;
+pub(crate) mod sidebar_tree;
 // the preview pane under the file list (setting `preview_position` = bottom)
 #[path = "preview_dock.rs"]
 mod preview_dock;
