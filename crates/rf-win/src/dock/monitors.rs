@@ -133,6 +133,17 @@ pub fn wanted(switch_on: bool, displays: &[Display]) -> Vec<&Display> {
     displays.iter().filter(|d| !d.primary).collect()
 }
 
+/// How long to wait before the next try at opening a window of the dock or of the desktop that could not be opened: `attempt` is 0 for
+/// the first new try. `None`: given up, until the monitors change again.
+///
+/// WHY: while a display driver is updated the graphics device is gone for some seconds, the monitors come back under new names, and a
+/// window asked for in those seconds cannot be made. Nothing asked again afterwards: that monitor stayed without its dock and its
+/// desktop until the app was started again.
+pub fn reopen_delay_ms(attempt: u32) -> Option<u64> {
+    const DELAYS: [u64; 6] = [1_000, 2_000, 4_000, 8_000, 15_000, 30_000];
+    DELAYS.get(attempt as usize).copied()
+}
+
 /// The changes that bring `current` (the secondary docks there are, by device name, with the monitor each was last placed for) to the
 /// monitors now. Closes come first (a monitor that left must not keep a window on the desktop while the next is built), then the
 /// docks to place again, then the opens. A dock is matched by NAME: a monitor whose handle changed with the same name is the same dock
@@ -350,6 +361,16 @@ pub fn panel_request<P: PartialEq, K: PartialEq>(open: Option<(&P, &K)>, want: (
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_window_that_could_not_be_opened_is_tried_again_a_few_times_at_growing_waits_then_left() {
+        let waits: Vec<u64> = (0..).map_while(super::reopen_delay_ms).collect();
+        assert_eq!(waits.len(), 6);
+        assert!(waits.windows(2).all(|w| w[0] < w[1]), "{waits:?}");
+        // (a driver update had the device away for about four seconds: the tries reach well past that)
+        assert!(waits.iter().sum::<u64>() >= 30_000);
+        assert_eq!(super::reopen_delay_ms(6), None);
+    }
+
     use super::*;
 
     fn info(handle: isize, rect: Rect, dpi: u32) -> MonitorInfo {

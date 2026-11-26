@@ -2203,5 +2203,11 @@
  "ae5ba83f": "Søk etter navn eller et mønster som *.pdf; Enter søker også i undermapper",
  "0a64f2ce": "Dette elementet kopieres fortsatt. Gi det nytt navn når kopieringen er ferdig.",
  "b8952992": "{name} + {n} til",
- "145a4b30": "{t} igjen"
+ "d14d53d5": "Når en kommando finnes i begge menyene, vis den klassiske",
+ "e073e569": "Noen programmer (for eksempel NanaZip) legger kommandoene sine både i den nye menyen i Windows 11 og i den klassiske; menyen viser bare én av dem. Av beholder den nye menyens, på beholder den klassiske.",
+ "145a4b30": "{t} igjen",
+ "0884e8a7": "Start en merkeramme fra det tomme området i en rad",
+ "1f5380d9": "I visningene Detaljer og Kolonner. Av: et element dras fra hvor som helst på raden sin.",
+ "8f85e23e": "Monter",
+ "c808916f": "Veldig liten"
 }

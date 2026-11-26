@@ -2859,7 +2859,7 @@ impl FolderView {
     fn grid_row_h(&self) -> Pixels {
         match self.grid_style {
             GridStyle::Tiles => px(GRID_SIZES[self.grid_size as usize].1 - if crate::settings::compact_items() { COMPACT_TILE_SAVE } else { 0. }),
-            GridStyle::Cards => px(84.),
+            GridStyle::Cards => px(CARD_ROW_H),
             GridStyle::List => px(32.),
         }
     }
@@ -2976,7 +2976,7 @@ impl FolderView {
             p: Palette::for_window(window),
             tile_w: px(LIST_COL_MIN),
             row_h,
-            thumb_px: self.grid_thumb_px(),
+            thumb_px: picture_px(self.grid_thumb_px(), px(20.), window.scale_factor()),
             style: GridStyle::List,
             visual_px: px(20.),
             show_ext,
@@ -3116,13 +3116,15 @@ impl FolderView {
         };
         // the picture is asked for at the screen's pixels: at 150 % and more the tile shows more pixels than the size step's own,
         // and a folder (Windows' own picture of it) came out blurred (issue 253)
-        let thumb_px = thumb_px.max(((f32::from(visual_px) * window.scale_factor() / 16.).ceil() as u32) * 16);
+        let thumb_px = picture_px(thumb_px, visual_px, window.scale_factor());
         let show_ext = cx.global::<crate::settings::Settings>().show_extensions;
         let renamed = self.renamed.clone();
         let mut out = Vec::with_capacity(range.len());
         let units = self.grid_grouped().then(|| self.grid_units_now());
         let (_, slice_h) = self.grid_slices();
         let g = GridCellCtx { hover_select, p, tile_w, row_h, thumb_px, style, visual_px, show_ext, renamed };
+        // the row of tiles (by its first tile) that the lines above have drawn already
+        let mut drawn = None;
         for row in range {
             // (start, how many, the slice of the row) in the grouped Grid; a whole row of `cols` otherwise
             let (start, len, part) = match units.as_ref().map(|u| u.0.get(row).cloned()) {
@@ -3157,6 +3159,16 @@ impl FolderView {
                 }
                 Some(None) => break,
             };
+            // A row of tiles is several lines of the list (its slices). It is drawn ONCE, by the first of its lines that is asked
+            // for, moved up by the slices above that line and not cut; its other lines only keep their height. (Until 1.0.0 every
+            // slice drew the whole row cut to itself. Where two slices met on a pixel's middle both drew that pixel row, and a
+            // hovered or selected tile's fill and outline came out twice there: a thin lighter line across the tile at 150 %
+            // scaling, 45 or 90 px under its top in the reporter's pictures, which is one and two slices. Issue 363.)
+            if part.is_some() && drawn == Some(start) {
+                out.push(div().w_full().h(slice_h).into_any_element());
+                continue;
+            }
+            drawn = Some(start);
             let mut r = h_flex().w_full().h(self.grid_row_h()).gap(GRID_GAP).items_start();
             for c in 0..len {
                 let Some(cell) = self.grid_cell(start + c, part, &g, window, cx) else { break };
@@ -3164,16 +3176,7 @@ impl FolderView {
             }
             match part {
                 None => out.push(r.into_any_element()),
-                // one slice of the row: the row drawn whole, moved up by the slices above this one and cut to this slice
-                Some(part) => out.push(
-                    div()
-                        .id(("gslice", row))
-                        .w_full()
-                        .h(slice_h)
-                        .overflow_hidden()
-                        .child(div().relative().top(-(slice_h * part as f32)).w_full().child(r))
-                        .into_any_element(),
-                ),
+                Some(part) => out.push(div().w_full().h(slice_h).child(div().relative().top(-(slice_h * part as f32)).w_full().child(r)).into_any_element()),
             }
         }
         out
@@ -3191,10 +3194,12 @@ impl FolderView {
         let dim = e.is_hidden() || e.is_cloud_placeholder() || (crate::cut_marks::any() && self.path_of(ei).is_some_and(|p| crate::cut_marks::is_cut(&p)));
         // Settings → "Show thumbnails" off: the file type's icon instead of a preview
         let thumbs_on = cx.global::<crate::settings::Settings>().show_thumbnails;
+        // the pixels the picture's box has on this screen: a picture that comes bigger is made to fit them (issue 253)
+        let box_px = (f32::from(visual_px) * window.scale_factor()).ceil() as u32;
         let thumb = self.parent_of(ei).map(|d| d.to_path_buf()).and_then(|d| {
             self.images.update(cx, |c, cx| {
                 if thumbs_on {
-                    c.thumbnail(&d, e, thumb_px, cx)
+                    c.thumbnail_fit(&d, e, thumb_px, box_px, cx)
                 } else if crate::settings::icon_theme() == crate::settings::IconThemePref::Freedesktop {
                     c.icon_sized(&d, e, thumb_px, cx)
                 } else {
@@ -3283,9 +3288,9 @@ impl FolderView {
                     v_flex()
                         .flex_1()
                         .min_w_0()
-                        .gap_0p5()
-                        .child(div().text_sm().font_weight(FontWeight::MEDIUM).whitespace_nowrap().overflow_hidden().text_ellipsis().when(dim, |d| d.opacity(0.6)).on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true)).child(name_text.clone()))
-                        .children(facts.unwrap_or_default().into_iter().map(|t| div().text_xs().text_color(p.text_secondary).whitespace_nowrap().overflow_hidden().text_ellipsis().child(t))),
+                        .gap(px(CARD_LINE_GAP))
+                        .child(div().text_sm().line_height(px(CARD_NAME_LINE)).font_weight(FontWeight::MEDIUM).whitespace_nowrap().overflow_hidden().text_ellipsis().when(dim, |d| d.opacity(0.6)).on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true)).child(name_text.clone()))
+                        .children(facts.unwrap_or_default().into_iter().map(|t| div().text_xs().line_height(px(CARD_FACT_LINE)).text_color(p.text_secondary).whitespace_nowrap().overflow_hidden().text_ellipsis().child(t))),
                 ),
             GridStyle::List => h_flex()
                 .px_2()
@@ -5916,6 +5921,31 @@ mod tile_tests {
         assert_eq!(split("Notes. And more words here", false), ("Notes. And more words here", ""), "a dot in a sentence");
     }
 
+    /// A tile's picture is asked for at the pixels its box has on the screen when that is more than the size step's own, and at
+    /// those pixels exactly (issue 253).
+    #[test]
+    fn a_tiles_picture_is_asked_for_at_the_boxs_own_pixels() {
+        use super::picture_px;
+        use gpui_kit::px;
+        assert_eq!(picture_px(128, px(96.), 1.0), 128, "100 %: the step's own");
+        assert_eq!(picture_px(128, px(96.), 1.25), 128, "125 %: the box is 120 px, the step's 128 cover it");
+        assert_eq!(picture_px(128, px(96.), 1.5), 144);
+        assert_eq!(picture_px(128, px(96.), 1.75), 168, "175 %: 168, not 176");
+        assert_eq!(picture_px(96, px(60.), 1.75), 105, "a card");
+        assert_eq!(picture_px(32, px(20.), 1.75), 35, "the List layout");
+    }
+
+    /// A card with all four lines (a file: name, type, size, date) keeps them inside itself, and two cards' texts stand further
+    /// apart than two lines of one card: the eye has to see which lines belong together (issue 366).
+    #[test]
+    fn a_cards_four_lines_fit_and_stand_apart_from_the_next_cards() {
+        use super::{CARD_LINE_GAP, GRID_GAP, card_text_margin};
+        let margin = card_text_margin();
+        assert!(margin >= 4., "{margin} px above and below a card's text");
+        let between_cards = 2. * margin + f32::from(GRID_GAP);
+        assert!(between_cards >= 4. * CARD_LINE_GAP, "{between_cards} px between two cards' texts, {CARD_LINE_GAP} between two lines");
+    }
+
     #[test]
     fn a_tile_has_room_for_two_whole_lines_of_its_name_at_every_size() {
         use super::{GRID_SIZES, TILE_NAME_LINE, tile_name_room};
@@ -6267,6 +6297,31 @@ const GRID_SIZES: [(f32, f32, u32); 5] = [(76., 102., 64), (92., 114., 80), (124
 /// 19.4 px): two such lines were higher than the room under the picture, and the second one was cut in half at the tile's edge
 /// with "Compact items" on (a Discord report).
 const TILE_NAME_LINE: f32 = 16.;
+/// The pixels a tile's picture is asked for: the size step's own, or what its box is on this screen when that is more. The box's
+/// pixels exactly, not rounded up to some step: an icon made 176 px wide and drawn into 168 (medium tiles at 175 %) has every one
+/// of its pixels spread over two of the screen's and is soft; made 168 px wide it is drawn pixel for pixel (issue 253, "this is
+/// a valid issue in 1.0.0", which rounded up to 16).
+fn picture_px(step: u32, visual: Pixels, scale: f32) -> u32 {
+    step.max((f32::from(visual) * scale).ceil() as u32)
+}
+
+/// A card's lines: its name and each line of facts under it (type, size, date), at Fluent's line heights for their text sizes
+/// (14 px text on 20, 12 px text on 16), with `CARD_LINE_GAP` between them. They are set on the lines instead of left to the
+/// toolkit's default (1.618 of the text size): four default lines were 87 px in a card of 80, ran over its top and bottom, and
+/// one card's date stood right on the next card's name (issue 366).
+const CARD_NAME_LINE: f32 = 20.;
+const CARD_FACT_LINE: f32 = 16.;
+const CARD_LINE_GAP: f32 = 2.;
+/// The height of a row of cards, with the gap between rows.
+const CARD_ROW_H: f32 = 88.;
+
+/// The room a card leaves above and below its text when it has all four lines (a file's): what keeps one card's text apart from
+/// the next card's.
+#[cfg(test)]
+fn card_text_margin() -> f32 {
+    (CARD_ROW_H - f32::from(GRID_GAP) - (CARD_NAME_LINE + 3. * CARD_FACT_LINE + 3. * CARD_LINE_GAP)) / 2.
+}
+
 /// How much of a tile the picture's side is, of the thumbnail's pixels.
 const TILE_VISUAL: f32 = 0.75;
 
@@ -6391,7 +6446,8 @@ pub(crate) fn open_in_background_sorted(path: PathBuf, key: SortKey, ascending: 
     }
     std::thread::spawn(move || {
         // FTP: download to a temp copy, then open that
-        let path = if rf_win::ftp::is_ftp(&path) {
+        let own = !rf_win::ftp::is_ftp(&path);
+        let path = if !own {
             let name = path.file_name().map(|n| n.to_os_string()).unwrap_or_default();
             let dir = std::env::temp_dir().join("rustyfiles-ftp");
             let _ = std::fs::create_dir_all(&dir);
@@ -6405,8 +6461,11 @@ pub(crate) fn open_in_background_sorted(path: PathBuf, key: SortKey, ascending: 
             path
         };
         // (with the user's own program for the file's type when there is one: Settings > File types)
-        if let Err(e) = rf_win::openrules::open_in_order(&path, key, ascending) {
-            log::warn!("open {path:?}: {e}");
+        match rf_win::openrules::open_in_order(&path, key, ascending) {
+            // (the user's own file, not a copy fetched to be shown: it is one of the recent files now)
+            Ok(_) if own && path.is_file() => rf_win::shell::note_recent(&path),
+            Ok(_) => {}
+            Err(e) => log::warn!("open {path:?}: {e}"),
         }
     });
 }

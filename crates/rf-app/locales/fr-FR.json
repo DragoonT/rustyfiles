@@ -2203,5 +2203,11 @@
  "ae5ba83f": "Recherchez par nom ou avec un modèle comme *.pdf ; Enter cherche aussi dans les sous-dossiers",
  "0a64f2ce": "Cet élément est encore en cours de copie. Renommez-le une fois la copie terminée.",
  "b8952992": "{name} + {n} de plus",
- "145a4b30": "{t} restantes"
+ "d14d53d5": "Quand une commande est dans les deux menus, afficher la classique",
+ "e073e569": "Certains programmes (NanaZip, par exemple) ajoutent leurs commandes au nouveau menu de Windows 11 et au menu classique ; le menu n'en affiche qu'une. Désactivé garde celle du nouveau menu, activé garde la classique.",
+ "145a4b30": "{t} restantes",
+ "0884e8a7": "Commencer un cadre de sélection depuis l'espace vide d'une ligne",
+ "1f5380d9": "Dans les vues Détails et Colonnes. Désactivé : un élément se fait glisser depuis n'importe quel endroit de sa ligne.",
+ "8f85e23e": "Monter",
+ "c808916f": "Très petite"
 }

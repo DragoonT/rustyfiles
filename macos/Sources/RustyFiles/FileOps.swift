@@ -107,7 +107,9 @@ enum Clipboard {
         cutChangeCount = cut ? pb.changeCount : nil
         setCut(cut ? Set(urls.map(\.path)) : [])
         guard cut else { return }
-        // the pasteboard says nothing when another app writes to it; look once a second
+        // the pasteboard says nothing when another app writes to it; look once a second (one
+        // timer: a second Cut must not leave the first one running)
+        watch?.invalidate()
         watch = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
             MainActor.assumeIsolated {
                 if cutChangeCount != NSPasteboard.general.changeCount {

@@ -377,6 +377,11 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         let omni = navBar.omnibar
         omni.breadcrumb.onNavigate = { [weak self] url in self?.navigate(to: url) }
         omni.breadcrumb.onHome = { [weak self] in self?.goHome(nil) }
+        omni.breadcrumb.onOpenInNewTab = { [weak self] url in self?.openTab(url) }
+        omni.breadcrumb.folderMenu = { [weak self] url in
+            guard let self else { return nil }
+            return self.sidebar.folderMenu(url) { [weak self] in self?.navigate(to: url) }.done()
+        }
         omni.onSubmitPath = { [weak self] text in self?.submitPath(text) }
         omni.onSearch = { [weak self] text in self?.runSearch(text) }
         omni.onFilter = { [weak self] text in

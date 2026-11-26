@@ -728,6 +728,35 @@ fn remember_search(history: &mut Vec<String>, q: &str) {
     history.truncate(10);
 }
 
+/// Where a new tab asked for by the user starts: Home, or the place of the tab in front when the setting says "the current
+/// folder". Settings and the Recycle Bin are one tab per window, so "the same place again" would only go back to that tab and
+/// no tab would open (issue 358): from them a new tab starts at Home.
+fn new_tab_start(current_folder: bool, front: Option<Location>) -> Location {
+    front.filter(|loc| current_folder && !matches!(loc, Location::Settings | Location::RecycleBin)).unwrap_or(Location::Home)
+}
+
+#[cfg(test)]
+mod new_tab_tests {
+    use super::new_tab_start;
+    use rf_core::Location;
+    use std::path::PathBuf;
+
+    #[test]
+    fn a_new_tab_starts_at_home_or_where_the_front_tab_is() {
+        let folder = Location::Path(PathBuf::from(r"C:\Work"));
+        assert_eq!(new_tab_start(false, Some(folder.clone())), Location::Home);
+        assert_eq!(new_tab_start(true, Some(folder.clone())), folder);
+        assert_eq!(new_tab_start(true, None), Location::Home);
+    }
+
+    #[test]
+    fn a_new_tab_from_settings_or_the_recycle_bin_starts_at_home() {
+        // (issue 358: these are one tab per window, so asking for the same place again opened nothing)
+        assert_eq!(new_tab_start(true, Some(Location::Settings)), Location::Home);
+        assert_eq!(new_tab_start(true, Some(Location::RecycleBin)), Location::Home);
+    }
+}
+
 /// The folder a tab's terminal button would open, if the tab has one: a real disk folder,
 /// not an archive, not FTP or a network share. Called for every tab on every frame, so it
 /// looks at the path only and never asks the disk (a stat of a share that went away blocks
@@ -1519,10 +1548,9 @@ impl Workspace {
 
     /// A new tab asked for by the user (Ctrl+T, "+", the tab menu): Home, or the folder of the tab in front when the setting says so.
     fn open_new_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let here = (cx.global::<crate::settings::Settings>().new_tab_opens == crate::settings::NewTabOpens::Current)
-            .then(|| self.tabs.get(self.active).map(|t| t.view().read(cx).location().clone()))
-            .flatten();
-        self.open_tab(here.unwrap_or(Location::Home), window, cx);
+        let current = cx.global::<crate::settings::Settings>().new_tab_opens == crate::settings::NewTabOpens::Current;
+        let front = self.tabs.get(self.active).map(|t| t.view().read(cx).location().clone());
+        self.open_tab(new_tab_start(current, front), window, cx);
         if cx.global::<crate::settings::Settings>().new_tab_address {
             // (on the next frame: the new tab's address bar is not drawn yet, and a focus target outside the frame is dropped)
             cx.on_next_frame(window, |this, window, cx| this.begin_address_edit(window, cx));
@@ -4424,6 +4452,8 @@ impl Workspace {
                     .min_h_0()
                     .children(pins_top)
                     .child(col)
+                    // the folder tree's sideways bar, while a deep row has the tree moved or able to move (issue 359)
+                    .children((!rail).then(|| self.tree_sideways_bar(if explorer_look && sidebar_scrollable { 20. } else { 0. }, scrollbar_thumb, scrollbar_thumb_hover, cx)).flatten())
                     // the Windows look's scrollbar, only while there is something to scroll (issue 229: it stood there with nothing to
                     // scroll, a thumb drawn on an empty track)
                     .when(explorer_look && sidebar_scrollable, |d| d.child(

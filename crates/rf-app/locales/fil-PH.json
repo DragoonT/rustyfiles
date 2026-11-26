@@ -2203,5 +2203,11 @@
  "ae5ba83f": "Maghanap ayon sa pangalan o pattern gaya ng *.pdf; hinahanap din ng Enter ang mga subfolder",
  "0a64f2ce": "Kinokopya pa ang item na ito. I-rename ito kapag tapos na ang pagkopya.",
  "b8952992": "{name} + {n} pa",
- "145a4b30": "{t} ang natitira"
+ "d14d53d5": "Kapag nasa parehong menu ang isang command, ipakita ang classic",
+ "e073e569": "Idinadagdag ng ilang program (halimbawa, NanaZip) ang kanilang mga command sa bagong menu ng Windows 11 at sa classic; isa lang sa mga ito ang ipinapakita ng menu. Kapag naka-off, ang nasa bagong menu ang pinapanatili; kapag naka-on, ang classic.",
+ "145a4b30": "{t} ang natitira",
+ "0884e8a7": "Magsimula ng selection box mula sa bakanteng bahagi ng row",
+ "1f5380d9": "Sa mga view na Mga detalye at Mga hanay. Naka-off: nada-drag ang item mula saanman sa row nito.",
+ "8f85e23e": "I-mount",
+ "c808916f": "Napakaliit"
 }

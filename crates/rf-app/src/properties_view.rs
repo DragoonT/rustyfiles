@@ -38,8 +38,31 @@ use crate::theme::{self, Palette};
 const READONLY: u32 = 0x1;
 const HIDDEN: u32 = 0x2;
 
-/// Opens a Properties window for `paths` (one window per call), on the display of the window
-/// in front.
+thread_local! {
+    /// The Properties windows that are open: the items each one shows (see [`same_items`]), whether it is locked, its window.
+    static OPEN: std::cell::RefCell<Vec<(Vec<String>, bool, AnyWindowHandle)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The items of a Properties window as one value that is equal for the same items in any order and any letter case.
+fn same_items(paths: &[PathBuf]) -> Vec<String> {
+    let mut key: Vec<String> = paths.iter().map(|p| p.to_string_lossy().trim_end_matches('\\').to_lowercase()).collect();
+    key.sort();
+    key.dedup();
+    key
+}
+
+/// The window that already shows exactly these items, if it is still open. Windows that were closed leave the list here.
+fn open_window_for(key: &[String], locked: bool, cx: &mut App) -> Option<AnyWindowHandle> {
+    let all: Vec<(Vec<String>, bool, AnyWindowHandle)> = OPEN.with(|o| std::mem::take(&mut *o.borrow_mut()));
+    let alive: Vec<_> = all.into_iter().filter(|(_, _, h)| h.update(cx, |_, _, _| ()).is_ok()).collect();
+    let found = alive.iter().find(|(k, l, _)| k.as_slice() == key && *l == locked).map(|(_, _, h)| *h);
+    OPEN.with(|o| *o.borrow_mut() = alive);
+    found
+}
+
+/// Opens a Properties window for `paths`, on the display of the window in front. One window per item (or per set of items): asked
+/// again for what a window already shows, that window comes to the front instead of a second one opening over it (issue 337:
+/// every click on Properties opened another window, and the earlier ones lay behind the main window).
 pub fn open(paths: Vec<PathBuf>, images: Entity<ImageCache>, cx: &mut App) {
     open_with(paths, images, false, cx);
 }
@@ -50,6 +73,12 @@ pub fn open(paths: Vec<PathBuf>, images: Entity<ImageCache>, cx: &mut App) {
 pub fn open_with(paths: Vec<PathBuf>, images: Entity<ImageCache>, locked: bool, cx: &mut App) {
     if paths.is_empty() {
         return;
+    }
+    let key = same_items(&paths);
+    if let Some(open) = open_window_for(&key, locked, cx) {
+        if open.update(cx, |_, window, _| window.activate_window()).is_ok() {
+            return;
+        }
     }
     let display = cx.active_window().and_then(|w| w.update(cx, |_, w, cx| w.display(cx).map(|d| d.id())).ok().flatten());
     // the size the user last left it at, or the default, never more than most of the display (it was 500 x 680 always, which filled a
@@ -64,7 +93,7 @@ pub fn open_with(paths: Vec<PathBuf>, images: Entity<ImageCache>, locked: bool, 
         window_background: crate::theme::window_material(WindowBackgroundAppearance::MicaBackdrop),
         ..TitleBar::window_options()
     };
-    if let Err(e) = gpui_kit::open_window(options, cx, move |window, cx| {
+    match gpui_kit::open_window(options, cx, move |window, cx| {
         // it often lies over a main window: with glass behind it, the glass must not bend its picture
         crate::glass::keep_out_of_capture(crate::look::window::hwnd_of(window));
         cx.new(|cx| {
@@ -73,8 +102,18 @@ pub fn open_with(paths: Vec<PathBuf>, images: Entity<ImageCache>, locked: bool, 
             v
         })
     }) {
-        log::error!("properties window: {e:#}");
+        Ok((handle, _)) => OPEN.with(|o| o.borrow_mut().push((key, locked, handle))),
+        Err(e) => log::error!("properties window: {e:#}"),
     }
+}
+
+/// A Properties window renamed its item: it is that item's window from now on.
+fn items_changed(window: AnyWindowHandle, paths: &[PathBuf]) {
+    OPEN.with(|o| {
+        if let Some(entry) = o.borrow_mut().iter_mut().find(|(_, _, h)| *h == window) {
+            entry.0 = same_items(paths);
+        }
+    });
 }
 
 /// The Properties window's size the first time (logical px).
@@ -98,6 +137,18 @@ mod size_tests {
     use super::{DEFAULT_SIZE, fit_size};
 
     #[test]
+    fn a_window_is_found_again_by_its_items_in_any_order_and_letter_case() {
+        use super::same_items;
+        use std::path::PathBuf;
+        let a = same_items(&[PathBuf::from(r"C:\Docs\a.txt"), PathBuf::from(r"C:\Docs\B.txt")]);
+        let b = same_items(&[PathBuf::from(r"c:\docs\b.txt"), PathBuf::from(r"C:\Docs\a.txt")]);
+        assert_eq!(a, b);
+        assert_ne!(a, same_items(&[PathBuf::from(r"C:\Docs\a.txt")]));
+        // a folder with and without its closing backslash is one item
+        assert_eq!(same_items(&[PathBuf::from(r"C:\Docs\")]), same_items(&[PathBuf::from(r"C:\Docs")]));
+    }
+
+    #[test]
     fn the_window_keeps_the_size_it_was_left_at_within_the_display() {
         assert_eq!(fit_size(DEFAULT_SIZE, Some([1920., 1080.])), DEFAULT_SIZE);
         assert_eq!(fit_size([700., 900.], Some([1920., 1080.])), [700., 900.]);
@@ -112,6 +163,7 @@ mod size_tests {
 enum Page {
     General,
     Shortcut,
+    WebShortcut,
     Compat,
     Security,
     Details,
@@ -224,6 +276,7 @@ struct Loaded {
     pe: Option<rf_win::pe::PeInfo>,
     signatures: Option<rf_win::signature::Signatures>,
     link: Option<rf_win::shortcut::Details>,
+    web_shortcut: Option<Result<rf_win::internet_shortcut::InternetShortcut, String>>,
     /// The program the Compatibility tab is about (the file, or the shortcut's target).
     compat_exe: Option<PathBuf>,
     compat: Compat,
@@ -273,6 +326,8 @@ pub struct PropsView {
     link: Option<rf_win::shortcut::Details>,
     link_loaded: Option<rf_win::shortcut::Details>,
     link_inputs: Option<LinkInputs>,
+    web_shortcut: Option<Result<rf_win::internet_shortcut::InternetShortcut, String>>,
+    url_input: Option<Entity<InputState>>,
     /// The Shortcut tab's "Shortcut key" field (see hotkey_field.rs).
     hotkey: crate::hotkey_field::HotkeyState,
     /// The Details tab's writable fields as loaded, and their text boxes (title, subject, tags,
@@ -387,6 +442,8 @@ impl PropsView {
             link: None,
             link_loaded: None,
             link_inputs: None,
+            web_shortcut: None,
+            url_input: None,
             hotkey: crate::hotkey_field::HotkeyState::new(window, cx),
             desc_loaded: None,
             desc_inputs: None,
@@ -452,6 +509,14 @@ impl PropsView {
                     if let Some(d) = &v.drive {
                         v.label_loaded = d.label.clone();
                         v.label_input = Some(mk_input(&d.label, window, cx));
+                    }
+                    if let Some(result) = l.web_shortcut {
+                        if let Ok(shortcut) = &result {
+                            let input = mk_input(&shortcut.url, window, cx);
+                            cx.observe(&input, |_, _, cx| cx.notify()).detach();
+                            v.url_input = Some(input);
+                        }
+                        v.web_shortcut = Some(result);
                     }
                     if let Some(d) = l.link {
                         let mk = |s: &str, window: &mut Window, cx: &mut Context<Self>| {
@@ -642,6 +707,12 @@ impl PropsView {
         Some(d)
     }
 
+    fn url_now(&self, cx: &App) -> Option<String> {
+        let Some(Ok(shortcut)) = &self.web_shortcut else { return None };
+        let url = self.url_input.as_ref()?.read(cx).value().to_string();
+        (url != shortcut.url).then_some(url)
+    }
+
     /// The Details tab's writable fields as typed.
     fn desc_now(&self, cx: &App) -> Option<rf_win::props::Editable> {
         let i = self.desc_inputs.as_ref()?;
@@ -670,6 +741,7 @@ impl PropsView {
             || self.attrs.changed()
             || (self.blocked && self.unblock)
             || self.link_now(cx) != self.link_loaded
+            || self.url_now(cx).is_some()
             || self.compat != self.compat_loaded
             || self.folder_icon != self.folder_icon_loaded
             || self.desc_now(cx) != self.desc_loaded
@@ -719,8 +791,13 @@ impl PropsView {
         let paths = self.paths.clone();
         let unblock = self.blocked && self.unblock;
         let link = self.link_now(cx).filter(|d| Some(d) != self.link_loaded.as_ref());
+        let web_shortcut = match (&self.web_shortcut, self.url_now(cx)) {
+            (Some(Ok(shortcut)), Some(url)) => Some((shortcut.clone(), url)),
+            _ => None,
+        };
         let compat = (self.compat != self.compat_loaded).then(|| (self.compat_exe.clone(), self.compat.clone()));
         let icon = (self.folder_icon != self.folder_icon_loaded).then(|| self.folder_icon.clone());
+        let icon_changed = icon.is_some();
         let desc = match (self.desc_loaded.clone(), self.desc_now(cx)) {
             (Some(was), Some(now)) if was != now => Some((was, now)),
             _ => None,
@@ -732,6 +809,15 @@ impl PropsView {
         let task = cx.background_spawn(async move {
             let mut paths = paths;
             let named = |p: &Path, e: &dyn std::fmt::Display| format!("{}: {e}", file_name(p));
+            // Avoid saving the URL when the requested rename already conflicts.
+            if web_shortcut.is_some() {
+                if let Some(n) = &new_name {
+                    let to = paths[0].with_file_name(n);
+                    if to.exists() && !n.eq_ignore_ascii_case(&file_name(&paths[0])) {
+                        return Err(t!("Bu adla bir öğe zaten var").to_string());
+                    }
+                }
+            }
             if unblock {
                 rf_win::fileinfo::unblock(&paths[0]).map_err(|e| named(&paths[0], &e))?;
             }
@@ -760,6 +846,10 @@ impl PropsView {
                     }
                 }
             }
+            let mut saved_web = None;
+            if let Some((shortcut, url)) = &web_shortcut {
+                saved_web = Some(rf_win::internet_shortcut::save(&paths[0], shortcut, url).map_err(|e| named(&paths[0], &e))?);
+            }
             if let Some(d) = &link {
                 rf_win::shortcut::save(&paths[0], d).map_err(|e| named(&paths[0], &format!("{e:#}")))?;
             }
@@ -778,8 +868,8 @@ impl PropsView {
             }
             if let Some(icon) = &icon {
                 rf_win::folder_custom::set_folder_icon(&paths[0], icon.as_ref().map(|(f, i)| (f.as_str(), *i))).map_err(|e| named(&paths[0], &format!("{e:#}")))?;
-                // the list and the tree show the new icon, not the one they kept (issue 65)
-                crate::image_cache::refresh_folder_icons();
+                // the list and the tree show the new icon, not the one they kept (issues 65 and 349)
+                crate::image_cache::folder_icon_changed(&paths[0]);
             }
             let mut renamed = None;
             if let Some(n) = new_name {
@@ -792,16 +882,22 @@ impl PropsView {
                 renamed = Some((from, to.clone()));
                 paths[0] = to;
             }
-            Ok::<_, String>((paths, renamed))
+            Ok::<_, String>((paths, renamed, saved_web))
         });
         cx.spawn_in(window, async move |this, cx| {
             let r = task.await;
             let _ = this.update_in(cx, |v, window, cx| {
                 v.busy = false;
                 match r {
-                    Ok((paths, renamed)) => {
+                    Ok((paths, renamed, saved_web)) => {
+                        if let Some(shortcut) = saved_web { v.web_shortcut = Some(Ok(shortcut)); }
                         if let Some((from, to)) = renamed {
                             crate::undo::push(crate::undo::UndoOp::Renamed { from, to });
+                        }
+                        items_changed(window.window_handle(), &paths);
+                        if icon_changed {
+                            // (the main window draws the folder too, in its list, its tree and its sidebar)
+                            cx.refresh_windows();
                         }
                         v.paths = paths;
                         v.attrs.commit();
@@ -914,6 +1010,9 @@ impl PropsView {
         let Some(Ok(info)) = &self.info else { return pages };
         if self.link.is_some() {
             pages.push((Page::Shortcut, t!("Kısayol")));
+        }
+        if self.web_shortcut.is_some() {
+            pages.push((Page::WebShortcut, t!("Kısayol")));
         }
         if self.compat_exe.is_some() {
             pages.push((Page::Compat, t!("Uyumluluk")));
@@ -1184,6 +1283,18 @@ impl PropsView {
                 .into_any_element(),
         );
         out
+    }
+
+    fn render_web_shortcut(&self, p: &Palette) -> Vec<AnyElement> {
+        match (&self.web_shortcut, &self.url_input) {
+            (Some(Ok(_)), Some(input)) => vec![card(p, vec![
+                h_flex().w_full().gap_3().items_center().py(px(4.)).text_sm()
+                    .child(div().w(px(130.)).flex_shrink_0().text_color(p.text_secondary).child("URL"))
+                    .child(text_field(p, input)).into_any_element()
+            ])],
+            (Some(Err(e)), _) => vec![card(p, vec![row(p, t!("Hata"), e.clone())])],
+            _ => vec![],
+        }
     }
 
     fn render_shortcut(&self, p: &Palette, cx: &mut Context<Self>) -> Vec<AnyElement> {
@@ -1737,6 +1848,9 @@ fn load_one(p: &Path) -> Loaded {
         if signable(p) {
             l.signatures = rf_win::signature::read(p);
         }
+        if ext_of(p) == "url" {
+            l.web_shortcut = Some(rf_win::internet_shortcut::read(p));
+        }
         if ext_of(p) == "lnk" {
             l.link = rf_win::shortcut::details(p).ok();
         }
@@ -2070,6 +2184,7 @@ impl Render for PropsView {
         let body: Vec<AnyElement> = match self.page {
             Page::General => self.render_general(&p, cx),
             Page::Shortcut => self.render_shortcut(&p, cx),
+            Page::WebShortcut => self.render_web_shortcut(&p),
             Page::Compat => self.render_compat(&p, cx),
             Page::Security => self.render_security(&p, cx),
             Page::Details => self.render_details(&p),

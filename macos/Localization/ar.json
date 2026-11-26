@@ -894,5 +894,7 @@
 "A USB stick, a card or a disk image opens in a tab, as Finder does.": "تُفتح عصا USB أو بطاقة أو صورة قرص في علامة تبويب، كما يفعل Finder.",
 "Resume": "استئناف",
 "Pause": "إيقاف مؤقت",
-"Paused": "متوقف مؤقتًا"
+"Paused": "متوقف مؤقتًا",
+"Drop here to pin": "أفلت هنا للتثبيت",
+"No grouping": "بلا تجميع"
 }

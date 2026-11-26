@@ -2203,5 +2203,11 @@
  "ae5ba83f": "Hledejte podle názvu nebo vzoru jako *.pdf; Enter hledá i v podsložkách",
  "0a64f2ce": "Tato položka se ještě kopíruje. Přejmenujte ji, až kopírování skončí.",
  "b8952992": "{name} + {n} dalších",
- "145a4b30": "Zbývá {t}"
+ "d14d53d5": "Když je příkaz v obou nabídkách, zobrazit ten klasický",
+ "e073e569": "Některé programy (například NanaZip) přidávají své příkazy do nové nabídky Windows 11 i do klasické; nabídka zobrazí jen jeden z nich. Vypnuto ponechá příkaz nové nabídky, zapnuto ponechá klasický.",
+ "145a4b30": "Zbývá {t}",
+ "0884e8a7": "Začít výběrový rámeček z prázdného místa řádku",
+ "1f5380d9": "V zobrazeních Podrobnosti a Sloupce. Vypnuto: položku lze táhnout odkudkoli na jejím řádku.",
+ "8f85e23e": "Připojit",
+ "c808916f": "Velmi malé"
 }

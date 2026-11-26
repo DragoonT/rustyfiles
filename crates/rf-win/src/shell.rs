@@ -57,6 +57,15 @@ pub fn run_program(program: &Path, args: &str, dir: Option<&Path>) -> anyhow::Re
     Ok(())
 }
 
+/// Tells Windows that the user opened this file: it goes to Windows' recent items (Home, Start, the jump lists), as a file opened
+/// from Explorer does. Windows keeps that list for what Explorer and the file dialogs open; a file opened by another program is in it
+/// only when that program says so (issue 341). Nothing happens when the user switched the recent items off.
+pub fn note_recent(path: &Path) {
+    use windows::Win32::UI::Shell::{SHARD_PATHW, SHAddToRecentDocs};
+    let file = wide(path);
+    unsafe { SHAddToRecentDocs(SHARD_PATHW.0 as u32, Some(file.as_ptr().cast())) };
+}
+
 /// Opens a file with its default handler (same as double-click in Explorer).
 pub fn open(path: &Path) -> anyhow::Result<()> {
     exec(path, None, None)
@@ -259,5 +268,30 @@ mod terminal_tests {
         assert_eq!(terminal_dir_args("conemu64.exe", r"C:\work"), ["-Dir", r"C:\work"]);
         assert_eq!(terminal_dir_args("wt.exe", r"C:\work"), ["-d", r"C:\work"]);
         assert!(terminal_dir_args("cmd.exe", r"C:\work").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod recent_tests {
+    /// Live: one shortcut is written to this PC's recent items and taken out again. Windows leaves out files in the temporary
+    /// folder, so the file stands beside the test program.
+    #[test]
+    #[ignore = "writes one entry to this PC's recent items and removes it again"]
+    fn a_noted_file_is_one_of_windows_recent_items() {
+        let dir = std::env::current_exe().unwrap().parent().unwrap().join("rf-recent-probe");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("rf-recent-probe-341.txt");
+        std::fs::write(&file, "probe").unwrap();
+        let link = crate::dock::startrecent::recent_dir().unwrap().join("rf-recent-probe-341.txt.lnk");
+        let _ = std::fs::remove_file(&link);
+        super::note_recent(&file);
+        let t = std::time::Instant::now();
+        while !link.exists() && t.elapsed() < std::time::Duration::from_secs(5) {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let there = link.exists();
+        let _ = std::fs::remove_file(&link);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(there, "no shortcut in the recent items after {:?}", t.elapsed());
     }
 }

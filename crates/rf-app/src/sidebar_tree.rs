@@ -64,6 +64,27 @@ fn sideways_most(deepest: u16, width: f32) -> f32 {
     sideways_goal(0.0, indent_of(deepest), width.max(0.0)) * f32::from(u8::from(width > 1.0))
 }
 
+/// Height of the strip the sideways bar stands in, at the sidebar's bottom edge (the bar itself is thinner).
+const BAR_H: f32 = 12.;
+/// The least the bar's thumb takes of its track, so that it can always be grabbed.
+const BAR_THUMB_LEAST: f32 = 0.15;
+
+/// The sideways bar's thumb for a tree `width` wide that stands moved `x` of at most `most`: where it starts and how wide it is,
+/// both as a share of the track. It is as much of the track as the tree's width is of all there is to see sideways.
+fn bar_thumb(x: f32, most: f32, width: f32) -> (f32, f32) {
+    if most <= 0.0 || width <= 0.0 {
+        return (0.0, 1.0);
+    }
+    let w = (width / (width + most)).clamp(BAR_THUMB_LEAST, 1.0);
+    ((1.0 - w) * (x / most).clamp(0.0, 1.0), w)
+}
+
+/// The other way round: where the tree stands when the thumb's left edge is `left` pixels into a track `track` pixels wide.
+fn bar_slide(left: f32, track: f32, most: f32, width: f32) -> f32 {
+    let room = track * (1.0 - bar_thumb(0.0, most, width).1);
+    if room <= 0.0 { 0.0 } else { most * (left / room).clamp(0.0, 1.0) }
+}
+
 /// The tree's place sideways: how far it is moved to the left, and the slide that takes it there.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Slide {
@@ -193,7 +214,15 @@ pub struct Holder {
     /// The rail's hover peek draws a second sidebar; the rail itself shows no tree and neither does its peek.
     in_peek: bool,
     sub: Option<gpui_kit::Subscription>,
+    /// The sideways bar's track in the window (its left edge and its width, measured at every paint), for a click on it.
+    bar_track: Rc<Cell<(f32, f32)>>,
+    /// Where in the thumb a drag of it took hold, so that the thumb stays under the pointer as it was grabbed.
+    bar_grab: Rc<Cell<f32>>,
 }
+
+/// A drag of the sideways bar's thumb.
+#[derive(Clone)]
+struct TreeBarDrag;
 
 impl Holder {
     pub(super) fn scroll_handle(&self) -> &ScrollHandle {
@@ -584,6 +613,25 @@ impl SidebarTree {
         most > 0.0
     }
 
+    /// For the sideways bar: where the tree stands, how far it may go and how wide it is. `None` while no row is deep enough for
+    /// the tree to move at all: then there is no bar.
+    fn sideways_state(&self) -> Option<(f32, f32, f32)> {
+        let width = self.tree_w.get();
+        let most = sideways_most(self.deepest.1, width);
+        (most > 0.5).then(|| (self.slide.at(Instant::now()).0.clamp(0.0, most), most, width))
+    }
+
+    /// The bar's thumb was put `left` pixels into its track (a drag, a click on the track): the tree goes there at once.
+    fn slide_bar_to(&mut self, left: f32, track: f32, cx: &mut Context<Self>) {
+        let width = self.tree_w.get();
+        let most = sideways_most(self.deepest.1, width);
+        let to = bar_slide(left, track, most, width);
+        if (to - self.slide.to).abs() > 0.01 || self.slide.since.is_some() {
+            self.slide = Slide { from: to, to, since: None };
+            cx.notify();
+        }
+    }
+
     /// Where the tree stands sideways in this frame. It is moved when the open folder's row or the keyboard's row becomes another
     /// one (or the sidebar another width), by the least that shows that row; never for a row that only came into view by scrolling.
     fn sideways(&mut self, mark: Option<(usize, bool)>, focused: bool, window: &mut Window) -> f32 {
@@ -721,8 +769,8 @@ impl SidebarTree {
                 crate::image_cache::PackPicture::Ready(im) => Some(im),
                 _ => None,
             }
-        } else if info.own_icon && root.is_none() {
-            // (only a folder whose desktop.ini names a picture: issue 225)
+        } else if (info.own_icon || crate::image_cache::folder_icon_given(info.path)) && root.is_none() {
+            // (only a folder whose desktop.ini names a picture: issue 225; one given its first icon since it was listed: issue 349)
             self.images.update(cx, |c, cx| if c.folder_names_icon(info.path, cx) { c.icon(dir, &e, cx) } else { None })
         } else {
             None
@@ -1038,10 +1086,85 @@ impl Workspace {
             (crate::glass::key_of(cur), self.glass_hwnd)
         });
         view.update(cx, |t, cx| t.sync(path.as_deref(), shown_elsewhere, lens, cx));
+        // (room for the sideways bar under the last row, so that the bar never covers a folder)
+        let bar = view.read(cx).sideways_state().is_some();
         col.track_scroll(&self.side_tree.scroll).child(
             v_flex()
+                .when(bar, |d| d.pb(px(BAR_H)))
                 .child(div().px_2().pt_3().pb_1().text_xs().font_weight(FontWeight::SEMIBOLD).text_color(p.text_tertiary).child(t!("Klasörler")))
                 .child(view),
+        )
+    }
+
+    /// The sideways bar: a thin scrollbar at the sidebar's bottom edge, there only while a row is deep enough for the tree to
+    /// stand moved sideways. The tree moves for the open folder by itself; the bar shows that it did and takes it back by hand:
+    /// its thumb is dragged, a click on the track puts the thumb's middle there (issue 359: "I cannot use the horizontal
+    /// scrollbar to scroll to the left ... and I don't know how to reset it"; until then only Shift and the wheel, or a
+    /// touchpad, moved it). `right` keeps it clear of the sidebar's own scrollbar.
+    pub(super) fn tree_sideways_bar(&self, right: f32, thumb: Hsla, thumb_hover: Hsla, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let view = self.side_tree.view.clone().filter(|_| !self.side_tree.in_peek)?;
+        let (x, most, width) = view.read(cx).sideways_state()?;
+        let (start, share) = bar_thumb(x, most, width);
+        let (track, grab) = (self.side_tree.bar_track.clone(), self.side_tree.bar_grab.clone());
+        let probe = canvas(
+            {
+                let track = track.clone();
+                move |b, _, _| track.set((f32::from(b.origin.x), f32::from(b.size.width)))
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .size_full();
+        let thumb_el = div()
+            .id("tree-sideways-thumb")
+            .group("tree-sideways-thumb")
+            .absolute()
+            .top_0()
+            .h_full()
+            .left(relative(start))
+            .w(relative(share))
+            .flex()
+            .items_center()
+            // (the press is the thumb's alone: on the track under it, it would be a click that jumps)
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_drag(TreeBarDrag, move |_, at: Point<Pixels>, _, cx| {
+                grab.set(f32::from(at.x));
+                cx.new(|_| ResizeGhost)
+            })
+            .child(div().w_full().h(px(4.)).rounded_full().bg(thumb).group_hover("tree-sideways-thumb", move |s| s.h(px(6.)).bg(thumb_hover)));
+        Some(
+            div()
+                .id("tree-sideways-bar")
+                .absolute()
+                .left(px(6.))
+                .right(px(right + 6.))
+                .bottom_0()
+                .h(px(BAR_H))
+                // (the pointer on the bar is not on the row under it: that row lit up as hovered, seen in a test copy)
+                .occlude()
+                .child(probe)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, ev: &MouseDownEvent, _, cx| {
+                        cx.stop_propagation();
+                        let (left, wide) = track.get();
+                        if wide > 1.0
+                            && let Some(view) = this.side_tree.view.clone()
+                        {
+                            let at = f32::from(ev.position.x) - left - wide * share / 2.0;
+                            view.update(cx, |t, cx| t.slide_bar_to(at, wide, cx));
+                        }
+                    }),
+                )
+                .on_drag_move(cx.listener(|this, ev: &DragMoveEvent<TreeBarDrag>, _, cx| {
+                    let (left, wide) = (f32::from(ev.bounds.origin.x), f32::from(ev.bounds.size.width));
+                    let at = f32::from(ev.event.position.x) - left - this.side_tree.bar_grab.get();
+                    if let Some(view) = this.side_tree.view.clone() {
+                        view.update(cx, |t, cx| t.slide_bar_to(at, wide, cx));
+                    }
+                }))
+                .child(thumb_el)
+                .into_any_element(),
         )
     }
 
@@ -1084,6 +1207,30 @@ mod tests {
         assert_eq!((indent_of(0), indent_of(1), indent_of(6), indent_of(7), indent_of(40)), (0., 16., 96., 112., 640.));
         for depth in 0..60 {
             assert_eq!(indent_of(depth + 1) - indent_of(depth), super::INDENT, "level {depth} and its children");
+        }
+    }
+
+    /// The sideways bar: the thumb is the share of the tree that is in view, it runs the whole track, and putting it somewhere
+    /// by hand moves the tree to the place the thumb then shows (issue 359).
+    #[test]
+    fn the_sideways_bar_shows_where_the_tree_stands_and_takes_it_there() {
+        use super::{BAR_THUMB_LEAST, bar_slide, bar_thumb};
+        let (w, most, track) = (240.0, 80.0, 200.0);
+        assert_eq!(bar_thumb(0., most, w), (0.0, 0.75), "at rest: at the left, three quarters of the track");
+        assert_eq!(bar_thumb(most, most, w), (0.25, 0.75), "moved all the way: at the right end");
+        assert_eq!(bar_thumb(most * 2., most, w), (0.25, 0.75), "never past the end");
+        assert_eq!(bar_thumb(0., 0., w), (0.0, 1.0), "nothing to move: the whole track");
+        assert_eq!(bar_thumb(0., 100_000., w).1, BAR_THUMB_LEAST, "a very deep tree: the thumb can still be grabbed");
+        // the thumb's room is a quarter of the track, 50 px: half of it is half of the way
+        assert_eq!(bar_slide(0., track, most, w), 0.);
+        assert_eq!(bar_slide(25., track, most, w), 40.);
+        assert_eq!(bar_slide(50., track, most, w), most);
+        assert_eq!((bar_slide(-30., track, most, w), bar_slide(900., track, most, w)), (0., most), "dragged past an end: held there");
+        assert_eq!(bar_slide(10., 0., most, w), 0., "a track not measured yet");
+        // and back: the tree put where the thumb was dropped shows the thumb at that very place
+        for left in [0.0_f32, 10., 33., 50.] {
+            let x = bar_slide(left, track, most, w);
+            assert!((bar_thumb(x, most, w).0 * track - left).abs() < 0.01, "thumb at {left}");
         }
     }
 

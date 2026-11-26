@@ -179,8 +179,11 @@ mod tests {
         });
         let (owner, apartment, name) = rx.recv_timeout(Duration::from_millis(700)).expect("the drag's job ran while the shell thread was busy");
         assert_ne!(owner, 0, "it has an owner window of its own");
-        // (a single-threaded apartment, as OLE's drag needs)
-        assert_eq!(apartment.ok(), Some(windows::Win32::System::Com::APTTYPE_STA));
+        // (a single-threaded apartment, as OLE's drag needs. The first one made in a process is its "main" one: which thread that is
+        // depends on the order the tests of a full run start in)
+        let apartment = apartment.ok();
+        use windows::Win32::System::Com::{APTTYPE_MAINSTA, APTTYPE_STA};
+        assert!(apartment == Some(APTTYPE_STA) || apartment == Some(APTTYPE_MAINSTA), "{apartment:?}");
         assert_eq!(name.as_deref(), Some("rf-drag-sta"));
         // a second job finds the same thread, and a job of the shell thread still runs on its own
         let (tx, rx) = std::sync::mpsc::channel();

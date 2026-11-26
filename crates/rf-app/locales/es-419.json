@@ -2203,5 +2203,11 @@
  "ae5ba83f": "Busca por nombre o con un patrón como *.pdf; Enter también busca en las subcarpetas",
  "0a64f2ce": "Este elemento aún se está copiando. Cámbiale el nombre cuando termine la copia.",
  "b8952992": "{name} + {n} más",
- "145a4b30": "Quedan {t}"
+ "d14d53d5": "Cuando un comando está en ambos menús, mostrar el clásico",
+ "e073e569": "Algunos programas (NanaZip, por ejemplo) agregan sus comandos al menú nuevo de Windows 11 y al clásico; el menú muestra solo uno de ellos. Desactivado conserva el del menú nuevo, activado conserva el clásico.",
+ "145a4b30": "Quedan {t}",
+ "0884e8a7": "Iniciar un cuadro de selección desde el espacio vacío de una fila",
+ "1f5380d9": "En las vistas Detalles y Columnas. Desactivado: un elemento se arrastra desde cualquier punto de su fila.",
+ "8f85e23e": "Montar",
+ "c808916f": "Muy pequeño"
 }

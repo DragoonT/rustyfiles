@@ -894,5 +894,7 @@
 "A USB stick, a card or a disk image opens in a tab, as Finder does.": "USB ფლეშკა, ბარათი ან დისკის სურათი ჩანართში იხსნება, როგორც Finder-ში.",
 "Resume": "გაგრძელება",
 "Pause": "პაუზა",
-"Paused": "დაპაუზებულია"
+"Paused": "დაპაუზებულია",
+"Drop here to pin": "ჩააგდეთ აქ მისამაგრებლად",
+"No grouping": "დაჯგუფების გარეშე"
 }

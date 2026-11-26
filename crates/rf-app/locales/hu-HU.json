@@ -2203,5 +2203,11 @@
  "ae5ba83f": "Keresés név vagy minta alapján, például *.pdf; az Enter az almappákban is keres",
  "0a64f2ce": "Ennek az elemnek a másolása még tart. Nevezze át, amikor a másolás befejeződött.",
  "b8952992": "{name} + még {n}",
- "145a4b30": "{t} van hátra"
+ "d14d53d5": "Ha egy parancs mindkét menüben szerepel, a klasszikus jelenjen meg",
+ "e073e569": "Egyes programok (például a NanaZip) a Windows 11 új menüjéhez és a klasszikushoz is hozzáadják a parancsaikat; a menü csak az egyiket mutatja. Kikapcsolva az új menüé marad, bekapcsolva a klasszikus.",
+ "145a4b30": "{t} van hátra",
+ "0884e8a7": "Kijelölőkeret indítása a sor üres területéről",
+ "1f5380d9": "A Részletek és az Oszlopok nézetben. Ki: az elem a sora bármely pontjáról húzható.",
+ "8f85e23e": "Csatolás",
+ "c808916f": "Nagyon kicsi"
 }

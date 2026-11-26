@@ -18,6 +18,8 @@ final class SidebarView: FlippedView {
         /// The folder tree: how deep, and whether it has folders inside (a chevron).
         var depth = 0
         var expandable = false
+        /// The "Pinned" header: folders dropped on it get pinned (workspace.rs `pin_dropped`).
+        var pinHeader = false
         var expanded = false
         /// A drive: how full it is (0…1) and "used / total", for its bar.
         var used: Double? = nil
@@ -82,6 +84,28 @@ final class SidebarView: FlippedView {
     var onOpenInNewTab: ((URL) -> Void)?
     var onOpenInNewWindow: ((URL) -> Void)?
     var onDiskUsage: ((URL) -> Void)?
+
+    /// The menu of a folder in the sidebar, which the address bar's segments show too (issue
+    /// 331): open here / in a new tab / in a new window, pin, copy the path, Terminal,
+    /// Properties and Disk usage. Callers add their own items to the end.
+    func folderMenu(_ url: URL, pinnable: Bool = true, open: @escaping () -> Void) -> MenuBuilder {
+        let b = MenuBuilder()
+        b.add(String(localized: "Open"), "square-arrow-out-up-right", open)
+        b.add(String(localized: "Open in new tab"), "square-plus") { [weak self] in self?.onOpenInNewTab?(url) }
+        b.add(String(localized: "Open in new window"), "app-window") { [weak self] in self?.onOpenInNewWindow?(url) }
+        b.separator()
+        if pinnable {
+            let pinned = MenuActions.isPinned(url)
+            b.add(pinned ? String(localized: "Unpin from sidebar") : String(localized: "Pin to sidebar"), pinned ? "pin-off" : "pin") {
+                MenuActions.setPinned(url, !pinned)
+            }
+        }
+        b.add(String(localized: "Copy path"), "clipboard-copy") { MenuActions.copyPaths([url]) }
+        b.add(String(localized: "Open in Terminal"), "square-terminal") { MenuActions.openInTerminal(url) }
+        b.add(String(localized: "Properties"), "wrench", key: "i") { PropertiesWindow.show([url]) }
+        b.add(String(localized: "Disk usage"), "chart-pie") { [weak self] in self?.onDiskUsage?(url) }
+        return b
+    }
     var selectedURL: URL? {
         didSet {
             if let u = selectedURL, u != oldValue { follow(u) }
@@ -146,7 +170,7 @@ final class SidebarView: FlippedView {
             }
         }
         if AppSettings.showsSection(.pinned) {
-            items.append(Item(kind: .header, title: String(localized: "Pinned"), icon: "", url: nil))
+            items.append(Item(kind: .header, title: String(localized: "Pinned"), icon: "", url: nil, pinHeader: true))
             for url in Pins.load() {
                 items.append(Item(kind: .pinned, title: fm.displayName(atPath: url.path), icon: "folder", url: url))
             }
@@ -288,10 +312,15 @@ final class SidebarListView: HoverView {
                 enclosingScrollView?.reflectScrolledClipView(clip)
             }
         }
-        dropIndex = index(at: pt).flatMap { dropURL($0) != nil ? $0 : nil }
-        guard let i = dropIndex, let dest = dropURL(i) else { return [] }
         let urls = FileListController.droppedURLs(info)
-        guard !urls.isEmpty else { return [] }
+        fileDrag = !urls.isEmpty
+        // on the "Pinned" header, folders get pinned (files are ignored, as in Explorer)
+        if let h = rects().firstIndex(where: { $0.contains(pt) }), items[h].pinHeader {
+            dropIndex = Self.folders(urls).isEmpty ? nil : h
+            return dropIndex == nil ? [] : .link
+        }
+        dropIndex = index(at: pt).flatMap { dropURL($0) != nil ? $0 : nil }
+        guard let i = dropIndex, let dest = dropURL(i), !urls.isEmpty else { return [] }
         if items[i].kind == .trash { return .delete }
         if items[i].kind == .tag { return .link }
         return FileListController.dropKind(info, urls, into: dest) == .copy ? .copy : .move
@@ -301,12 +330,34 @@ final class SidebarListView: HoverView {
     override func wantsPeriodicDraggingUpdates() -> Bool { true }
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { dragOperation(sender) }
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { dragOperation(sender) }
-    override func draggingExited(_ sender: NSDraggingInfo?) { dropIndex = nil }
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        dropIndex = nil
+        fileDrag = false
+    }
+
+    override func draggingEnded(_ sender: NSDraggingInfo) {
+        dropIndex = nil
+        fileDrag = false
+    }
+
+    /// While files are dragged over the sidebar, the "Pinned" header says it takes them.
+    private var fileDrag = false { didSet { if fileDrag != oldValue { needsDisplay = true } } }
+
+    private static func folders(_ urls: [URL]) -> [URL] {
+        urls.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey])).map { $0.isDirectory == true && $0.isPackage != true } ?? false }
+    }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        defer { dropIndex = nil }
-        guard let i = dropIndex, let dest = dropURL(i) else { return false }
+        defer {
+            dropIndex = nil
+            fileDrag = false
+        }
         let urls = FileListController.droppedURLs(sender)
+        if let i = dropIndex, items[i].pinHeader {
+            for d in Self.folders(urls) where !MenuActions.isPinned(d) { MenuActions.setPinned(d, true) }
+            return true
+        }
+        guard let i = dropIndex, let dest = dropURL(i) else { return false }
         if items[i].kind == .tag {
             // dropped on a tag: the files get it
             let name = items[i].title
@@ -347,6 +398,13 @@ final class SidebarListView: HoverView {
         let selected = owner?.selectedURL.map(SidebarView.norm)
         for (i, (item, r)) in zip(items, rects()).enumerated() {
             if item.kind == .header {
+                if item.pinHeader, fileDrag {
+                    if dropIndex == i { Draw.roundedRect(r, radius: Metrics.radiusSmall, fill: p.selection) }
+                    Draw.icon("pin", in: NSRect(x: r.minX + 8, y: r.minY + 12, width: 12, height: 16), size: 12, color: p.accent)
+                    Draw.text(String(localized: "Drop here to pin"), in: NSRect(x: r.minX + 24, y: r.minY + 12, width: r.width - 32, height: 16),
+                              font: Metrics.textXsSemibold, color: p.accent)
+                    continue
+                }
                 // px_2, pt_3, pb_1, text_xs semibold, tertiary
                 Draw.text(item.title, in: NSRect(x: r.minX + 8, y: r.minY + 12, width: r.width - 16, height: 16), font: Metrics.textXsSemibold, color: p.textTertiary)
                 continue
@@ -436,21 +494,7 @@ final class SidebarListView: HoverView {
             items[i].kind != .trash, let owner
         else { return nil }
         let item = items[i]
-        let b = MenuBuilder()
-        b.add(String(localized: "Open"), "square-arrow-out-up-right") { owner.clicked(item) }
-        b.add(String(localized: "Open in new tab"), "square-plus") { owner.onOpenInNewTab?(url) }
-        b.add(String(localized: "Open in new window"), "app-window") { owner.onOpenInNewWindow?(url) }
-        b.separator()
-        if item.kind != .drive {
-            let pinned = MenuActions.isPinned(url)
-            b.add(pinned ? String(localized: "Unpin from sidebar") : String(localized: "Pin to sidebar"), pinned ? "pin-off" : "pin") {
-                MenuActions.setPinned(url, !pinned)
-            }
-        }
-        b.add(String(localized: "Copy path"), "clipboard-copy") { MenuActions.copyPaths([url]) }
-        b.add(String(localized: "Open in Terminal"), "square-terminal") { MenuActions.openInTerminal(url) }
-        b.add(String(localized: "Properties"), "wrench", key: "i") { PropertiesWindow.show([url]) }
-        b.add(String(localized: "Disk usage"), "chart-pie") { owner.onDiskUsage?(url) }
+        let b = owner.folderMenu(url, pinnable: item.kind != .drive) { owner.clicked(item) }
         // a cloud folder, a drive, Applications or Library can be hidden on its own (issue 141)
         if [.cloud, .drive, .place].contains(item.kind) {
             b.separator()

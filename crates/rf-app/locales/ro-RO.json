@@ -2203,5 +2203,11 @@
  "ae5ba83f": "Căutați după nume sau după un model precum *.pdf; Enter caută și în subfoldere",
  "0a64f2ce": "Acest element încă se copiază. Redenumiți-l după ce copierea se termină.",
  "b8952992": "{name} + încă {n}",
- "145a4b30": "Au mai rămas {t}"
+ "d14d53d5": "Când o comandă este în ambele meniuri, afișează-o pe cea clasică",
+ "e073e569": "Unele programe (NanaZip, de exemplu) își adaugă comenzile atât în noul meniu din Windows 11, cât și în cel clasic; meniul afișează doar una dintre ele. Dezactivat o păstrează pe cea din noul meniu, activat o păstrează pe cea clasică.",
+ "145a4b30": "Au mai rămas {t}",
+ "0884e8a7": "Începe un cadru de selecție din spațiul gol al unui rând",
+ "1f5380d9": "În vizualizările Detalii și Coloane. Dezactivat: un element este tras din orice punct al rândului său.",
+ "8f85e23e": "Montare",
+ "c808916f": "Foarte mici"
 }

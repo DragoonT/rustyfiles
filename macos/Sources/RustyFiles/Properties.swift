@@ -18,8 +18,20 @@ import UniformTypeIdentifiers
 final class PropertiesWindow: NSWindowController, NSWindowDelegate {
     private static var open: [PropertiesWindow] = []
 
+    /// One window per item, or per set of items: asked again for what a window already shows,
+    /// that window comes to the front instead of a second one opening over it (issue 337).
     static func show(_ urls: [URL], page: Int = 0) {
         guard !urls.isEmpty else { return }
+        func key(_ list: [URL]) -> Set<String> { Set(list.map { $0.standardizedFileURL.path }) }
+        open.removeAll { $0.window?.isVisible != true }
+        if let w = open.first(where: { key($0.urls) == key(urls) }) {
+            if page > 0, page < w.pages.count {
+                w.tabs.selectedSegment = page
+                w.tabChanged()
+            }
+            w.window?.makeKeyAndOrderFront(nil)
+            return
+        }
         let w = PropertiesWindow(urls)
         if page > 0, page < w.pages.count {
             w.tabs.selectedSegment = page

@@ -894,5 +894,7 @@
 "A USB stick, a card or a disk image opens in a tab, as Finder does.": "דיסק USB, כרטיס או קובץ תמונת דיסק נפתחים בכרטיסייה, כמו ב-Finder.",
 "Resume": "המשך",
 "Pause": "השהה",
-"Paused": "מושהה"
+"Paused": "מושהה",
+"Drop here to pin": "שחרר כאן כדי להצמיד",
+"No grouping": "ללא קיבוץ"
 }

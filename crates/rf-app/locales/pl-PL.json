@@ -2203,7 +2203,13 @@
  "ae5ba83f": "Szukaj według nazwy lub wzorca, np. *.pdf; Enter szuka także w podfolderach",
  "0a64f2ce": "Ten element jest jeszcze kopiowany. Zmień jego nazwę po zakończeniu kopiowania.",
  "b8952992": "{name} + {n} więcej",
+ "d14d53d5": "Gdy polecenie jest w obu menu, pokazuj klasyczne",
+ "e073e569": "Niektóre programy (na przykład NanaZip) dodają swoje polecenia zarówno do nowego menu systemu Windows 11, jak i do klasycznego; menu pokazuje tylko jedno z nich. Wyłączone zostawia polecenie nowego menu, włączone zostawia klasyczne.",
  "145a4b30": "Pozostało {t}",
+ "0884e8a7": "Rozpoczynaj ramkę zaznaczenia z pustego miejsca wiersza",
+ "1f5380d9": "W widokach Szczegóły i Kolumny. Wyłączone: element można przeciągać z dowolnego miejsca jego wiersza.",
+ "8f85e23e": "Zamontuj",
+ "c808916f": "Bardzo małe",
  "d59927ac": "Materiał menu podręcznych",
  "338db07f": "Określa tło menu kontekstowych i list rozwijanych. Kolory zależą od wybranego motywu."
 }
