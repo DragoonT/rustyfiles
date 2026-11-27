@@ -39,6 +39,9 @@ pub struct Preview {
     _task: Option<Task<()>>,
     /// Extension → a Windows preview handler exists (looked up off the UI thread).
     handlers: std::collections::HashMap<String, bool>,
+    /// The pane's scrolling, for its scrollbar (issue 401: a long list of details went under the pane's edge with nothing to show
+    /// that there was more).
+    scroll: ScrollHandle,
     /// What the hosted preview handler currently shows: (file, screen rect).
     host: Option<(PathBuf, [i32; 4])>,
     /// Pane hidden or covered by a dialog/flyout: the host window must not show.
@@ -148,6 +151,7 @@ impl Preview {
             images,
             _task: None,
             handlers: Default::default(),
+            scroll: ScrollHandle::new(),
             host: None,
             occluded: false,
             large: false,
@@ -1032,7 +1036,7 @@ fn prop_row(p: &Palette, k: &'static str, v: String) -> impl IntoElement {
 impl Render for Preview {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = Palette::for_window(window);
-        let mut col = v_flex().id("preview").size_full().p_3().gap_3().overflow_y_scroll();
+        let mut col = v_flex().id("preview").size_full().p_3().gap_3().overflow_y_scroll().track_scroll(&self.scroll);
         let Some((path, e)) = self.target.clone() else {
             self.hide_host();
             return col
@@ -1188,9 +1192,21 @@ impl Render for Preview {
         };
         // (the details can be switched off: Settings, "File details in the preview")
         if !cx.global::<crate::settings::Settings>().preview_details {
-            return col.into_any_element();
+            return self.with_scrollbar(col.into_any_element());
         }
-        col.child(div().w_full().h(px(1.)).bg(p.divider)).child(props).children(hash_section).into_any_element()
+        self.with_scrollbar(col.child(div().w_full().h(px(1.)).bg(p.divider)).child(props).children(hash_section).into_any_element())
+    }
+}
+
+impl Preview {
+    /// The pane's column with the file list's scrollbar beside it (shown as the list's is: Settings › scrollbars).
+    fn with_scrollbar(&self, body: AnyElement) -> AnyElement {
+        div()
+            .relative()
+            .size_full()
+            .child(body)
+            .child(gpui_kit::component::scroll::Scrollbar::vertical(&self.scroll).id("preview-scrollbar").mode(crate::folder_view::scrollbar_mode()))
+            .into_any_element()
     }
 }
 
