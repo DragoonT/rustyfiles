@@ -231,6 +231,17 @@ pub enum MenuMaterial {
 }
 
 impl MenuMaterial {
+    /// For the popups that are not menus (the View flyout, the Status Center: issue 380, they did not follow the setting): what a
+    /// popup that would draw `auto_liquid` glass, and an opaque card in the Explorer look (`explorer`), gets with this material.
+    /// Automatic keeps each one as it was (`None`); another choice gives (glass, backdrop, opaque card).
+    pub fn for_panel(self, auto_liquid: bool, explorer: bool, materials: bool) -> Option<(bool, WindowBackgroundAppearance, bool)> {
+        if self == Self::Automatic {
+            return None;
+        }
+        let (liquid, bg) = self.resolve(auto_liquid, explorer, materials);
+        Some((liquid, bg, bg == WindowBackgroundAppearance::Opaque))
+    }
+
     /// Whether to draw HyperGlass and what backdrop the popup requests before OS fallback.
     pub fn resolve(self, auto_liquid: bool, auto_opaque: bool, materials: bool) -> (bool, WindowBackgroundAppearance) {
         use WindowBackgroundAppearance::{Blurred, MicaAltBackdrop, MicaBackdrop, Opaque, Transparent};

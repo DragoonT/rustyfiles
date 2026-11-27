@@ -71,6 +71,14 @@ pub fn toggle(key: &'static str, pos: Point<Pixels>, width: f32, body: Body, exp
     let dark = Palette::for_window(owner).dark;
     // opened from a window that shows glass (or from a popup that does): on real glass, not Windows' acrylic
     let liquid = !explorer_style && crate::glass::liquid(crate::look::window::hwnd_of(owner));
+    // Settings › Appearance › the popup menus' material, when it is not Automatic: this flyout follows it as the menus do (issue
+    // 380); an opaque one is drawn as the Explorer look's card
+    let material = cx.global::<crate::settings::Settings>().menu_material;
+    let chosen = material.for_panel(crate::glass::liquid(crate::look::window::hwnd_of(owner)), explorer_style, crate::settings::materials_available());
+    let (liquid, explorer_style, backdrop) = match chosen {
+        Some((liquid, bg, opaque)) => (liquid, opaque, bg),
+        None => (liquid, explorer_style, if explorer_style { WindowBackgroundAppearance::Opaque } else { crate::theme::popup_material(liquid) }),
+    };
     let opts = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::new(origin, size(px(width), px(80.))))),
         display_id: crate::theme::popup_display(owner, cx),
@@ -81,7 +89,7 @@ pub fn toggle(key: &'static str, pos: Point<Pixels>, width: f32, body: Body, exp
         is_movable: false,
         is_resizable: false,
         is_minimizable: false,
-        window_background: if explorer_style { WindowBackgroundAppearance::Opaque } else { crate::theme::popup_material(liquid) },
+        window_background: backdrop,
         ..Default::default()
     };
     // the app window keeps its active look (Mica, caption) while the flyout has focus

@@ -2034,9 +2034,16 @@ pub fn sync_popup(ops: &Entity<Ops>, cx: &mut App) {
 fn open_popup(ops: &Entity<Ops>, owner: AnyWindowHandle, cx: &mut App) -> Option<AnyWindowHandle> {
     // anchored under the title-bar button: right edge 8 px in from the window's
     let explorer_style = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
-    let (origin, width, dark, display) = owner
-        .update(cx, |_, w, cx| (w.bounds().origin, w.viewport_size().width, Palette::for_window(w).dark, crate::theme::popup_display(w, cx)))
+    let (origin, width, dark, display, owner_hwnd) = owner
+        .update(cx, |_, w, cx| (w.bounds().origin, w.viewport_size().width, Palette::for_window(w).dark, crate::theme::popup_display(w, cx), crate::look::window::hwnd_of(w)))
         .ok()?;
+    // the popup menus' material when it is not Automatic, as the menus have it (issue 380); an opaque one draws the card
+    let material = cx.global::<crate::settings::Settings>().menu_material;
+    let (explorer_style, backdrop) = match material.for_panel(crate::glass::liquid(owner_hwnd), explorer_style, crate::settings::materials_available()) {
+        // (this panel paints no glass of its own: a glass choice gets the see-through backdrop it already uses)
+        Some((_, bg, opaque)) => (opaque, if bg == WindowBackgroundAppearance::Transparent { crate::theme::window_material(WindowBackgroundAppearance::Blurred) } else { bg }),
+        None => (explorer_style, if explorer_style { WindowBackgroundAppearance::Opaque } else { crate::theme::window_material(WindowBackgroundAppearance::Blurred) }),
+    };
     let top = theme::titlebar_h() + px(theme::address_row_h(false) - 4.);
     let x = origin.x + width - px(8. + FLYOUT_W);
     let bounds = Bounds::new(point(x, origin.y + top), size(px(FLYOUT_W), px(120.)));
@@ -2050,11 +2057,7 @@ fn open_popup(ops: &Entity<Ops>, owner: AnyWindowHandle, cx: &mut App) -> Option
         is_movable: false,
         is_resizable: false,
         is_minimizable: false,
-        window_background: if explorer_style {
-            WindowBackgroundAppearance::Opaque
-        } else {
-            crate::theme::window_material(WindowBackgroundAppearance::Blurred)
-        },
+        window_background: backdrop,
         ..Default::default()
     };
     let ops = ops.clone();
