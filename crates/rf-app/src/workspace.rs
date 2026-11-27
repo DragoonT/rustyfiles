@@ -3487,6 +3487,7 @@ impl Workspace {
                 .children(word.map(|w| div().whitespace_nowrap().child(w)))
         };
         let hidden_shown = self.active_tab().read(cx).filter.show_hidden;
+        let (ext_shown, dual_on, shelf_on) = (cx.global::<crate::settings::Settings>().show_extensions, self.tabs[self.active].right.is_some(), self.shelf_open);
         let popups_open = self.popups_open(cx);
         let drop = |id: &'static str, icon: L, label: Option<&'static str>, tip: &'static str, enabled: bool, look: crate::toolbar_layout::Look, cx: &mut Context<Self>, which: fn(&Self, &App) -> crate::ctx_menu::BarMenu| {
             // (a word of its own, or the tooltip's: "Sırala ve gruplandır")
@@ -3600,6 +3601,26 @@ impl Workspace {
                     })
                     .when(hidden_shown && in_folder, |d| d.bg(p.selection))
                     .into_any_element()
+                }),
+                // the View menu's switches as buttons of their own, on the selected fill while on (off unless asked for: issue 405)
+                "extensions" => extra("extensions").then(|| {
+                    cmd("cb-extensions", L::FileType, "Dosya uzantıları", true, look("extensions"), cx, |_, w, cx| {
+                        let v = !cx.global::<crate::settings::Settings>().show_extensions;
+                        crate::settings::update(cx, |s| s.show_extensions = v);
+                        w.refresh();
+                    })
+                    .when(ext_shown, |d| d.bg(p.selection))
+                    .into_any_element()
+                }),
+                "dual" => extra("dual").then(|| {
+                    cmd("cb-dual", L::Columns2, "Çift panel  (Ctrl+Shift+D)", true, look("dual"), cx, |_, w, cx| w.dispatch_action(Box::new(ToggleDualPane), cx))
+                        .when(dual_on, |d| d.bg(p.selection))
+                        .into_any_element()
+                }),
+                "shelf" => extra("shelf").then(|| {
+                    cmd("cb-shelf", L::Inbox, "Raf", true, look("shelf"), cx, |_, w, cx| w.dispatch_action(Box::new(ToggleShelf), cx))
+                        .when(shelf_on, |d| d.bg(p.selection))
+                        .into_any_element()
                 }),
                 "refresh" => extra("refresh").then(|| cmd("cb-refresh", L::RotateCw, "Yenile  (F5)", true, look("refresh"), cx, |_, w, cx| w.dispatch_action(Box::new(Refresh), cx)).into_any_element()),
                 // (off unless asked for; issue 258: "keep the Repeat/Undo button visible in the navigation bar")

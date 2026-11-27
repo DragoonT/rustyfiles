@@ -2014,7 +2014,7 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         move || {
             use crate::toolbar_layout::{Look, SEP};
             // (key, id, label, off unless asked for)
-            const BUTTONS: [(&str, &str, &str, bool); 24] = [
+            const BUTTONS: [(&str, &str, &str, bool); 27] = [
                 ("new", "tb-new", "Yeni", false),
                 ("newfolder", "tb-newfolder", "Yeni klasör", true),
                 ("cut", "tb-cut", "Kes", false),
@@ -2027,6 +2027,9 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                 ("edit", "tb-edit", "Metin düzenleyicide düzenle", true),
                 ("terminal", "tb-terminal", "Terminalde aç", true),
                 ("hidden", "tb-hidden", "Gizli öğeleri göster/gizle", true),
+                ("extensions", "tb-extensions", "Dosya uzantıları", true),
+                ("dual", "tb-dual", "Çift panel", true),
+                ("shelf", "tb-shelf", "Raf", true),
                 ("refresh", "tb-refresh", "Yenile", true),
                 ("undo", "tb-undo", "Geri al", true),
                 ("redo", "tb-redo", "Yinele", true),

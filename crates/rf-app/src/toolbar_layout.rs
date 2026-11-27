@@ -14,16 +14,16 @@
 pub const SEP: &str = "sep";
 
 /// The left group in the ordinary look, as it always stood.
-/// (the three selection commands are off unless asked for, as Undo and Redo: issue 406)
-pub const DEFAULT: [&str; 20] = [
-    "new", "newfolder", SEP, "cut", "copy", "paste", "rename", "share", "delete", "props", "edit", "terminal", "hidden", "refresh", "undo", "redo", "selectall",
-    "selectnone", "invertsel", "more",
+/// (the three selection commands, issue 406, and the View menu's switches, issue 405, are off unless asked for, as Undo and Redo)
+pub const DEFAULT: [&str; 23] = [
+    "new", "newfolder", SEP, "cut", "copy", "paste", "rename", "share", "delete", "props", "edit", "terminal", "hidden", "extensions", "dual", "shelf", "refresh",
+    "undo", "redo", "selectall", "selectnone", "invertsel", "more",
 ];
 
 /// The left group in the Windows File Explorer look (Sort and View stand in it there, Properties at its end).
-pub const DEFAULT_EXPLORER: [&str; 23] = [
-    "new", "newfolder", SEP, "cut", "copy", "paste", "rename", "share", "delete", "edit", "terminal", "hidden", "refresh", "undo", "redo", "selectall", "selectnone",
-    "invertsel", SEP, "sort", "view", "more", "props",
+pub const DEFAULT_EXPLORER: [&str; 26] = [
+    "new", "newfolder", SEP, "cut", "copy", "paste", "rename", "share", "delete", "edit", "terminal", "hidden", "extensions", "dual", "shelf", "refresh", "undo",
+    "redo", "selectall", "selectnone", "invertsel", SEP, "sort", "view", "more", "props",
 ];
 
 fn default_of(explorer: bool) -> &'static [&'static str] {
