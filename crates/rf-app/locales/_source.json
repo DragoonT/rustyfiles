@@ -13466,5 +13466,17 @@
   "key": "Varsayılan sıra",
   "tr": "Varsayılan sıra",
   "en": "Default order"
+ },
+ {
+  "id": "4e935827",
+  "key": "Windows simgeleri",
+  "tr": "Windows simgeleri",
+  "en": "Windows icons"
+ },
+ {
+  "id": "a2e62d37",
+  "key": "Araç çubuğunda Windows Dosya Gezgini'nin simgeleri",
+  "tr": "Araç çubuğunda Windows Dosya Gezgini'nin simgeleri",
+  "en": "Windows File Explorer's icons on the toolbar"
  }
 ]

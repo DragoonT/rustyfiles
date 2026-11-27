@@ -3438,9 +3438,11 @@ impl Workspace {
         let paste_ok = (in_folder || in_shell) && rf_win::clipboard::can_paste();
         // (Settings > Appearance > Toolbar buttons: the pictures' size, issue 248)
         let icon_px = px(crate::toolbar_layout::icon_px(cx.global::<crate::settings::Settings>().toolbar_icon_size));
+        // (Windows' own pictures in the Explorer look, and in the other one when asked for: issue 382)
+        let windows_icons = windows_theme || cx.global::<crate::settings::Settings>().toolbar_windows_icons;
         let toolbar_icon = |icon: L| {
             #[cfg(target_os = "windows")]
-            if windows_theme {
+            if windows_icons {
                 if let Some(glyph) = crate::icons::windows_theme_icon_glyph(icon) {
                     return crate::icons::windows_theme_glyph(glyph, icon_px);
                 }
@@ -3592,6 +3594,9 @@ impl Workspace {
                     .into_any_element()
                 }),
                 "refresh" => extra("refresh").then(|| cmd("cb-refresh", L::RotateCw, "Yenile  (F5)", true, look("refresh"), cx, |_, w, cx| w.dispatch_action(Box::new(Refresh), cx)).into_any_element()),
+                // (off unless asked for; issue 258: "keep the Repeat/Undo button visible in the navigation bar")
+                "undo" => extra("undo").then(|| cmd("cb-undo", L::Undo2, "Geri al  (Ctrl+Z)", true, look("undo"), cx, |_, w, cx| w.dispatch_action(Box::new(Undo), cx)).into_any_element()),
+                "redo" => extra("redo").then(|| cmd("cb-redo", L::Redo2, "Yinele  (Ctrl+Y)", true, look("redo"), cx, |_, w, cx| w.dispatch_action(Box::new(Redo), cx)).into_any_element()),
                 "more" => on("more").then(|| drop("cb-more", L::Ellipsis, None, "Diğer", in_folder, look("more"), cx, |_, _| crate::ctx_menu::BarMenu::More).into_any_element()),
                 // (in the Explorer look only: in the other one they stand in the right group)
                 "sort" => on("sort").then(|| drop("cb-sort", L::ArrowUpDown, sort_label, "Sırala ve gruplandır", in_folder, look("sort"), cx, |_, _| crate::ctx_menu::BarMenu::Sort).into_any_element()),
@@ -3738,6 +3743,12 @@ impl Workspace {
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.toggle_preview(cx);
                     }))
+            }))
+            // Settings at the bar's right end, a picture only, in place of the sidebar's row (issue 295: "move the App settings icon to
+            // the far right of the toolbar and show it as an icon only"); off unless asked for
+            .children(extra("settings").then(sep))
+            .children(extra("settings").then(|| {
+                cmd("cb-settings", L::Settings, "Ayarlar", true, crate::toolbar_layout::Look::Icon, cx, |this, w, cx| this.navigate(Location::Settings, w, cx))
             }))
     }
 
@@ -4485,7 +4496,11 @@ impl Workspace {
             cx,
             &[],
         );
-        // Files: Settings stays at the bottom of the sidebar, under a divider
+        // Files: Settings stays at the bottom of the sidebar, under a divider (unless it is the command bar's button, with the bar shown)
+        let settings_on_bar = {
+            let s = cx.global::<crate::settings::Settings>();
+            s.show_toolbar && s.toolbar_extra.iter().any(|k| k == "settings")
+        };
         v_flex()
             .w(px(if self.sidebar_rail { RAIL_W } else { self.sidebar_w }))
             .h_full()
@@ -4562,8 +4577,11 @@ impl Workspace {
             )
             // (the Explorer look: the line runs the sidebar's whole width, under the scrollbar's track too; inset, it stopped 8 px short
             // of the track's right edge and left a notch in the corner, issue 229)
-            .child(div().when(!explorer_look, |d| d.mx_2()).h(px(1.)).when(explorer_look, |d| d.flex_shrink_0()).bg(p.divider))
-            .child(div().px_2().py_1().child(settings))
+            // (not while Settings is the command bar's button: issue 295)
+            .when(!settings_on_bar, |d| {
+                d.child(div().when(!explorer_look, |d| d.mx_2()).h(px(1.)).when(explorer_look, |d| d.flex_shrink_0()).bg(p.divider))
+                    .child(div().px_2().py_1().child(settings))
+            })
     }
 
     fn render_statusbar(&mut self, p: &Palette, strip_bar_w: Option<f32>, cx: &mut Context<Self>) -> impl IntoElement + use<> {

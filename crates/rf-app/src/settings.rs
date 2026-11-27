@@ -549,6 +549,8 @@ pub struct Settings {
     pub toolbar_look: Vec<String>,
     /// The size of the command bar's pictures (issue 248).
     pub toolbar_icon_size: ToolbarIconSize,
+    /// The command bar's pictures are Windows' own (the Explorer look's) in the other look too (issue 382). Off.
+    pub toolbar_windows_icons: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub toolbar_commands: Vec<crate::quick_commands::QuickCommand>,
     pub preview_width: f32,
@@ -1030,6 +1032,7 @@ impl Default for Settings {
             toolbar_order: Vec::new(),
             toolbar_look: Vec::new(),
             toolbar_icon_size: ToolbarIconSize::Medium,
+            toolbar_windows_icons: false,
             toolbar_extra: Vec::new(),
             toolbar_commands: Vec::new(),
             preview_width: 300.,

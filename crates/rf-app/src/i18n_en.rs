@@ -871,6 +871,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Yalnızca kalıcı silmede", "Only for permanent deletion"),
     ("Bundan sonra Windows'un penceresini kullan:", "From now on, use Windows' own window for"),
     ("Bu programda Windows'un Aç / Kaydet penceresi açılır.", "This program gets Windows' own Open / Save window."),
+    ("Windows simgeleri", "Windows icons"),
+    ("Araç çubuğunda Windows Dosya Gezgini'nin simgeleri", "Windows File Explorer's icons on the toolbar"),
     ("Yazı", "Text"),
     ("Simge ve yazı", "Icon and text"),
     ("Ayırıcı", "Separator"),

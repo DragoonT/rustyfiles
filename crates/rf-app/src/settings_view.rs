@@ -2001,6 +2001,7 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     let bar_order = crate::toolbar_layout::order(&s.toolbar_order, explorer);
     let bar_looks = s.toolbar_look.clone();
     let icon_size = s.toolbar_icon_size;
+    let windows_icons = s.toolbar_windows_icons;
     // the switch and the buttons it shows stand together (issue 111)
     v.push(card(p, L::PanelTop, t!("Araç çubuğunu göster"), Some("Ctrl+Shift+B"), sw("toolbar", p, s.show_toolbar, |s, v| s.show_toolbar = v)));
     v.push(expander(
@@ -2013,7 +2014,7 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         move || {
             use crate::toolbar_layout::{Look, SEP};
             // (key, id, label, off unless asked for)
-            const BUTTONS: [(&str, &str, &str, bool); 18] = [
+            const BUTTONS: [(&str, &str, &str, bool); 21] = [
                 ("new", "tb-new", "Yeni", false),
                 ("newfolder", "tb-newfolder", "Yeni klasör", true),
                 ("cut", "tb-cut", "Kes", false),
@@ -2027,11 +2028,14 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                 ("terminal", "tb-terminal", "Terminalde aç", true),
                 ("hidden", "tb-hidden", "Gizli öğeleri göster/gizle", true),
                 ("refresh", "tb-refresh", "Yenile", true),
+                ("undo", "tb-undo", "Geri al", true),
+                ("redo", "tb-redo", "Yinele", true),
                 ("more", "tb-more", "Diğer", false),
                 ("filter", "tb-filter", "Filtrele", false),
                 ("sort", "tb-sort", "Sırala ve gruplandır", false),
                 ("view", "tb-view", "Görünüm", false),
                 ("preview", "tb-preview", "Önizleme paneli", false),
+                ("settings", "tb-settings", "Ayarlar", true),
             ];
             let button_of = |key: &str| BUTTONS.iter().find(|b| b.0 == key).copied();
             let shown_switch = |key: &'static str, id: &'static str, optional: bool| {
@@ -2101,6 +2105,15 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                     },
                 ),
             ));
+            // Windows' own pictures, as in the Explorer look (issue 382)
+            if !explorer {
+                rows.push(sub(
+                    &pp,
+                    t!("Windows simgeleri"),
+                    Some(t!("Araç çubuğunda Windows Dosya Gezgini'nin simgeleri")),
+                    switch("tb-win-icons", &pp, windows_icons, move |_, cx| settings::update(cx, |s| s.toolbar_windows_icons = !windows_icons)),
+                ));
+            }
             // the left group in its order, lines included
             for (i, name) in bar_order.iter().enumerate() {
                 if name == SEP {
