@@ -871,6 +871,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Yalnızca kalıcı silmede", "Only for permanent deletion"),
     ("Bundan sonra Windows'un penceresini kullan:", "From now on, use Windows' own window for"),
     ("Bu programda Windows'un Aç / Kaydet penceresi açılır.", "This program gets Windows' own Open / Save window."),
+    ("Bu kısayolu değiştirmek yönetici izni ister", "Changing this shortcut needs administrator rights"),
     ("Windows'un Aç / Kaydet penceresini alan programlar", "Programs that get Windows' own Open / Save window"),
     ("Ayarlar ve Geri Dönüşüm Kutusu yeni sekmede açılsın", "Open Settings and the Recycle Bin in a new tab"),
     ("Açık klasör yerinde kalır. Giriş sayfasından ya da bu iki sayfadan birinden açılınca aynı sekmede açılırlar.", "The open folder stays where it is. From Home or from one of the two pages they open in the same tab."),

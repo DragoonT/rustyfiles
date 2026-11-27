@@ -2225,5 +2225,6 @@
  "50c83481": "a sessão FTP foi cancelada",
  "bd3c41cf": "Abrir as Definições e a Reciclagem num novo separador",
  "32e6819a": "A pasta aberta fica onde está. A partir do Início ou de uma das duas páginas, abrem no mesmo separador.",
- "8872682e": "Programas que usam a janela Abrir / Guardar do próprio Windows"
+ "8872682e": "Programas que usam a janela Abrir / Guardar do próprio Windows",
+ "c1ba122b": "Alterar este atalho requer permissões de administrador"
 }

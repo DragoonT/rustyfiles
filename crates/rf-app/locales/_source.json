@@ -13430,5 +13430,11 @@
   "key": "Windows'un Aç / Kaydet penceresini alan programlar",
   "tr": "Windows'un Aç / Kaydet penceresini alan programlar",
   "en": "Programs that get Windows' own Open / Save window"
+ },
+ {
+  "id": "c1ba122b",
+  "key": "Bu kısayolu değiştirmek yönetici izni ister",
+  "tr": "Bu kısayolu değiştirmek yönetici izni ister",
+  "en": "Changing this shortcut needs administrator rights"
  }
 ]

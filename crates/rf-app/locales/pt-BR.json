@@ -2225,5 +2225,6 @@
  "50c83481": "a sessão FTP foi cancelada",
  "bd3c41cf": "Abrir Configurações e a Lixeira em uma nova guia",
  "32e6819a": "A pasta aberta fica onde está. A partir do Início ou de uma das duas páginas, elas abrem na mesma guia.",
- "8872682e": "Programas que usam a janela Abrir / Salvar do próprio Windows"
+ "8872682e": "Programas que usam a janela Abrir / Salvar do próprio Windows",
+ "c1ba122b": "Alterar este atalho requer permissões de administrador"
 }

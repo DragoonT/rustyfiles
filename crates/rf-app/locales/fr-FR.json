@@ -2225,5 +2225,6 @@
  "50c83481": "la session FTP a été annulée",
  "bd3c41cf": "Ouvrir les Paramètres et la Corbeille dans un nouvel onglet",
  "32e6819a": "Le dossier ouvert reste en place. Depuis l'Accueil ou l'une des deux pages, ils s'ouvrent dans le même onglet.",
- "8872682e": "Programmes qui utilisent la fenêtre Ouvrir / Enregistrer de Windows"
+ "8872682e": "Programmes qui utilisent la fenêtre Ouvrir / Enregistrer de Windows",
+ "c1ba122b": "La modification de ce raccourci nécessite des droits d'administrateur"
 }

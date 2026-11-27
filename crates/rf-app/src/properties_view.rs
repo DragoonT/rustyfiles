@@ -851,7 +851,12 @@ impl PropsView {
                 saved_web = Some(rf_win::internet_shortcut::save(&paths[0], shortcut, url).map_err(|e| named(&paths[0], &e))?);
             }
             if let Some(d) = &link {
-                rf_win::shortcut::save(&paths[0], d).map_err(|e| named(&paths[0], &format!("{e:#}")))?;
+                // A shortcut in the Start menu of all users (ProgramData) needs an administrator; Windows answers "access denied"
+                // (0x80070005). Said plainly, as for a drive's label: we never elevate (issue 384).
+                rf_win::shortcut::save(&paths[0], d).map_err(|e| {
+                    let text = format!("{e:#}");
+                    if text.contains("0x80070005") { t!("Bu kısayolu değiştirmek yönetici izni ister").to_string() } else { named(&paths[0], &text) }
+                })?;
             }
             if let Some((was, now)) = &desc {
                 rf_win::props::set_editable(&paths[0], was, now).map_err(|e| named(&paths[0], &format!("{e:#}")))?;
