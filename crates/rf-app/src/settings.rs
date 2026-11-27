@@ -381,6 +381,9 @@ impl Default for MenuPrefs {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ColumnPrefs {
+    /// The order of the Details columns after Name, by name (`folder_view::ColKey`), as dragged by their headers. A column it does
+    /// not name stands in its default place after the named ones; empty: the default order.
+    pub order: Vec<String>,
     pub modified: bool,
     pub created: bool,
     pub kind: bool,
@@ -427,6 +430,7 @@ fn is_zero_u16(v: &u16) -> bool {
 impl Default for ColumnPrefs {
     fn default() -> Self {
         Self {
+            order: Vec::new(),
             modified: true,
             created: false,
             kind: true,
