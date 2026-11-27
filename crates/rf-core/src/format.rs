@@ -61,6 +61,38 @@ pub fn set_english(on: bool) {
     ENGLISH.store(on, Ordering::Relaxed);
 }
 
+/// A language's own names for sizes, where they are not the Latin "KB", "MB" (Windows writes "1,5 МБ" in Russian): the word for
+/// bytes, the five unit names from KB up, the same with the IEC "i", and the decimal mark (issue 283).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Units {
+    pub bytes: &'static str,
+    pub units: [&'static str; 5],
+    pub iec: [&'static str; 5],
+    pub mark: char,
+}
+
+static UNITS: std::sync::RwLock<Option<Units>> = std::sync::RwLock::new(None);
+
+/// The language's own size names, or `None` for the usual ones. Set by the app with the language.
+pub fn set_units(u: Option<Units>) {
+    if let Ok(mut g) = UNITS.write() {
+        *g = u;
+    }
+}
+
+/// The size names of a language by its code ("ru-RU"), where it has its own (the Cyrillic ones). Pure.
+pub fn units_for(code: &str) -> Option<Units> {
+    const CYR: [&str; 5] = ["КБ", "МБ", "ГБ", "ТБ", "ПБ"];
+    const CYR_IEC: [&str; 5] = ["КиБ", "МиБ", "ГиБ", "ТиБ", "ПиБ"];
+    let bytes = match code {
+        "ru-RU" | "uk-UA" | "be-BY" => "байт",
+        "bg" => "байта",
+        "sr-Cyrl" => "бајтова",
+        _ => return None,
+    };
+    Some(Units { bytes, units: CYR, iec: CYR_IEC, mark: ',' })
+}
+
 /// "0 bayt", "512 bayt", "1,2 KB", "34,5 MB", "1,02 GB" (Turkish decimal comma).
 pub fn size(bytes: u64) -> String {
     let decimal = DECIMAL.load(Ordering::Relaxed);
@@ -68,14 +100,25 @@ pub fn size(bytes: u64) -> String {
 }
 
 fn size_with(bytes: u64, en: bool, decimal: bool, iec: bool) -> String {
+    let own = UNITS.read().ok().and_then(|g| g.clone());
+    size_in(bytes, en, decimal, iec, own.as_ref())
+}
+
+fn size_in(bytes: u64, en: bool, decimal: bool, iec: bool, own: Option<&Units>) -> String {
     let base: f64 = if decimal { 1000.0 } else { 1024.0 };
-    let units: [&str; 6] = if iec {
+    let mut units: [&str; 6] = if iec {
         [if en { "bytes" } else { "bayt" }, "KiB", "MiB", "GiB", "TiB", "PiB"]
     } else {
         [if en { "bytes" } else { "bayt" }, "KB", "MB", "GB", "TB", "PB"]
     };
+    if let Some(o) = own {
+        let names = if iec { &o.iec } else { &o.units };
+        units = [o.bytes, names[0], names[1], names[2], names[3], names[4]];
+    }
     if (bytes as f64) < base {
-        return format!("{bytes} {}", units[0]);
+        // ("1 byte", not "1 bytes")
+        let word = if bytes == 1 && units[0] == "bytes" { "byte" } else { units[0] };
+        return format!("{bytes} {word}");
     }
     let mut v = bytes as f64;
     let mut u = 0;
@@ -90,8 +133,28 @@ fn size_with(bytes: u64, en: bool, decimal: bool, iec: bool) -> String {
     } else {
         format!("{v:.2}")
     };
-    let s = if en { s } else { s.replace('.', ",") };
+    let s = match own {
+        Some(o) if o.mark != '.' => s.replace('.', &o.mark.to_string()),
+        Some(_) => s,
+        None if en => s,
+        None => s.replace('.', ","),
+    };
     format!("{s} {}", units[u])
+}
+
+#[cfg(test)]
+mod units_tests {
+    use super::{size_in, units_for};
+
+    #[test]
+    fn a_cyrillic_language_has_its_own_size_names_and_comma() {
+        let ru = units_for("ru-RU").unwrap();
+        assert_eq!(size_in(1536 * 1024, true, false, false, Some(&ru)), "1,50 МБ");
+        assert_eq!(size_in(14, true, false, false, Some(&ru)), "14 байт");
+        assert_eq!(size_in(1536, true, false, true, Some(&ru)), "1,50 КиБ");
+        assert!(units_for("de-DE").is_none(), "the others keep KB, MB");
+        assert_eq!(size_in(1536, true, false, false, None), "1.50 KB");
+    }
 }
 
 /// A file time in the chosen [`DateStyle`].

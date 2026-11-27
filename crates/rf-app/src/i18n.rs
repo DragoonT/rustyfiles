@@ -226,6 +226,11 @@ pub fn set(lang: Lang) {
     #[cfg(not(test))]
     ACTIVE.store(code, Ordering::Relaxed);
     rf_core::format::set_english(l != Lang::Tr);
+    // (the size names of the language, where it has its own: issue 283, "МБ instead of MB" in Russian)
+    rf_core::format::set_units(match l {
+        Lang::Other(_) => rf_core::format::units_for(l.code()),
+        _ => None,
+    });
 }
 
 /// The active (resolved) language.

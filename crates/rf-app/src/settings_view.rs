@@ -2547,7 +2547,8 @@ fn files(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                     .rounded(theme::RADIUS_SM)
                     .bg(hsla_alpha(0xFCE100, 0.12))
                     .child(Icon::new(L::CircleAlert).size(px(14.)).text_color(rgb(0xFCE100)))
-                    .child(div().text_xs().text_color(pp.text).child(t!("Büyük klasörlerde disk ve işlemci yükü artabilir; hesap arka planda yapılır, arayüz donmaz.")))
+                    // (wrapped: a longer language ran out of the box, issue 283)
+                    .child(div().flex_1().min_w_0().whitespace_normal().text_xs().text_color(pp.text).child(t!("Büyük klasörlerde disk ve işlemci yükü artabilir; hesap arka planda yapılır, arayüz donmaz.")))
                     .into_any_element(),
             ]
         },

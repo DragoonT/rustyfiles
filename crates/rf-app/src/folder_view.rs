@@ -2189,6 +2189,7 @@ impl FolderView {
                 Msg::Done(r) => {
                     done = true;
                     self.loading = false;
+                    self.measure_all_for_size_sort(cx);
                     self.search_stage = None;
                     self.apply_adaptive();
                     self.load_ms = Some(self.load_started.elapsed().as_millis());
@@ -2922,6 +2923,7 @@ impl FolderView {
         }
         self.props_drop_sort();
         self.sort = spec;
+        self.measure_all_for_size_sort(cx);
         // (a sort by tag or path keeps the list as it is until its ranks are made: sorted by name now
         // and by the ranks a moment later would be two sorts and a flicker)
         self.sortx_ensure(cx);
@@ -2936,6 +2938,7 @@ impl FolderView {
         // from a sort by a property column, a fixed column starts as a new sort (not a flip of the one under it)
         self.sort = if self.props.sort_active() { self.props_fixed_sort(key) } else { self.sort.toggled(key) };
         self.props_drop_sort();
+        self.measure_all_for_size_sort(cx);
         self.sortx_ensure(cx);
         if !self.sortx_must_wait() {
             self.rebuild_visible();
@@ -4285,6 +4288,21 @@ impl FolderView {
         DirSize::Partial(0)
     }
 
+    /// Sorted by Size with folder sizes on: every folder of the listing is measured, not only those on the screen, so the biggest
+    /// one comes to the top without scrolling down to it first (issue 283: "Largest folder is somewhere on the list, but not on top").
+    fn measure_all_for_size_sort(&mut self, cx: &mut Context<Self>) {
+        if self.sort.key != SortKey::Size || !cx.global::<crate::settings::Settings>().calculate_folder_sizes {
+            return;
+        }
+        if self.location().path().is_some_and(crate::archive_view::is_browsable_path) {
+            return;
+        }
+        let dirs: Vec<PathBuf> = (0..self.entries.len()).filter(|&i| self.entries[i].is_dir()).filter_map(|i| self.path_of(i as u32)).collect();
+        for d in dirs {
+            self.folder_size(d, cx);
+        }
+    }
+
     fn known_folder_size(&self, path: &Path, on_disk: bool) -> Option<String> {
         self.folder_sizes.get(path).copied().and_then(|size| size.measured_text(on_disk))
     }
@@ -4585,7 +4603,10 @@ impl FolderView {
         }
         let Some(path) = self.path_of(ei) else { return };
         let e = &self.entries[ei as usize];
+        // (in an Open dialog an archive is a file to hand to the program, as in Explorer's: issue 283, a zip picked to upload
+        // somewhere opened as a folder instead)
         let browse = !e.is_dir()
+            && !self.picking
             && cx.global::<crate::settings::Settings>().browse_archives
             && crate::archive_view::is_browsable(&path);
         // an archive goes where the setting says (its own tab or window, or here as a folder)
