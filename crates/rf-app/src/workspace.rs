@@ -3392,6 +3392,12 @@ impl Workspace {
             .child(self.nav_button("refresh", L::RotateCw, true, p, cx, |this, _, cx| this.with_tab(cx, |v, cx| v.refresh(cx))))
             .child(omnibar)
             .child(crate::status_center::render_button(&self.ops, p, cx))
+            // Settings as a button of its own (in place of the sidebar's row, when asked for): beside the Status Center, in the row
+            // that every page has. On the command bar it was gone wherever the bar is not drawn (Home, the Recycle Bin, Settings
+            // itself) and with the bar switched off, and the sidebar's row was gone too (issue 399).
+            .when(cx.global::<crate::settings::Settings>().toolbar_extra.iter().any(|k| k == "settings"), |d| {
+                d.child(self.nav_button("settings", L::Settings, true, p, cx, |this, w, cx| this.navigate(Location::Settings, w, cx)))
+            })
     }
 
     fn enter_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -3765,12 +3771,7 @@ impl Workspace {
                         this.toggle_preview(cx);
                     }))
             }))
-            // Settings at the bar's right end, a picture only, in place of the sidebar's row (issue 295: "move the App settings icon to
-            // the far right of the toolbar and show it as an icon only"); off unless asked for
-            .children(extra("settings").then(sep))
-            .children(extra("settings").then(|| {
-                cmd("cb-settings", L::Settings, "Ayarlar", true, crate::toolbar_layout::Look::Icon, cx, |this, w, cx| this.navigate(Location::Settings, w, cx))
-            }))
+            // (Settings, when it is a button of its own, stands in the address row: issue 399)
     }
 
     fn render_breadcrumb(&mut self, loc: &Location, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -4046,7 +4047,7 @@ impl Workspace {
                 Location::RecycleBin => {
                     let state = self.places.read(cx).recycle_full.map_or(0, |full| if full { 2 } else { 1 });
                     self.images.update(cx, |images, cx| {
-                        images.shell_icon_state("::{645ff040-5081-101b-9f08-00aa002f954e}", icon_px, state, cx)
+                        images.shell_icon_state_ui("::{645ff040-5081-101b-9f08-00aa002f954e}", icon_px, state, cx)
                     })
                 }
                 _ => {
@@ -4059,7 +4060,7 @@ impl Workspace {
                         });
                     parsing.and_then(|path| {
                         self.images.update(cx, |images, cx| {
-                            images.shell_icon(&path, icon_px, cx)
+                            images.shell_icon_ui(&path, icon_px, cx)
                         })
                     })
                 }
@@ -4578,11 +4579,8 @@ impl Workspace {
             cx,
             &[],
         );
-        // Files: Settings stays at the bottom of the sidebar, under a divider (unless it is the command bar's button, with the bar shown)
-        let settings_on_bar = {
-            let s = cx.global::<crate::settings::Settings>();
-            s.show_toolbar && s.toolbar_extra.iter().any(|k| k == "settings")
-        };
+        // Files: Settings stays at the bottom of the sidebar, under a divider (unless it is a button of its own, in the address row)
+        let settings_on_bar = cx.global::<crate::settings::Settings>().toolbar_extra.iter().any(|k| k == "settings");
         v_flex()
             .w(px(if self.sidebar_rail { RAIL_W } else { self.sidebar_w }))
             .h_full()
@@ -4933,6 +4931,7 @@ fn tooltip_text(id: &str) -> &'static str {
         "fwd" => t!("İleri  (Alt+→)"),
         "up" => t!("Üst klasör  (Alt+↑)"),
         "refresh" => t!("Yenile  (F5)"),
+        "settings" => t!("Ayarlar"),
         "hidden" => t!("Gizli öğeleri göster/gizle  (Ctrl+H)"),
         "terminal" => t!("Terminalde aç"),
         "sort" => t!("Sıralama ve gruplama"),
@@ -5427,6 +5426,7 @@ impl Render for Workspace {
             static FIRST: std::sync::Once = std::sync::Once::new();
             FIRST.call_once(|| crate::start_mark("first render"));
         }
+        crate::image_cache::set_ui_scale(window.scale_factor());
         // the text size (Settings > Appearance, issue 89): the window's base size, which the texts are given in
         let rem = crate::settings::rem_for(cx.global::<crate::settings::Settings>().text_percent);
         if f32::from(window.rem_size()) != rem {
