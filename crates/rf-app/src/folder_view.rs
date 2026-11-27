@@ -2949,6 +2949,26 @@ impl FolderView {
 
     // ---------- selection ----------
 
+    /// Tab / Shift+Tab while an item is being renamed (the window's pane-walking keys come here then): the name is applied and the
+    /// next (previous) item's name is edited, as in Explorer (issue 395). Not past the last or the first item, and not on while a
+    /// question or a notice about the name is showing. False when nothing is being renamed.
+    pub(crate) fn rename_step(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(ei) = self.renaming.as_ref().map(|(i, _)| *i) else { return false };
+        let Some(vi) = self.visible.iter().position(|&i| i == ei) else { return false };
+        let next = if forward { Some(vi + 1).filter(|&n| n < self.visible.len()) } else { vi.checked_sub(1) };
+        let next_ei = next.map(|n| self.visible[n]);
+        let quiet = self.commit_rename_quietly(window, cx);
+        let Some(next_ei) = next_ei.filter(|_| quiet) else { return true };
+        // (the item just renamed is not selected again when the watcher brings its new name: the box has moved on)
+        self.clear_reselect();
+        if let Some(nvi) = self.visible.iter().position(|&i| i == next_ei) {
+            self.select_only(nvi);
+            self.scroll.scroll_to_item(self.list_row(nvi), ScrollStrategy::Nearest);
+            self.begin_rename(window, cx);
+        }
+        true
+    }
+
     fn select_only(&mut self, vi: usize) {
         self.selected.clear();
         if let Some(&ei) = self.visible.get(vi) {

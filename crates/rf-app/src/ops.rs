@@ -840,7 +840,13 @@ impl FolderView {
     }
 
     pub fn commit_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((ei, input)) = self.renaming.take() else { return };
+        self.commit_rename_quietly(window, cx);
+    }
+
+    /// [`commit_rename`](Self::commit_rename), saying whether the name went through without a question or a notice on the screen
+    /// (Tab goes on to the next item only then).
+    pub(crate) fn commit_rename_quietly(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some((ei, input)) = self.renaming.take() else { return false };
         let typed = input.read(cx).value().trim().to_string();
         // characters Windows does not allow: tidied rather than refused, so that what was typed is not lost (issue 370)
         let typed = if cx.global::<crate::settings::Settings>().fix_name_characters { rf_core::rename::tidy_name(&typed) } else { typed };
@@ -859,7 +865,7 @@ impl FolderView {
             let msg = format!("{}\n\n{}", new_name, crate::t!("Dosya adı şu karakterleri içeremez: \\ / : * ? \" < > | ve nokta ile bitemez."));
             crate::prompt::notice(title, msg, window, cx);
             cx.notify();
-            return;
+            return false;
         }
         // Inside an archive: rewrite the archive with the new name. An archive file ITSELF splits as its own root, with an empty
         // inner path, and is a plain file to rename (issue 36: "after zip something, I couldn't rename the .zip", with "not found"
@@ -871,7 +877,7 @@ impl FolderView {
                 crate::archive_view::rename_inside(cx, archive, inner, new_name.clone());
                 self.set_reselect(new_name);
                 cx.notify();
-                return;
+                return true;
             }
         }
         // still being copied here: the copy would go on under the old name (issue 297)
@@ -879,8 +885,9 @@ impl FolderView {
             let msg = format!("{old}\n\n{}", crate::t!("Bu öğe hâlâ kopyalanıyor. Kopyalama bitince yeniden adlandırın."));
             crate::prompt::notice(crate::t!("Yeniden adlandır").to_string(), msg, window, cx);
             cx.notify();
-            return;
+            return false;
         }
+        let mut quiet = true;
         if !new_name.is_empty() && new_name != old {
             if let Some(dir) = self.parent_of(ei).map(|d| d.to_path_buf()) {
                 let from = dir.join(&old);
@@ -893,6 +900,7 @@ impl FolderView {
                 let warn = cx.global::<crate::settings::Settings>().warn_extension_change;
                 // (a dialog of our own, in the window: it was a Windows message box, which opened behind the window, issue 30)
                 let asks = warn && !self.entry(ei).is_dir() && ext(&old).is_some() && ext(&old) != ext(&new_name);
+                quiet = !asks;
                 let confirm_rx = if asks {
                     let msg = crate::t!("Dosya adı uzantısını değiştirirseniz dosya kullanılamaz hale gelebilir. Değiştirmek istediğinizden emin misiniz?").to_string();
                     Some(crate::prompt::ask(crate::t!("Dosya adı uzantısı"), msg, window, cx))
@@ -957,6 +965,7 @@ impl FolderView {
             }
         }
         cx.notify();
+        quiet
     }
 
     /// The classic Explorer context menu (Shift+right-click) for the selection or background.

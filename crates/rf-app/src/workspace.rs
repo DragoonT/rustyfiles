@@ -1226,6 +1226,8 @@ impl Workspace {
     /// screen) and the file list, as Explorer's Tab does (issue 38: "TAB does not work anywhere"). A rename in the list keeps it.
     fn cycle_focus(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.active_tab().read(cx).renaming.is_some() {
+            // (in the rename box Tab goes on to the next item's name, issue 395)
+            self.active_tab().update(cx, |v, cx| v.rename_step(forward, window, cx));
             return;
         }
         let tree = self.tree_focus(cx);
