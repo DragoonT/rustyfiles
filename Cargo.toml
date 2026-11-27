@@ -5,7 +5,7 @@ members = ["crates/rf-core", "crates/rf-win", "crates/rf-app", "crates/rf-nearby
 exclude = ["crates/rf-mac", "macos", "vendor/velopack"]
 
 [workspace.package]
-version = "1.0.1"
+version = "1.0.2"
 edition = "2024"
 license = "MIT"
 publish = false

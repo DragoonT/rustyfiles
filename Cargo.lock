@@ -3270,7 +3270,7 @@ checksum = "99b18b06f5026b3d312488eacfdddbe78f82b4bf32bb2d2bc3186e31e552b797"
 
 [[package]]
 name = "gpustress"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "windows 0.62.2",
 ]
@@ -6357,7 +6357,7 @@ dependencies = [
 
 [[package]]
 name = "rf-app"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6398,7 +6398,7 @@ dependencies = [
 
 [[package]]
 name = "rf-archive"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "bzip2",
@@ -6422,7 +6422,7 @@ dependencies = [
 
 [[package]]
 name = "rf-core"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "chardetng",
@@ -6440,7 +6440,7 @@ dependencies = [
 
 [[package]]
 name = "rf-dialog"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -6450,7 +6450,7 @@ dependencies = [
 
 [[package]]
 name = "rf-nearby"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "blake3",
@@ -6470,7 +6470,7 @@ dependencies = [
 
 [[package]]
 name = "rf-player"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "filmcraft-codecs",
@@ -6485,14 +6485,14 @@ dependencies = [
 
 [[package]]
 name = "rf-shellguard"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "windows 0.62.2",
 ]
 
 [[package]]
 name = "rf-win"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "cfb",
@@ -6687,7 +6687,7 @@ dependencies = [
 
 [[package]]
 name = "rustdecoder"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "crc32fast",
  "flate2",

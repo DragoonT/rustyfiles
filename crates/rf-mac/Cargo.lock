@@ -1829,7 +1829,7 @@ checksum = "d902046e6a28a1e4c3cab97258a0ce11e994903f01c2d97a9447a0b3df85f4f6"
 
 [[package]]
 name = "rf-archive"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "bzip2",
@@ -1853,7 +1853,7 @@ dependencies = [
 
 [[package]]
 name = "rf-core"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "chardetng",
@@ -1888,7 +1888,7 @@ dependencies = [
 
 [[package]]
 name = "rf-nearby"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "blake3",
