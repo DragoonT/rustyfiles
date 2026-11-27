@@ -65,6 +65,22 @@ fn cost(bytes: usize) -> usize {
 }
 pub const ICON_PX: u32 = 32;
 
+/// The scale of the screen the main window was last drawn on, in hundredths (100 = 100 %).
+static UI_SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(100);
+
+/// Told by the main window at each draw: the pictures asked for in the interface's pixels ([`ImageCache::shell_icon_ui`]) are made
+/// at this screen's pixels.
+pub fn set_ui_scale(scale: f32) {
+    let v = ((scale.clamp(0.5, 5.0)) * 100.0).round() as u32;
+    UI_SCALE.store(v, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// `px` of the interface in the screen's pixels.
+pub fn ui_px(px: u32) -> u32 {
+    let s = UI_SCALE.load(std::sync::atomic::Ordering::Relaxed);
+    ((px * s + 99) / 100).max(px)
+}
+
 /// Takes back what `lookup` charged for a picture that was asked for and then dropped before it was made.
 fn forget_pending(thumb_use: &mut HashMap<u64, (u64, usize)>, thumb_cost: &mut usize, key: u64) {
     if let Some((_, bytes)) = thumb_use.remove(&key) {
@@ -636,6 +652,18 @@ impl ImageCache {
         self.evict_over_budget();
         self.release_evicted(cx);
         r
+    }
+
+    /// [`shell_icon`](Self::shell_icon) for a picture drawn `px` big in the interface's pixels (a drive in the sidebar, a card on the
+    /// Home page, a menu's row): made at the screen's pixels. Asked at `px` itself, a 16 px drive icon was stretched to 28 of the
+    /// screen's pixels at 175 % and came out blurred (issue 253).
+    pub fn shell_icon_ui(&mut self, parsing: &str, px: u32, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
+        self.shell_icon(parsing, ui_px(px), cx)
+    }
+
+    /// [`shell_icon_state`](Self::shell_icon_state) for a picture drawn `px` big in the interface's pixels (see [`Self::shell_icon_ui`]).
+    pub fn shell_icon_state_ui(&mut self, parsing: &str, px: u32, state: u8, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
+        self.shell_icon_state(parsing, ui_px(px), state, cx)
     }
 
     /// [`shell_icon`](Self::shell_icon) for a place whose picture depends on a state the shell keeps (the Recycle Bin: full or empty).

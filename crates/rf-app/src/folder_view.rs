@@ -3396,10 +3396,9 @@ impl FolderView {
             self.images.update(cx, |c, cx| {
                 if thumbs_on {
                     c.thumbnail_fit(&d, e, thumb_px, box_px, cx)
-                } else if crate::settings::icon_theme() == crate::settings::IconThemePref::Freedesktop {
-                    c.icon_sized(&d, e, thumb_px, cx)
                 } else {
-                    c.icon(&d, e, cx)
+                    // (the tile's own size: the 32 px list icon stretched over a tile was blurred, issue 253)
+                    c.icon_sized(&d, e, thumb_px, cx)
                 }
             })
         });
@@ -6001,7 +6000,7 @@ impl FolderView {
             let path = f.path.clone();
             let shell_icon = if windows_file_explorer_theme {
                 self.images.update(cx, |images, cx| {
-                    images.shell_icon(&path.to_string_lossy(), 28, cx)
+                    images.shell_icon_ui(&path.to_string_lossy(), 28, cx)
                 })
             } else {
                 None
@@ -6023,7 +6022,7 @@ impl FolderView {
             let usage_root = d.root.clone();
             let shell_icon = if windows_file_explorer_theme {
                 self.images.update(cx, |images, cx| {
-                    images.shell_icon(&root.to_string_lossy(), 28, cx)
+                    images.shell_icon_ui(&root.to_string_lossy(), 28, cx)
                 })
             } else {
                 None

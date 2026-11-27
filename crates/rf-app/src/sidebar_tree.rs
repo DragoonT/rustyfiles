@@ -782,7 +782,7 @@ impl SidebarTree {
             && matches!(root, Some(RootKind::Fixed | RootKind::Removable | RootKind::Network | RootKind::Optical)))
         .then(|| {
             self.images.update(cx, |images, cx| {
-                images.shell_icon(&info.path.to_string_lossy(), 16, cx)
+                images.shell_icon_ui(&info.path.to_string_lossy(), 16, cx)
             })
         })
         .flatten();

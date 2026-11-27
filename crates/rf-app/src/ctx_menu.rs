@@ -224,7 +224,7 @@ impl FolderView {
                 .first()
                 .and_then(|path| {
                     let parsing = path.to_string_lossy();
-                    self.images.update(cx, |images, cx| images.shell_icon(&parsing, 16, cx))
+                    self.images.update(cx, |images, cx| images.shell_icon_ui(&parsing, 16, cx))
                 })
                 .map(MenuIcon::Image)
                 .unwrap_or_else(|| {
