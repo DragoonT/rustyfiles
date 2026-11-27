@@ -46,6 +46,9 @@ pub struct Recent {
     pub is_dir: bool,
 }
 
+/// How many recent items Home lists (14 until 1.0.2; the user: longer).
+const RECENT_SHOWN: usize = 30;
+
 /// Windows' own "recent items" (%APPDATA%\Microsoft\Windows\Recent\*.lnk), newest first.
 fn load_recent(limit: usize) -> Vec<Recent> {
     let Some(dir) = dirs::data_dir().map(|d| d.join("Microsoft").join("Windows").join("Recent")) else {
@@ -321,7 +324,7 @@ impl Places {
             while rx.next().await.is_some() {
                 let began = std::time::Instant::now();
                 let read = cx.background_spawn(async move {
-                    let recent = load_recent(14);
+                    let recent = load_recent(RECENT_SHOWN);
                     rf_win::localized::warm(recent.iter().filter(|r| r.is_dir).flat_map(|r| crate::nav_touch::label_paths(&r.target)));
                     (recent, rf_win::dock::startrecent::recent_tracking_on())
                 });
@@ -378,7 +381,7 @@ impl Places {
         });
         let began = std::time::Instant::now();
         let extras = cx.background_spawn(async move {
-            let recent = load_recent(14);
+            let recent = load_recent(RECENT_SHOWN);
             // the localized names the jump list and the Home view show for these folders are read here, on this thread: the
             // drawing only looks in the cache (see rf_win::localized::label_if_known)
             rf_win::localized::warm(recent.iter().filter(|r| r.is_dir).flat_map(|r| crate::nav_touch::label_paths(&r.target)));

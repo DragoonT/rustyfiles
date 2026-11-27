@@ -2,6 +2,7 @@
 //! (rounded corners, gentle fills, calm secondary text).
 
 use gpui_kit::*;
+use gpui_kit::prelude::FluentBuilder as _;
 
 #[derive(Clone, Copy)]
 #[allow(dead_code)]
@@ -314,17 +315,27 @@ pub fn selection_pill(p: &Palette) -> Div {
     selection_pill_joined(p, false, false)
 }
 
-/// The pill of a selected row whose neighbour above or below is selected too: it reaches nearly to that edge, so that a run of
-/// selected rows reads as one block while each row keeps a pill of its own to count by (a small gap between them). The user,
-/// 2026-11-20: "ortadakiler birleşik gibi mi olsa ... hem bir görünür hem de sayılabilir çizgiler ile".
+/// The pill of a selected row whose neighbour above or below is selected too: it reaches nearly to that edge with a square end, so
+/// that a run of selected rows reads as ONE line cut between its rows, each row still counted by its own piece. The user,
+/// 2026-11-20: "ortadakiler birleşik gibi mi olsa ... hem bir görünür hem de sayılabilir çizgiler ile"; 2026-11-27: the gaps should
+/// look cut, not like separate lines (they were rounded pills 4 px apart).
 pub fn selection_pill_joined(p: &Palette, above: bool, below: bool) -> Div {
     let (top, bottom) = pill_insets(above, below);
-    div().absolute().left(px(0.)).top(px(top)).bottom(px(bottom)).w(px(3.)).rounded_full().bg(p.accent)
+    let r = px(1.5);
+    div()
+        .absolute()
+        .left(px(0.))
+        .top(px(top))
+        .bottom(px(bottom))
+        .w(px(3.))
+        .when(!above, |d| d.rounded_tl(r).rounded_tr(r))
+        .when(!below, |d| d.rounded_bl(r).rounded_br(r))
+        .bg(p.accent)
 }
 
-/// How far the pill stays from the row's top and bottom: 8 px on a side with no selected neighbour, 2 px towards one.
+/// How far the pill stays from the row's top and bottom: 8 px on a side with no selected neighbour, 1 px towards one (a 2 px cut).
 pub fn pill_insets(above: bool, below: bool) -> (f32, f32) {
-    (if above { 2. } else { 8. }, if below { 2. } else { 8. })
+    (if above { 1. } else { 8. }, if below { 1. } else { 8. })
 }
 
 pub const RADIUS: Pixels = px(8.);
@@ -366,10 +377,10 @@ mod tests {
     #[test]
     fn a_run_of_selected_rows_has_long_pills_with_small_gaps_and_a_lone_row_its_short_one() {
         assert_eq!(super::pill_insets(false, false), (8., 8.));
-        assert_eq!(super::pill_insets(true, true), (2., 2.));
+        assert_eq!(super::pill_insets(true, true), (1., 1.));
         // the gap between two pills in a run: one row's bottom and the next one's top
         let gap = super::pill_insets(false, true).1 + super::pill_insets(true, false).0;
-        assert_eq!(gap, 4.);
+        assert_eq!(gap, 2.);
     }
 
     #[test]
