@@ -24,14 +24,14 @@
   <a href="https://github.com/gelenmedya/rustyfiles/releases/latest"><img alt="Última versión" src="https://img.shields.io/github/v/release/gelenmedya/rustyfiles?label=download&labelColor=232326&color=ff6a1a"></a>
   <a href="https://github.com/gelenmedya/rustyfiles/releases"><img alt="Descargas" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fgelenmedya%2Frustyfiles%2Fbadges%2Fdownloads.json"></a>
   <img alt="Windows 11, x64 y ARM64" src="https://img.shields.io/badge/Windows_11-x64_%7C_ARM64-3d3d44?labelColor=232326">
-  <img alt="macOS 26 en Apple silicon, beta" src="https://img.shields.io/badge/macOS_26-Apple_silicon_(beta)-3d3d44?labelColor=232326">
+  <img alt="macOS 26 en Apple silicon e Intel, beta" src="https://img.shields.io/badge/macOS_26-Apple_silicon_and_Intel_(beta)-3d3d44?labelColor=232326">
   <a href="https://github.com/gelenmedya/rustyfiles/releases/latest"><img alt="Cada versión se analiza en VirusTotal: los informes están enlazados al final de sus notas" src="https://img.shields.io/badge/VirusTotal-every_release_scanned-3d3d44?labelColor=232326"></a>
   <a href="LICENSE"><img alt="Licencia MIT" src="https://img.shields.io/badge/license-MIT-3d3d44?labelColor=232326"></a>
 </p>
 
 <p align="center">
   <a href="https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-win-Setup.exe"><img alt="Descargar para Windows" src="https://img.shields.io/badge/Download_for_Windows-FF6A1A?style=for-the-badge&logo=windows11&logoColor=white"></a>
-  <a href="https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-mac-arm64.dmg"><img alt="Descargar para macOS (beta)" src="https://img.shields.io/badge/Download_for_macOS_(beta)-232326?style=for-the-badge&logo=apple&logoColor=white"></a>
+  <a href="https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-mac.dmg"><img alt="Descargar para macOS (beta)" src="https://img.shields.io/badge/Download_for_macOS_(beta)-232326?style=for-the-badge&logo=apple&logoColor=white"></a>
   <br>
   <a href="https://rustyfiles.com"><img alt="Sitio web" src="https://img.shields.io/badge/rustyfiles.com-232326?style=flat-square&logo=googlechrome&logoColor=white"></a>
   <a href="https://discord.gg/K2banZ36zJ"><img alt="Únete al Discord" src="https://img.shields.io/badge/Discord-5865F2?style=flat-square&logo=discord&logoColor=white"></a>
@@ -337,7 +337,7 @@ El mismo gestor de archivos, dibujado de forma nativa con AppKit y Liquid Glass 
 doble panel, todas las vistas, Quick Look con <kbd>Space</kbd>, archivos comprimidos como carpetas, renombrado masivo, uso de disco,
 el Shelf, etiquetas de color, estado de Git, Conectar al servidor, Ferry y los mismos 49 idiomas. El Dock, el escritorio,
 HyperSearch y DirectLook siguen en Windows por ahora, y la versión para Mac de HyperDownload llegará en su propia versión.
-Apple silicon y macOS 26 (Tahoe). Se actualiza sola, igual que la app de Windows.
+Apple silicon e Intel, con macOS 26 (Tahoe). Se actualiza sola, igual que la app de Windows.
 
 ## Instalación
 
@@ -348,7 +348,7 @@ Apple silicon y macOS 26 (Tahoe). Se actualiza sola, igual que la app de Windows
 rustyfiles se abre solo y aparece en tu menú Inicio. No hace falta contraseña de administrador; las actualizaciones
 se instalan en silencio en segundo plano.
 
-**macOS (beta).** [Descargar rustyfiles-mac-arm64.dmg](https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-mac-arm64.dmg),
+**macOS (beta).** [Descargar rustyfiles-mac.dmg](https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-mac.dmg),
 ábrelo y arrastra rustyfiles a Aplicaciones. Apple lo ha firmado y notarizado, así que se abre como cualquier otra app de Mac.
 
 <details>

@@ -24,14 +24,14 @@
   <a href="https://github.com/gelenmedya/rustyfiles/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/gelenmedya/rustyfiles?label=download&labelColor=232326&color=ff6a1a"></a>
   <a href="https://github.com/gelenmedya/rustyfiles/releases"><img alt="下载次数" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fgelenmedya%2Frustyfiles%2Fbadges%2Fdownloads.json"></a>
   <img alt="Windows 11，x64 与 ARM64" src="https://img.shields.io/badge/Windows_11-x64_%7C_ARM64-3d3d44?labelColor=232326">
-  <img alt="macOS 26，Apple 芯片，测试版" src="https://img.shields.io/badge/macOS_26-Apple_silicon_(beta)-3d3d44?labelColor=232326">
+  <img alt="macOS 26，Apple 芯片与 Intel，测试版" src="https://img.shields.io/badge/macOS_26-Apple_silicon_and_Intel_(beta)-3d3d44?labelColor=232326">
   <a href="https://github.com/gelenmedya/rustyfiles/releases/latest"><img alt="每个版本都会在 VirusTotal 上扫描：报告链接位于其发布说明末尾" src="https://img.shields.io/badge/VirusTotal-every_release_scanned-3d3d44?labelColor=232326"></a>
   <a href="LICENSE"><img alt="MIT 许可证" src="https://img.shields.io/badge/license-MIT-3d3d44?labelColor=232326"></a>
 </p>
 
 <p align="center">
   <a href="https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-win-Setup.exe"><img alt="下载 Windows 版" src="https://img.shields.io/badge/Download_for_Windows-FF6A1A?style=for-the-badge&logo=windows11&logoColor=white"></a>
-  <a href="https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-mac-arm64.dmg"><img alt="下载 macOS 版（测试版）" src="https://img.shields.io/badge/Download_for_macOS_(beta)-232326?style=for-the-badge&logo=apple&logoColor=white"></a>
+  <a href="https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-mac.dmg"><img alt="下载 macOS 版（测试版）" src="https://img.shields.io/badge/Download_for_macOS_(beta)-232326?style=for-the-badge&logo=apple&logoColor=white"></a>
   <br>
   <a href="https://rustyfiles.com"><img alt="官方网站" src="https://img.shields.io/badge/rustyfiles.com-232326?style=flat-square&logo=googlechrome&logoColor=white"></a>
   <a href="https://discord.gg/K2banZ36zJ"><img alt="加入 Discord" src="https://img.shields.io/badge/Discord-5865F2?style=flat-square&logo=discord&logoColor=white"></a>
@@ -301,7 +301,7 @@ rustyfiles 自带的下载管理器，是一个附加组件：设置 › 附加�
 同一款文件管理器，使用 AppKit 与 Liquid Glass 原生绘制，运行在相同的 Rust 核心之上：标签页、双窗格、所有视图、<kbd>Space</kbd> 快速查看（Quick Look）、
 以文件夹形式打开压缩包、批量重命名、磁盘占用、Shelf、颜色标签、Git 状态、连接到服务器、Ferry 以及相同的 49 种语言。
 Dock、桌面、HyperSearch 和 DirectLook 目前仍仅在 Windows 上提供，HyperDownload 的 Mac 版本将在其自己的发布版中推出。
-支持 Apple 芯片与 macOS 26（Tahoe）。它与 Windows 版一样自动更新。
+支持 Apple 芯片与 Intel 芯片的 Mac，需要 macOS 26（Tahoe）。它与 Windows 版一样自动更新。
 
 ## 安装
 
@@ -310,7 +310,7 @@ Dock、桌面、HyperSearch 和 DirectLook 目前仍仅在 Windows 上提供，H
 且每个版本都会在 [VirusTotal](https://www.virustotal.com) 上扫描（报告链接位于其发布说明末尾）。
 rustyfiles 会自行打开，并出现在你的开始菜单中。无需管理员密码；更新会在后台悄悄安装。
 
-**macOS（测试版）。** [下载 rustyfiles-mac-arm64.dmg](https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-mac-arm64.dmg)，
+**macOS（测试版）。** [下载 rustyfiles-mac.dmg](https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-mac.dmg)，
 打开后将 rustyfiles 拖到“应用程序”中。它已由 Apple 签名并公证，因此和其他 Mac 应用一样可以直接打开。
 
 <details>

@@ -24,14 +24,14 @@
   <a href="https://github.com/gelenmedya/rustyfiles/releases/latest"><img alt="最新バージョン" src="https://img.shields.io/github/v/release/gelenmedya/rustyfiles?label=download&labelColor=232326&color=ff6a1a"></a>
   <a href="https://github.com/gelenmedya/rustyfiles/releases"><img alt="ダウンロード数" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fgelenmedya%2Frustyfiles%2Fbadges%2Fdownloads.json"></a>
   <img alt="Windows 11、x64 と ARM64" src="https://img.shields.io/badge/Windows_11-x64_%7C_ARM64-3d3d44?labelColor=232326">
-  <img alt="macOS 26、Apple silicon、ベータ版" src="https://img.shields.io/badge/macOS_26-Apple_silicon_(beta)-3d3d44?labelColor=232326">
+  <img alt="macOS 26、Apple silicon と Intel、ベータ版" src="https://img.shields.io/badge/macOS_26-Apple_silicon_and_Intel_(beta)-3d3d44?labelColor=232326">
   <a href="https://github.com/gelenmedya/rustyfiles/releases/latest"><img alt="すべてのリリースは VirusTotal でスキャンされ、そのレポートはリリースノートの末尾にリンクされている" src="https://img.shields.io/badge/VirusTotal-every_release_scanned-3d3d44?labelColor=232326"></a>
   <a href="LICENSE"><img alt="MIT ライセンス" src="https://img.shields.io/badge/license-MIT-3d3d44?labelColor=232326"></a>
 </p>
 
 <p align="center">
   <a href="https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-win-Setup.exe"><img alt="Windows 版をダウンロード" src="https://img.shields.io/badge/Download_for_Windows-FF6A1A?style=for-the-badge&logo=windows11&logoColor=white"></a>
-  <a href="https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-mac-arm64.dmg"><img alt="macOS 版（ベータ）をダウンロード" src="https://img.shields.io/badge/Download_for_macOS_(beta)-232326?style=for-the-badge&logo=apple&logoColor=white"></a>
+  <a href="https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-mac.dmg"><img alt="macOS 版（ベータ）をダウンロード" src="https://img.shields.io/badge/Download_for_macOS_(beta)-232326?style=for-the-badge&logo=apple&logoColor=white"></a>
   <br>
   <a href="https://rustyfiles.com"><img alt="ウェブサイト" src="https://img.shields.io/badge/rustyfiles.com-232326?style=flat-square&logo=googlechrome&logoColor=white"></a>
   <a href="https://discord.gg/K2banZ36zJ"><img alt="Discord に参加" src="https://img.shields.io/badge/Discord-5865F2?style=flat-square&logo=discord&logoColor=white"></a>
@@ -255,13 +255,13 @@ rustyfiles 独自のダウンロードマネージャーで、アドオンです
 
 ## macOS（ベータ版）
 
-同じファイルマネージャーを、同じ Rust のコアの上に AppKit と Liquid Glass でネイティブに描いたものです。タブ、デュアルペイン、すべての表示、<kbd>Space</kbd> での Quick Look、フォルダーのように開ける書庫、一括名前変更、ディスク使用量、Shelf、色タグ、Git の状態、サーバーへの接続、Ferry、そして同じ49言語。Dock、デスクトップ、HyperSearch、DirectLook は当面 Windows にあります。HyperDownload の Mac 版は、独自のリリースで後から続きます。Apple silicon と macOS 26（Tahoe）。Windows 版と同じように自分で更新されます。
+同じファイルマネージャーを、同じ Rust のコアの上に AppKit と Liquid Glass でネイティブに描いたものです。タブ、デュアルペイン、すべての表示、<kbd>Space</kbd> での Quick Look、フォルダーのように開ける書庫、一括名前変更、ディスク使用量、Shelf、色タグ、Git の状態、サーバーへの接続、Ferry、そして同じ49言語。Dock、デスクトップ、HyperSearch、DirectLook は当面 Windows にあります。HyperDownload の Mac 版は、独自のリリースで後から続きます。Apple silicon と Intel の Mac、macOS 26（Tahoe）。Windows 版と同じように自分で更新されます。
 
 ## インストール
 
 **Windows。** [rustyfiles-win-Setup.exe をダウンロード](https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-win-Setup.exe)（約 50 MB）して開きます。Windows に「Windows によって PC が保護されました」と表示されたら、**詳細情報** をクリックしてから **実行** をクリックしてください。インストーラーはまだコード署名されておらず、すべてのリリースは [VirusTotal](https://www.virustotal.com) でスキャンされています（レポートはリリースノートの末尾にリンクされています）。rustyfiles は自動で開き、スタートメニューに入ります。管理者パスワードは不要で、更新はバックグラウンドで静かにインストールされます。
 
-**macOS（ベータ版）。** [rustyfiles-mac-arm64.dmg をダウンロード](https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-mac-arm64.dmg)して開き、rustyfiles を「アプリケーション」にドラッグします。Apple による署名と公証があるので、ほかの Mac アプリと同じように開きます。
+**macOS（ベータ版）。** [rustyfiles-mac.dmg をダウンロード](https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-mac.dmg)して開き、rustyfiles を「アプリケーション」にドラッグします。Apple による署名と公証があるので、ほかの Mac アプリと同じように開きます。
 
 <details>
 <summary><b>Scoop、ポータブル、ARM64、既定のファイルマネージャー、アンインストール</b></summary>

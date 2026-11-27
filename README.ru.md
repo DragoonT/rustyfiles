@@ -24,14 +24,14 @@
   <a href="https://github.com/gelenmedya/rustyfiles/releases/latest"><img alt="Последняя версия" src="https://img.shields.io/github/v/release/gelenmedya/rustyfiles?label=download&labelColor=232326&color=ff6a1a"></a>
   <a href="https://github.com/gelenmedya/rustyfiles/releases"><img alt="Загрузки" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fgelenmedya%2Frustyfiles%2Fbadges%2Fdownloads.json"></a>
   <img alt="Windows 11, x64 и ARM64" src="https://img.shields.io/badge/Windows_11-x64_%7C_ARM64-3d3d44?labelColor=232326">
-  <img alt="macOS 26 на Apple silicon, бета" src="https://img.shields.io/badge/macOS_26-Apple_silicon_(beta)-3d3d44?labelColor=232326">
+  <img alt="macOS 26 на Apple silicon и Intel, бета" src="https://img.shields.io/badge/macOS_26-Apple_silicon_and_Intel_(beta)-3d3d44?labelColor=232326">
   <a href="https://github.com/gelenmedya/rustyfiles/releases/latest"><img alt="Каждый релиз проверяется в VirusTotal: отчёты приведены в конце его заметок" src="https://img.shields.io/badge/VirusTotal-every_release_scanned-3d3d44?labelColor=232326"></a>
   <a href="LICENSE"><img alt="Лицензия MIT" src="https://img.shields.io/badge/license-MIT-3d3d44?labelColor=232326"></a>
 </p>
 
 <p align="center">
   <a href="https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-win-Setup.exe"><img alt="Скачать для Windows" src="https://img.shields.io/badge/Download_for_Windows-FF6A1A?style=for-the-badge&logo=windows11&logoColor=white"></a>
-  <a href="https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-mac-arm64.dmg"><img alt="Скачать для macOS (бета)" src="https://img.shields.io/badge/Download_for_macOS_(beta)-232326?style=for-the-badge&logo=apple&logoColor=white"></a>
+  <a href="https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-mac.dmg"><img alt="Скачать для macOS (бета)" src="https://img.shields.io/badge/Download_for_macOS_(beta)-232326?style=for-the-badge&logo=apple&logoColor=white"></a>
   <br>
   <a href="https://rustyfiles.com"><img alt="Сайт" src="https://img.shields.io/badge/rustyfiles.com-232326?style=flat-square&logo=googlechrome&logoColor=white"></a>
   <a href="https://discord.gg/K2banZ36zJ"><img alt="Присоединиться к Discord" src="https://img.shields.io/badge/Discord-5865F2?style=flat-square&logo=discord&logoColor=white"></a>
@@ -333,7 +333,7 @@ rustyfiles ведёт индекс имён локальных дисков и �
 Тот же файловый менеджер, нарисованный нативно средствами AppKit и Liquid Glass поверх того же ядра на Rust: вкладки,
 двухпанельный режим, все виды, Quick Look по <kbd>Space</kbd>, архивы как папки, массовое переименование, использование диска,
 Полка, цветные метки, статус Git, Connect to Server, Ferry и те же 49 языков. Dock, рабочий стол, HyperSearch и DirectLook
-пока остаются на Windows, а сборка HyperDownload для Mac выйдет в собственном релизе. Apple silicon и macOS 26 (Tahoe).
+пока остаются на Windows, а сборка HyperDownload для Mac выйдет в собственном релизе. Apple silicon и Intel, macOS 26 (Tahoe).
 Обновляется сама, как приложение для Windows.
 
 ## Установка
@@ -344,7 +344,7 @@ rustyfiles ведёт индекс имён локальных дисков и �
 [VirusTotal](https://www.virustotal.com) (отчёты приведены в конце заметок к релизу). rustyfiles запускается сам и есть
 в меню «Пуск». Пароль администратора не нужен; обновления устанавливаются тихо, в фоне.
 
-**macOS (бета).** [Скачайте rustyfiles-mac-arm64.dmg](https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-mac-arm64.dmg),
+**macOS (бета).** [Скачайте rustyfiles-mac.dmg](https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-mac.dmg),
 откройте его и перетащите rustyfiles в «Программы». Приложение подписано и нотариально заверено Apple, поэтому открывается
 как любое другое приложение для Mac.
 

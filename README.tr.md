@@ -23,14 +23,14 @@
   <a href="https://github.com/gelenmedya/rustyfiles/releases/latest"><img alt="Son sürüm" src="https://img.shields.io/github/v/release/gelenmedya/rustyfiles?label=download&labelColor=232326&color=ff6a1a"></a>
   <a href="https://github.com/gelenmedya/rustyfiles/releases"><img alt="İndirmeler" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fgelenmedya%2Frustyfiles%2Fbadges%2Fdownloads.json"></a>
   <img alt="Windows 11, x64 ve ARM64" src="https://img.shields.io/badge/Windows_11-x64_%7C_ARM64-3d3d44?labelColor=232326">
-  <img alt="Apple silicon üzerinde macOS 26, beta" src="https://img.shields.io/badge/macOS_26-Apple_silicon_(beta)-3d3d44?labelColor=232326">
+  <img alt="Apple silicon ve Intel üzerinde macOS 26, beta" src="https://img.shields.io/badge/macOS_26-Apple_silicon_and_Intel_(beta)-3d3d44?labelColor=232326">
   <a href="https://github.com/gelenmedya/rustyfiles/releases/latest"><img alt="Her sürüm VirusTotal'da taranır: raporlar sürüm notlarının sonunda bağlantılıdır" src="https://img.shields.io/badge/VirusTotal-every_release_scanned-3d3d44?labelColor=232326"></a>
   <a href="LICENSE"><img alt="MIT lisansı" src="https://img.shields.io/badge/license-MIT-3d3d44?labelColor=232326"></a>
 </p>
 
 <p align="center">
   <a href="https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-win-Setup.exe"><img alt="Windows için indir" src="https://img.shields.io/badge/Download_for_Windows-FF6A1A?style=for-the-badge&logo=windows11&logoColor=white"></a>
-  <a href="https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-mac-arm64.dmg"><img alt="macOS için indir (beta)" src="https://img.shields.io/badge/Download_for_macOS_(beta)-232326?style=for-the-badge&logo=apple&logoColor=white"></a>
+  <a href="https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-mac.dmg"><img alt="macOS için indir (beta)" src="https://img.shields.io/badge/Download_for_macOS_(beta)-232326?style=for-the-badge&logo=apple&logoColor=white"></a>
   <br>
   <a href="https://rustyfiles.com"><img alt="Web sitesi" src="https://img.shields.io/badge/rustyfiles.com-232326?style=flat-square&logo=googlechrome&logoColor=white"></a>
   <a href="https://discord.gg/K2banZ36zJ"><img alt="Discord'a katıl" src="https://img.shields.io/badge/Discord-5865F2?style=flat-square&logo=discord&logoColor=white"></a>
@@ -334,7 +334,7 @@ değiştirilmez.
 Aynı dosya yöneticisi; Rust çekirdeği üzerinde AppKit ve Liquid Glass ile yerel olarak çizilmiş: sekmeler, çift bölme, her
 görünüm, <kbd>Space</kbd> ile Quick Look, klasör gibi arşivler, toplu yeniden adlandırma, disk kullanımı, Shelf, renk
 etiketleri, Git durumu, Connect to Server, Ferry ve aynı 49 dil. Dock, masaüstü, HyperSearch ve DirectLook şimdilik
-Windows'ta kalır; HyperDownload'ın Mac sürümü kendi sürümünde gelir. Apple silicon ve macOS 26 (Tahoe). Windows uygulaması
+Windows'ta kalır; HyperDownload'ın Mac sürümü kendi sürümünde gelir. Apple silicon ve Intel Mac'ler, macOS 26 (Tahoe). Windows uygulaması
 gibi kendini günceller.
 
 ## Kurulum
@@ -345,7 +345,7 @@ tıklayın: kurulum programı henüz kod imzalı değil ve her sürüm [VirusTot
 (raporlar sürüm notlarının sonunda bağlantılıdır). rustyfiles kendiliğinden açılır ve Başlat menünüzde bulunur. Yönetici
 parolası gerekmez; güncellemeler arka planda sessizce kurulur.
 
-**macOS (beta).** [rustyfiles-mac-arm64.dmg dosyasını indirin](https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-mac-arm64.dmg),
+**macOS (beta).** [rustyfiles-mac.dmg dosyasını indirin](https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-mac.dmg),
 açın ve rustyfiles'ı Applications'a sürükleyin. Apple tarafından imzalanmış ve notarize edilmiştir; bu yüzden diğer Mac
 uygulamaları gibi açılır.
 
