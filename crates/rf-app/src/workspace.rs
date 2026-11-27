@@ -5377,6 +5377,8 @@ impl Render for Workspace {
                 // engine has drawn (`check_glass` does that): until then, and for good if the engine gives up, the window has Mica.
                 BackdropPref::Glass => WindowBackgroundAppearance::MicaBackdrop,
             }));
+            // (a main window keeps the system's corners whatever the material: Acrylic asks for a popup's small ones, issue 385)
+            rf_win::window::set_system_corners(crate::look::window::hwnd_of(window));
             if backdrop == BackdropPref::Glass {
                 self.start_glass(p.dark, window, cx);
             }
