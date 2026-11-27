@@ -501,17 +501,24 @@ fn expander(key: &'static str, p: &Palette, icon: L, title: &str, desc: Option<&
         .items_center()
         .justify_center()
         .rounded(theme::RADIUS_SM)
+        .child(Icon::new(if open { L::ChevronUp } else { L::ChevronDown }).size(px(14.)));
+    // The whole header opens and closes the card, as Windows 11's own Settings do (issue 392: only the small arrow did). A control
+    // in the header (a switch, a list) keeps its press to itself, or using it would also open or close the card.
+    let control = control.map(|c| div().on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).child(c));
+    let header_control = h_flex().gap_2().items_center().children(control).child(chevron).into_any_element();
+    let body = div()
+        .id(SharedString::from(format!("exp-head-{key}")))
+        .rounded(theme::RADIUS)
+        .cursor_pointer()
         .hover(|s| s.bg(p.pressed))
-        .child(Icon::new(if open { L::ChevronUp } else { L::ChevronDown }).size(px(14.)))
         .on_click(move |_, window, cx| {
             let u = ui(cx);
             if !u.open.remove(key) {
                 u.open.insert(key);
             }
             window.refresh();
-        });
-    let header_control = h_flex().gap_2().items_center().children(control).child(chevron).into_any_element();
-    let body = card_body(p, icon, title.to_string().into(), desc.map(|d| d.to_string().into()), Some(header_control));
+        })
+        .child(card_body(p, icon, title.to_string().into(), desc.map(|d| d.to_string().into()), Some(header_control)));
     // (a search looks inside closed expanders too)
     let kids = if open || collecting() {
         let at = COLLECT_AT.with(|a| a.get());
