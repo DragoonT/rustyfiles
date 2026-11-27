@@ -702,7 +702,13 @@ pub fn route_ipc_shown(msg: String, cx: &mut App) -> bool {
         let ok = handle
             .update(cx, |_, window, cx| {
                 ws.update(cx, |w, cx| w.open_tab_selecting(target, sel, window, cx));
-                window.activate_window();
+                // In front, as Explorer's window comes: the request comes from another program (Win+E caught by the dock, the
+                // desktop, a download manager), so this program is not the one in front and a plain request to come forward was
+                // refused (issue 379). The switcher's way to the front tries harder and flashes the button at worst.
+                let hwnd = crate::look::window::hwnd_of(window);
+                if hwnd == 0 || rf_win::switcher::activate::activate(&mut rf_win::switcher::activate::Win32Ops, hwnd) == rf_win::switcher::activate::Outcome::Gone {
+                    window.activate_window();
+                }
             })
             .is_ok();
         if ok {
@@ -712,7 +718,8 @@ pub fn route_ipc_shown(msg: String, cx: &mut App) -> bool {
     }
     *START_SELECT.lock().unwrap() = select;
     let start = launch_window_start(&msg, has_browser_window(cx), loc);
-    let made = crate::open_main_window_made(start, None, None, cx);
+    // (a new window comes to the front the same way: issue 379)
+    let made = crate::open_main_window_in_front(start, cx).is_some();
     crate::shell::desktop::open::mark("main: a new window was made for the place");
     made
 }
