@@ -418,8 +418,8 @@ impl Nearby {
 
     /// This side's answer to the code shown for a pairing with `peer`.
     pub fn confirm_pairing(&self, peer: String, ok: bool) {
-        if let Some(tx) = self.inner.pairings.lock().unwrap_or_else(|e| e.into_inner()).remove(&peer) {
-            let _ = tx.send(ok);
+        if let Some(w) = self.inner.pairings.lock().unwrap_or_else(|e| e.into_inner()).remove(&peer) {
+            let _ = w.tx.send(ok);
         }
     }
 
@@ -478,6 +478,21 @@ pub(crate) struct SpeedTests {
     last: HashMap<String, std::time::Instant>,
 }
 
+/// A pairing waiting for this side's user: the answer goes to `tx`.
+struct PairingWait {
+    tx: oneshot::Sender<bool>,
+    /// This side opened the connection.
+    outgoing: bool,
+    ticket: u64,
+}
+
+/// Two devices that both start pairing with each other at the same moment have two pairings, one each way, and each device would
+/// ask its user twice, the second asking ending the first (issue 398: the question went at once and "Pair" did nothing). Both keep
+/// the one that the device with the smaller id opened: true when that is this connection (`outgoing`: this device, `me`, opened it).
+pub(crate) fn crossing_winner(me: &str, peer: &str, outgoing: bool) -> bool {
+    if outgoing { me < peer } else { peer < me }
+}
+
 /// The state the runtime's tasks share.
 pub(crate) struct Inner {
     pub(crate) cfg: Config,
@@ -491,7 +506,7 @@ pub(crate) struct Inner {
     vis_epoch: AtomicU64,
     peers: Mutex<HashMap<String, discovery::Seen>>,
     offers: Mutex<HashMap<u64, oneshot::Sender<Option<PathBuf>>>>,
-    pairings: Mutex<HashMap<String, oneshot::Sender<bool>>>,
+    pairings: Mutex<HashMap<String, PairingWait>>,
     /// The devices with an offer waiting for the user: one at a time each, and a few in all, so a device that floods offers is
     /// turned away instead of filling the screen with questions.
     asking: Mutex<HashSet<String>>,
@@ -578,10 +593,32 @@ impl Inner {
         self.asking.lock().unwrap_or_else(|e| e.into_inner()).remove(device);
     }
 
-    pub(crate) fn ask_pairing(&self, peer: &str) -> oneshot::Receiver<bool> {
+    /// Waits for this side's user on a pairing with `peer` over a connection this side opened (`outgoing`) or the peer did. `None`
+    /// when another pairing with the same device is waiting already and wins over this one (see [`crossing_winner`]); a waiting one
+    /// that loses gets no answer (its receiver ends) and steps back quietly.
+    pub(crate) fn ask_pairing(&self, peer: &str, outgoing: bool) -> Option<(u64, oneshot::Receiver<bool>)> {
+        let mut map = self.pairings.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(w) = map.get(peer)
+            && !w.tx.is_closed()
+        {
+            // the same way again (Pair pressed again): the newer one; both ways at once: the one both devices pick
+            let new_wins = w.outgoing == outgoing || crossing_winner(&self.me.id, peer, outgoing);
+            if !new_wins {
+                return None;
+            }
+        }
         let (tx, rx) = oneshot::channel();
-        self.pairings.lock().unwrap_or_else(|e| e.into_inner()).insert(peer.to_string(), tx);
-        rx
+        let ticket = self.next_id();
+        map.insert(peer.to_string(), PairingWait { tx, outgoing, ticket });
+        Some((ticket, rx))
+    }
+
+    /// Ends the wait `ticket` with `peer` (when it is still the one waiting).
+    pub(crate) fn end_pairing(&self, peer: &str, ticket: u64) {
+        let mut map = self.pairings.lock().unwrap_or_else(|e| e.into_inner());
+        if map.get(peer).is_some_and(|w| w.ticket == ticket) {
+            map.remove(peer);
+        }
     }
 
     pub(crate) fn track(&self, tid: u64, conn: quinn::Connection) {
@@ -721,5 +758,22 @@ impl Inner {
 
     fn notify_peers(&self) {
         self.listener.peers_changed(self.peer_list());
+    }
+}
+
+#[cfg(test)]
+mod crossing_tests {
+    use super::crossing_winner;
+
+    /// Both devices must keep the same one of the two pairings: the one the device with the smaller id opened.
+    #[test]
+    fn both_devices_keep_the_same_pairing() {
+        let (a, b) = ("aaa", "bbb");
+        // the connection a opened: a sees it as outgoing, b as incoming; both keep it
+        assert!(crossing_winner(a, b, true));
+        assert!(crossing_winner(b, a, false));
+        // the connection b opened: both let it go
+        assert!(!crossing_winner(b, a, true));
+        assert!(!crossing_winner(a, b, false));
     }
 }

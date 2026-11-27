@@ -132,6 +132,10 @@ pub struct Ferry {
     /// The speed tests running now (by device), and the last result with each device in this run.
     measuring: std::collections::HashSet<String>,
     speeds: HashMap<String, SpeedResult>,
+    /// Each question's asking (by key), so that the three-minute end of an earlier one with the same key does not take a newer one
+    /// away (issue 398: pairing again within three minutes, the panel went at the first try's end).
+    asked: HashMap<String, u64>,
+    next_ask: u64,
 }
 
 /// Settings > Ferry on screen, in `window`, last drawn at `seen`; `restore` is the visibility to go back to when it goes.
@@ -411,11 +415,18 @@ fn ask(q: Question, cx: &mut App) {
     if toasted {
         f.in_toast.insert(key.clone());
     }
+    f.next_ask += 1;
+    let this = f.next_ask;
+    f.asked.insert(key.clone(), this);
     sync_window(cx);
-    // the other side stops waiting after three minutes: the question goes with it
+    // the other side stops waiting after three minutes: the question goes with it (only this asking of it)
     cx.spawn(async move |cx| {
         cx.background_executor().timer(QUESTION_LIFE).await;
-        cx.update(|cx| forget_question(&key, cx));
+        cx.update(|cx| {
+            if cx.has_global::<Ferry>() && cx.global::<Ferry>().asked.get(&key) == Some(&this) {
+                forget_question(&key, cx);
+            }
+        });
     })
     .detach();
 }
@@ -442,6 +453,7 @@ fn forget_question(key: &str, cx: &mut App) {
     }
     let f = cx.global_mut::<Ferry>();
     f.questions.retain(|x| x.key() != key);
+    f.asked.remove(key);
     if f.in_toast.remove(key) {
         rf_win::toast_post::remove(crate::installer::APP_ID, key);
     }

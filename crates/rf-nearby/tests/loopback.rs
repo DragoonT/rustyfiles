@@ -311,3 +311,37 @@ fn a_speed_test_measures_both_ways_and_is_not_repeated_at_once() {
     let Ev::Speed(_, r) = next(&a.events) else { panic!() };
     assert!(!r.ok && r.error.as_deref().is_some_and(|e| e.contains("busy")), "{r:?}");
 }
+
+/// Both users press Pair on the other device at the same moment (issue 398): there are two pairings, one each way. Each device must
+/// end up asking once, with the same code as the other, nothing may end the question early, and a yes on both sides pairs them.
+#[test]
+fn pairing_started_on_both_devices_at_once_asks_once_and_pairs() {
+    let a = device("A", true);
+    let b = device("B", true);
+    a.nearby.set_visibility(Visibility::Everyone);
+    b.nearby.set_visibility(Visibility::Everyone);
+    a.nearby.pair_with_address(addr(&b), b.nearby.id()).unwrap();
+    b.nearby.pair_with_address(addr(&a), a.nearby.id()).unwrap();
+    // what each device shows in the first moments: its last code is the one asked
+    let settle = |rx: &Receiver<Ev>| {
+        let mut code = None;
+        while let Ok(ev) = rx.recv_timeout(Duration::from_millis(1500)) {
+            match ev {
+                Ev::Code(_, c) => code = Some(c),
+                Ev::Paired(_, ok) => panic!("the pairing ended before an answer (ok = {ok})"),
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+        code.expect("no code shown")
+    };
+    let (code_a, code_b) = (settle(&a.events), settle(&b.events));
+    assert_eq!(code_a, code_b, "the two devices show different codes");
+    a.nearby.confirm_pairing(b.nearby.id(), true);
+    b.nearby.confirm_pairing(a.nearby.id(), true);
+    assert!(matches!(next(&a.events), Ev::Paired(_, true)));
+    assert!(matches!(next(&b.events), Ev::Paired(_, true)));
+    assert!(a.events.recv_timeout(Duration::from_millis(800)).is_err(), "A heard more");
+    assert!(b.events.recv_timeout(Duration::from_millis(800)).is_err(), "B heard more");
+    assert_eq!(a.nearby.trusted().len(), 1);
+    assert_eq!(b.nearby.trusted().len(), 1);
+}

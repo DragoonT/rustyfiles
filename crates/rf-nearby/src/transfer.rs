@@ -269,7 +269,7 @@ pub async fn incoming(inner: Arc<Inner>, incoming: quinn::Incoming) -> anyhow::R
             }
             Ok(())
         }
-        Purpose::Pair => pair(&inner, &conn, &mut ctl_send, &mut ctl_recv, &hello.id, &hello.name, &fp).await,
+        Purpose::Pair => pair(&inner, &conn, &mut ctl_send, &mut ctl_recv, &hello.id, &hello.name, &fp, false).await,
         Purpose::Speed => speed_serve(&inner, &conn, &mut ctl_send, &mut ctl_recv, &hello.id, &fp).await,
     }
 }
@@ -821,7 +821,7 @@ pub async fn pair_with(inner: Arc<Inner>, addrs: Vec<SocketAddr>, peer_id: Strin
         let (mut send, mut recv) = conn.open_bi().await?;
         let hello = Hello { proto: proto::PROTOCOL, id: inner.me.id.clone(), name: inner.cfg.name.clone(), os: inner.cfg.os.clone(), purpose: Purpose::Pair };
         proto::write_frame(&mut send, &hello).await?;
-        pair(&inner, &conn, &mut send, &mut recv, &peer_id, &peer_name, &fp).await
+        pair(&inner, &conn, &mut send, &mut recv, &peer_id, &peer_name, &fp, true).await
     }
     .await;
     if let Err(e) = r {
@@ -831,15 +831,43 @@ pub async fn pair_with(inner: Arc<Inner>, addrs: Vec<SocketAddr>, peer_id: Strin
 }
 
 /// Both sides of a pairing run this: show the code, wait for this side's user, tell the other side, hear its answer; both yes: trusted.
-async fn pair(inner: &Arc<Inner>, conn: &quinn::Connection, send: &mut quinn::SendStream, recv: &mut quinn::RecvStream, peer_id: &str, peer_name: &str, fp: &str) -> anyhow::Result<()> {
+/// `outgoing`: this side opened the connection. When both devices started pairing at once, the one both pick goes on and the other
+/// steps back without a word to the user ([`crate::crossing_winner`]).
+#[allow(clippy::too_many_arguments)]
+async fn pair(
+    inner: &Arc<Inner>,
+    conn: &quinn::Connection,
+    send: &mut quinn::SendStream,
+    recv: &mut quinn::RecvStream,
+    peer_id: &str,
+    peer_name: &str,
+    fp: &str,
+    outgoing: bool,
+) -> anyhow::Result<()> {
     if inner.visibility() == Visibility::Off {
         conn.close(2u32.into(), b"not visible");
         bail!("not visible");
     }
     let code = crate::tls::pairing_code(conn).ok_or_else(|| anyhow!("no pairing code"))?;
-    let rx = inner.ask_pairing(peer_id);
+    let Some((ticket, rx)) = inner.ask_pairing(peer_id, outgoing) else {
+        log::info!("nearby: pairing with {peer_id} started both ways at once; the other one goes on");
+        conn.close(3u32.into(), b"pairing crossed");
+        return Ok(());
+    };
     inner.listener.pairing_code(peer_id.to_string(), code);
-    let mine = tokio::time::timeout(DECISION, rx).await.ok().and_then(|r| r.ok()).unwrap_or(false);
+    let mine = match tokio::time::timeout(DECISION, rx).await {
+        Ok(Ok(yes)) => yes,
+        // another pairing with the device took this one's place: it asks the user now
+        Ok(Err(_)) => {
+            log::info!("nearby: pairing with {peer_id} gave way to another one");
+            conn.close(3u32.into(), b"pairing crossed");
+            return Ok(());
+        }
+        Err(_) => {
+            inner.end_pairing(peer_id, ticket);
+            false
+        }
+    };
     proto::write_frame(send, &PairConfirm { ok: mine }).await?;
     let theirs: PairConfirm = tokio::time::timeout(DECISION, proto::read_frame(recv)).await.map_err(|_| anyhow!("no answer"))??;
     let _ = send.finish();
