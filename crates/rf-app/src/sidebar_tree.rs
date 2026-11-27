@@ -131,6 +131,8 @@ pub enum TreeEvent {
     KeyMenu(PathBuf, Point<Pixels>),
     /// Escape, Tab: give the focus back to the file list.
     Leave,
+    /// The eject button of a USB stick's or a disc's root row: remove that drive safely.
+    Eject(char),
 }
 
 enum Msg {
@@ -808,6 +810,11 @@ impl SidebarTree {
         let drop_dir = info.path.to_path_buf();
         let (drop_bg, drop_border) = (p.selection, p.accent);
         let full_name = deep.then(|| SharedString::from(crate::rtl::display_text(&info.label)));
+        // a USB stick's or a disc's root: "Güvenle çıkar" at the row's end, as in Explorer's navigation pane
+        let eject_letter = matches!(root, Some(RootKind::Removable | RootKind::Optical))
+            .then(|| info.path.to_str().and_then(|s| s.chars().next()).filter(|c| c.is_ascii_alphabetic()))
+            .flatten();
+        let eject_hover = p.pressed;
         h_flex()
             .id(("tree-row", id as usize))
             .h(px(ROW_H))
@@ -875,6 +882,25 @@ impl SidebarTree {
                     .when(hidden, |d| d.opacity(0.7))
                     .child(crate::rtl::display_text(&info.label)),
             )
+            .when_some(eject_letter, |d, letter| {
+                d.child(
+                    div()
+                        .id(("tree-eject", id as usize))
+                        .flex_shrink_0()
+                        .size(px(22.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(theme::RADIUS_SM)
+                        .hover(move |s| s.bg(eject_hover))
+                        .tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new(crate::i18n::t("Güvenle çıkar")).build(w, cx))
+                        .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
+                            cx.stop_propagation();
+                            cx.emit(TreeEvent::Eject(letter));
+                        }))
+                        .child(Icon::new(L::Eject).size(px(14.)).text_color(p.text_tertiary)),
+                )
+            })
             .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
                 window.focus(&this.focus, cx);
                 this.click_row(id, ev.modifiers().control, cx);
@@ -1060,6 +1086,7 @@ impl Workspace {
                 self.focus_active(window, cx);
                 self.active_tab().clone().update(cx, |v, cx| v.keyboard_entered(cx));
             }
+            TreeEvent::Eject(letter) => self.eject_drive(*letter, window, cx),
         }
     }
 

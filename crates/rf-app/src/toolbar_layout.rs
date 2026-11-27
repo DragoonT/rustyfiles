@@ -14,11 +14,17 @@
 pub const SEP: &str = "sep";
 
 /// The left group in the ordinary look, as it always stood.
-pub const DEFAULT: [&str; 17] = ["new", "newfolder", SEP, "cut", "copy", "paste", "rename", "share", "delete", "props", "edit", "terminal", "hidden", "refresh", "undo", "redo", "more"];
+/// (the three selection commands are off unless asked for, as Undo and Redo: issue 406)
+pub const DEFAULT: [&str; 20] = [
+    "new", "newfolder", SEP, "cut", "copy", "paste", "rename", "share", "delete", "props", "edit", "terminal", "hidden", "refresh", "undo", "redo", "selectall",
+    "selectnone", "invertsel", "more",
+];
 
 /// The left group in the Windows File Explorer look (Sort and View stand in it there, Properties at its end).
-pub const DEFAULT_EXPLORER: [&str; 20] =
-    ["new", "newfolder", SEP, "cut", "copy", "paste", "rename", "share", "delete", "edit", "terminal", "hidden", "refresh", "undo", "redo", SEP, "sort", "view", "more", "props"];
+pub const DEFAULT_EXPLORER: [&str; 23] = [
+    "new", "newfolder", SEP, "cut", "copy", "paste", "rename", "share", "delete", "edit", "terminal", "hidden", "refresh", "undo", "redo", "selectall", "selectnone",
+    "invertsel", SEP, "sort", "view", "more", "props",
+];
 
 fn default_of(explorer: bool) -> &'static [&'static str] {
     if explorer { &DEFAULT_EXPLORER } else { &DEFAULT }

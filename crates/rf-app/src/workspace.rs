@@ -3498,8 +3498,8 @@ impl Workspace {
                 .when(!popups_open, |d| d.tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(crate::i18n::t(tip)).build(w, cx)))
                 .when(look.icon(), |d| d.child(toolbar_icon(icon)))
                 .children(label.map(|l| div().whitespace_nowrap().child(l)))
-                // (Explorer's "See more" has no arrow, issue 229)
-                .when(!(windows_theme && id == "cb-more"), |d| d.child(div().text_color(p.text_secondary).child(toolbar_icon(L::ChevronDown))))
+                // (Explorer's "See more" has no arrow, issue 229; nor with Windows' pictures in the other look, issue 403)
+                .when(!(windows_icons && id == "cb-more"), |d| d.child(div().text_color(p.text_secondary).child(toolbar_icon(L::ChevronDown))))
                 .when(enabled, |d| {
                     d.hover(|s| s.bg(p.hover)).active(|s| s.bg(p.pressed)).on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
                         let menu = which(this, cx);
@@ -3599,6 +3599,25 @@ impl Workspace {
                 // (off unless asked for; issue 258: "keep the Repeat/Undo button visible in the navigation bar")
                 "undo" => extra("undo").then(|| cmd("cb-undo", L::Undo2, "Geri al  (Ctrl+Z)", true, look("undo"), cx, |_, w, cx| w.dispatch_action(Box::new(Undo), cx)).into_any_element()),
                 "redo" => extra("redo").then(|| cmd("cb-redo", L::Redo2, "Yinele  (Ctrl+Y)", true, look("redo"), cx, |_, w, cx| w.dispatch_action(Box::new(Redo), cx)).into_any_element()),
+                // (off unless asked for; issue 406: the "..." menu's selection commands on the bar)
+                "selectall" => extra("selectall").then(|| {
+                    cmd("cb-selectall", L::SquareCheck, "Tümünü seç", in_folder, look("selectall"), cx, |this, _, cx| {
+                        this.active_tab().clone().update(cx, |v, cx| v.select_all_items(cx))
+                    })
+                    .into_any_element()
+                }),
+                "selectnone" => extra("selectnone").then(|| {
+                    cmd("cb-selectnone", L::Square, "Hiçbirini seçme", in_folder && has_sel, look("selectnone"), cx, |this, _, cx| {
+                        this.active_tab().clone().update(cx, |v, cx| v.select_no_items(cx))
+                    })
+                    .into_any_element()
+                }),
+                "invertsel" => extra("invertsel").then(|| {
+                    cmd("cb-invertsel", L::ArrowLeftRight, "Seçimi tersine çevir", in_folder, look("invertsel"), cx, |this, _, cx| {
+                        this.active_tab().clone().update(cx, |v, cx| v.invert_selected_items(cx))
+                    })
+                    .into_any_element()
+                }),
                 "more" => on("more").then(|| drop("cb-more", L::Ellipsis, None, "Diğer", in_folder, look("more"), cx, |_, _| crate::ctx_menu::BarMenu::More).into_any_element()),
                 // (in the Explorer look only: in the other one they stand in the right group)
                 "sort" => on("sort").then(|| drop("cb-sort", L::ArrowUpDown, sort_label, "Sırala ve gruplandır", in_folder, look("sort"), cx, |_, _| crate::ctx_menu::BarMenu::Sort).into_any_element()),
@@ -3905,6 +3924,31 @@ impl Workspace {
         row
     }
 
+    /// The eject button of a drive's row: removed the way Explorer removes it (the shell's verb, on the shell thread); a drive that
+    /// is still there afterwards has files open on it, and is told so. The sidebar reads the drives again either way.
+    pub(crate) fn eject_drive(&mut self, letter: char, window: &mut Window, cx: &mut Context<Self>) {
+        let places = self.places.clone();
+        cx.spawn_in(window, async move |_, cx| {
+            let done = cx
+                .background_executor()
+                .spawn(async move {
+                    let r = rf_win::sta::call(std::time::Duration::from_secs(30), move || rf_win::volume::eject(letter).map_err(|e| e.to_string()));
+                    let still = std::path::Path::new(&format!("{letter}:\\")).exists();
+                    (r, still)
+                })
+                .await;
+            let _ = cx.update(|window, cx| {
+                places.update(cx, |pl, cx| pl.refresh(cx));
+                let (r, still) = done;
+                if !matches!(r, Some(Ok(()))) || still {
+                    log::warn!("sidebar: {letter}: could not be removed safely: {r:?} (still there: {still})");
+                    crate::prompt::notice(crate::i18n::t("Güvenle çıkar"), crate::i18n::t("Kullanımda: açık dosyaları kapatıp yeniden deneyin").to_string(), window, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
     fn sidebar_item(
         &self,
         id: ElementId,
@@ -3978,6 +4022,21 @@ impl Workspace {
         };
         let pin_label = label.clone();
         let pin_id = id.clone();
+        // a USB stick's or a disc's row: "Güvenle çıkar" at its end, as in Explorer's navigation pane
+        let eject_letter = if rail {
+            None
+        } else {
+            target.path().and_then(|path| {
+                self.places
+                    .read(cx)
+                    .drives
+                    .iter()
+                    .find(|d| d.root == path && matches!(d.kind, rf_win::DriveKind::Removable | rf_win::DriveKind::Optical))
+                    .map(|d| d.letter)
+            })
+        };
+        let eject_id = id.clone();
+        let eject_hover = p.pressed;
         let windows_home = windows_theme && matches!(&target, Location::Home);
         let recycle_icon_watch = windows_theme && matches!(&target, Location::RecycleBin);
         let shell_icon = if windows_theme {
@@ -4072,7 +4131,8 @@ impl Workspace {
                     v_flex()
                         .flex_1()
                         .overflow_hidden()
-                        .child(div().whitespace_nowrap().overflow_hidden().text_ellipsis().child(label))
+                        // (room for the eject button, which stands over the name's line so the drive's bar keeps its full width)
+                        .child(div().whitespace_nowrap().overflow_hidden().text_ellipsis().when(eject_letter.is_some(), |d| d.pr(px(22.))).child(label))
                         .children(extra),
                 )
             })
@@ -4099,7 +4159,27 @@ impl Workspace {
                         ),
                 )
             })
-
+            .when_some(eject_letter, |d, letter| {
+                d.child(
+                    div()
+                        .id((eject_id.clone(), "eject"))
+                        .absolute()
+                        .right(px(if windows_theme { 8. } else { 6. }))
+                        .top(px(4.))
+                        .size(px(24.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(theme::RADIUS_SM)
+                        .hover(move |s| s.bg(eject_hover))
+                        .tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new(crate::i18n::t("Güvenle çıkar")).build(w, cx))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            cx.stop_propagation();
+                            this.eject_drive(letter, window, cx);
+                        }))
+                        .child(Icon::new(L::Eject).size(px(14.)).text_color(p.text_tertiary)),
+                )
+            })
             .on_click(cx.listener(move |this, _, window, cx| this.navigate(target.clone(), window, cx)))
             .when(recycle_icon_watch, |d| {
                 d.on_hover(cx.listener(|this, hovered: &bool, _, cx| {

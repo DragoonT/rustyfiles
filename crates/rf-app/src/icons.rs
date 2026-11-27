@@ -63,7 +63,8 @@ pub fn windows_theme_icon_glyph(icon: L) -> Option<char> {
         "house" => 0xE80F,
         "layout-grid" => 0xECA5,
         "list-filter" | "filter" => 0xE71C,
-        "panel-right" => 0xE890,
+        // (the preview pane: a box with a pane on its right, not the eye of "View", issue 400)
+        "panel-right" => 0xEA4C,
         "scissors" | "cut" => 0xE8C6,
         "share-2" => 0xE72D,
         "text-cursor-input" => 0xE8AC,
@@ -93,6 +94,7 @@ mod windows_theme_tests {
             (L::ClipboardPaste, '\u{E77F}'),
             (L::Copy, '\u{E8C8}'),
             (L::Eye, '\u{E890}'),
+            (L::PanelRight, '\u{EA4C}'),
             (L::House, '\u{E80F}'),
             (L::Scissors, '\u{E8C6}'),
             (L::Share2, '\u{E72D}'),
