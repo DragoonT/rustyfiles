@@ -219,24 +219,31 @@ fn host(cx: &App) -> Option<HostState> {
 
 /// Opens `menu` at `pos` (window coordinates), replacing any open menu.
 pub fn show(menu: Menu, pos: Point<Pixels>, window: &mut Window, cx: &mut App) -> Entity<MenuView> {
-    show_ex(menu, pos, None, false, false, window, cx)
+    show_ex(menu, pos, None, false, false, None, window, cx)
 }
 
 /// Opens a file-list context menu with Explorer-style icons when its theme is enabled.
 pub fn show_context(menu: Menu, pos: Point<Pixels>, window: &mut Window, cx: &mut App) -> Entity<MenuView> {
     let explorer_context = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
-    show_ex(menu, pos, None, explorer_context, false, window, cx)
+    show_ex(menu, pos, None, explorer_context, false, None, window, cx)
+}
+
+/// [`show_context`] with the lazy submenu `hold` held back from the start (see [`MenuView::hold_back`]): taken out before the menu's
+/// window is made, so the window does not open with the row's height and then shrink (issue 368).
+pub fn show_context_holding(menu: Menu, pos: Point<Pixels>, hold: &'static str, window: &mut Window, cx: &mut App) -> Entity<MenuView> {
+    let explorer_context = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
+    show_ex(menu, pos, None, explorer_context, false, Some(hold), window, cx)
 }
 
 /// Opens a file-list context menu with the original app icons.
 pub fn show_context_original_icons(menu: Menu, pos: Point<Pixels>, window: &mut Window, cx: &mut App) -> Entity<MenuView> {
     let explorer_context = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
-    show_ex(menu, pos, None, explorer_context, true, window, cx)
+    show_ex(menu, pos, None, explorer_context, true, None, window, cx)
 }
 
 /// Desktop menus match the Dock's glass in Automatic mode, even when their own window has no glass.
 pub fn show_on_glass(menu: Menu, pos: Point<Pixels>, window: &mut Window, cx: &mut App) -> Entity<MenuView> {
-    show_ex(menu, pos, Some(crate::settings::materials_available()), false, false, window, cx)
+    show_ex(menu, pos, Some(crate::settings::materials_available()), false, false, None, window, cx)
 }
 
 fn show_ex(
@@ -245,6 +252,7 @@ fn show_ex(
     auto_liquid: Option<bool>,
     explorer_context: bool,
     original_icons: bool,
+    hold: Option<&'static str>,
     window: &mut Window,
     cx: &mut App,
 ) -> Entity<MenuView> {
@@ -275,6 +283,9 @@ fn show_ex(
         glides: RefCell::new(BTreeMap::new()),
         scrolls: RefCell::new(Vec::new()),
     });
+    if let Some(key) = hold {
+        view.update(cx, |m, _| m.hold_back(key));
+    }
 
     // Acrylic popups (Windows 11); RF_INWINDOW_MENU=1 or a failure falls back to drawing the
     // menu inside the window.

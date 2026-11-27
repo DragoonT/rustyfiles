@@ -124,17 +124,21 @@ fn on_tray(e: rf_win::tray::TrayEvent, cx: &mut App) {
         TrayEvent::Settings => {
             crate::workspace::show_settings(cx);
         }
-        TrayEvent::Quit => {
-            QUITTING.store(true, Ordering::Relaxed);
-            crate::workspace::save_all_sessions(cx);
-            let windows = cx.windows();
-            if !crate::workspace::any_main_window(cx) {
-                crate::quit_when_idle(cx);
-            }
-            for w in windows {
-                let _ = w.update(cx, |_, window, _| window.remove_window());
-            }
-        }
+        TrayEvent::Quit => quit_all(cx),
+    }
+}
+
+/// "Çıkış" (the tray icon's, and the toolbar's "..." menu's, issue 410): the sessions are saved and every window closes, so the
+/// process ends whatever keeps it running otherwise (background mode, the Dock).
+pub fn quit_all(cx: &mut App) {
+    QUITTING.store(true, Ordering::Relaxed);
+    crate::workspace::save_all_sessions(cx);
+    let windows = cx.windows();
+    if !crate::workspace::any_main_window(cx) {
+        crate::quit_when_idle(cx);
+    }
+    for w in windows {
+        let _ = w.update(cx, |_, window, _| window.remove_window());
     }
 }
 

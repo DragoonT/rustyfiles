@@ -92,15 +92,17 @@ impl FolderView {
         let background = background || items.is_empty();
         let me = cx.entity().downgrade();
         let menu = if background { self.background_menu(&me, &dir, cx) } else { self.items_menu(&me, &dir, &items, cx) };
-        let menu_view = fluent_menu::show_context(menu, window.mouse_position(), window, cx);
         // "Show more options": held back where it came back empty the last time for the same kind of item, so that it does not show
         // for a moment and go (issue 368); it is added when something comes after all. (Not with the shell's items in the menu
-        // itself: there is no row to hold back.)
+        // itself: there is no row to hold back.) It is taken out before the menu's window is made: taken out after, the window
+        // opened with its height and then shrank.
         let more_key = more_kind(background, &items);
         let inline_more = !cx.global::<crate::settings::Settings>().menu.shell_submenu;
-        if !inline_more && more_was_empty(&more_key) {
-            menu_view.update(cx, |m, _| m.hold_back("more"));
-        }
+        let menu_view = if !inline_more && more_was_empty(&more_key) {
+            fluent_menu::show_context_holding(menu, window.mouse_position(), "more", window, cx)
+        } else {
+            fluent_menu::show_context(menu, window.mouse_position(), window, cx)
+        };
 
         // Shell items in the background: QueryContextMenu can take a second with slow extensions.
         let target = if background { ShellTarget::Background(dir.clone()) } else { ShellTarget::Items(items.clone()) };
@@ -840,6 +842,8 @@ impl FolderView {
                         |w, cx| w.dispatch_action(Box::new(crate::actions::GoSettings), cx),
                     )
                     .hint("Ctrl+,"),
+                    // (closing the window leaves rustyfiles running with background mode or the Dock: issue 410)
+                    Item::action(t!("Çıkış"), icon(L::LogOut), |_, cx| cx.defer(crate::background::quit_all)),
                 ]
             }
             BarMenu::Sort => {
