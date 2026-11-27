@@ -354,7 +354,7 @@ unsafe fn read_menu(
 ) -> Vec<ShellItem> {
     use windows::Win32::UI::WindowsAndMessaging::{
         GetMenuItemCount, GetMenuItemInfoW, MENUITEMINFOW, MFS_DISABLED, MFT_OWNERDRAW, MFT_SEPARATOR, MIIM_BITMAP,
-        MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MIIM_SUBMENU,
+        MIIM_CHECKMARKS, MIIM_FTYPE, MIIM_ID, MIIM_STATE, MIIM_STRING, MIIM_SUBMENU,
     };
     use windows::core::PWSTR;
     let mut out = Vec::new();
@@ -363,7 +363,7 @@ unsafe fn read_menu(
         let mut buf = [0u16; 512];
         let mut mii = MENUITEMINFOW {
             cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
-            fMask: MIIM_FTYPE | MIIM_STATE | MIIM_ID | MIIM_SUBMENU | MIIM_STRING | MIIM_BITMAP,
+            fMask: MIIM_FTYPE | MIIM_STATE | MIIM_ID | MIIM_SUBMENU | MIIM_STRING | MIIM_BITMAP | MIIM_CHECKMARKS,
             dwTypeData: PWSTR(buf.as_mut_ptr()),
             cch: (buf.len() - 1) as u32,
             ..Default::default()
@@ -426,7 +426,7 @@ unsafe fn read_menu(
             label,
             hint,
             verb,
-            icon: unsafe { bitmap_bgra(mii.hbmpItem) },
+            icon: unsafe { item_icon(&mii) },
             enabled: !mii.fState.contains(MFS_DISABLED),
             separator: false,
             children,
@@ -435,9 +435,16 @@ unsafe fn read_menu(
     out
 }
 
-/// Reads a menu item bitmap as BGRA. Special `HBMMENU_*` values (owner-drawn callbacks,
+/// An item's picture: its item bitmap, or else the check-mark bitmap that some handlers
+/// (7-Zip, issue 397) set as their icon, which Explorer shows the same way. One-bit
+/// check marks are real check marks, not icons.
+unsafe fn item_icon(mii: &windows::Win32::UI::WindowsAndMessaging::MENUITEMINFOW) -> Option<ShellIcon> {
+    unsafe { bitmap_bgra(mii.hbmpItem, 1).or_else(|| bitmap_bgra(mii.hbmpUnchecked, 2)) }
+}
+
+/// Reads a menu item bitmap as BGRA; `None` below `min_bits` bits a pixel. Special `HBMMENU_*` values (owner-drawn callbacks,
 /// system glyphs) yield `None`.
-unsafe fn bitmap_bgra(hbm: windows::Win32::Graphics::Gdi::HBITMAP) -> Option<ShellIcon> {
+unsafe fn bitmap_bgra(hbm: windows::Win32::Graphics::Gdi::HBITMAP, min_bits: u16) -> Option<ShellIcon> {
     use windows::Win32::Graphics::Gdi::{
         BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, GetDC, GetDIBits, GetObjectW, HGDIOBJ, ReleaseDC,
     };
@@ -450,6 +457,9 @@ unsafe fn bitmap_bgra(hbm: windows::Win32::Graphics::Gdi::HBITMAP) -> Option<She
         return None;
     }
     let (w, h) = (bm.bmWidth, bm.bmHeight.abs());
+    if bm.bmBitsPixel < min_bits {
+        return None;
+    }
     if w <= 0 || h <= 0 || w > 256 || h > 256 {
         return None;
     }
@@ -679,6 +689,43 @@ mod tests {
             insert_extras(hmenu, &extra);
             assert_eq!(rows(hmenu), ["Install", "Repair", "Uninstall", "-", "Copy path", "Tag...", "-", "Open with", "-", "Properties"]);
             let _ = DestroyMenu(hmenu);
+        }
+    }
+
+    #[test]
+    fn an_icon_set_as_the_check_mark_bitmap_is_read() {
+        use windows::Win32::Graphics::Gdi::{CreateBitmap, DeleteObject, HGDIOBJ};
+        use windows::Win32::UI::WindowsAndMessaging::{GetMenuItemInfoW, InsertMenuItemW, MENUITEMINFOW, MIIM_BITMAP, MIIM_CHECKMARKS, MIIM_ID, MIIM_STRING};
+        unsafe {
+            // a 16x16 colour picture, as 7-Zip passes it, and a one-bit check mark
+            let px = vec![0x80u8; 16 * 16 * 4];
+            let colour = CreateBitmap(16, 16, 1, 32, Some(px.as_ptr() as *const _));
+            let mono = CreateBitmap(16, 16, 1, 1, None);
+            let hmenu = CreatePopupMenu().unwrap();
+            for (i, hbm) in [colour, mono].into_iter().enumerate() {
+                let mut label = crate::wide::wide("7-Zip");
+                let mii = MENUITEMINFOW {
+                    cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+                    fMask: MIIM_ID | MIIM_STRING | MIIM_CHECKMARKS,
+                    wID: i as u32 + 1,
+                    dwTypeData: windows::core::PWSTR(label.as_mut_ptr()),
+                    hbmpUnchecked: hbm,
+                    hbmpChecked: hbm,
+                    ..Default::default()
+                };
+                InsertMenuItemW(hmenu, i as u32, true, &mii).unwrap();
+            }
+            let read = |i: u32| {
+                let mut mii = MENUITEMINFOW { cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32, fMask: MIIM_BITMAP | MIIM_CHECKMARKS, ..Default::default() };
+                GetMenuItemInfoW(hmenu, i, true, &mut mii).unwrap();
+                item_icon(&mii)
+            };
+            let icon = read(0).expect("the colour picture is the icon");
+            assert_eq!((icon.width, icon.height), (16, 16));
+            assert!(read(1).is_none(), "a one-bit check mark is not an icon");
+            let _ = DestroyMenu(hmenu);
+            let _ = DeleteObject(HGDIOBJ(colour.0));
+            let _ = DeleteObject(HGDIOBJ(mono.0));
         }
     }
 
