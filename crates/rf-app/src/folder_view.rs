@@ -3436,6 +3436,7 @@ impl FolderView {
         let was_renaming = self.renaming.is_some();
         let had_focus = window.is_window_active() && self.focus.is_focused(window);
         let was_only = self.visible.get(vi).is_some_and(|ei| self.selected.len() == 1 && self.selected.contains(ei));
+        let was_selected = self.visible.get(vi).is_some_and(|ei| self.selected.contains(ei));
         self.slow_click = None;
         // a press on another item applies the name being typed, as Explorer does (issue 180: "With Windows Explorer you could just
         // click anywhere on the window for the changes to be applied"); it was thrown away
@@ -3499,7 +3500,7 @@ impl FolderView {
                 on_release = Release::SelectOnly;
             }
         }
-        let band = row_press_band(self.view_mode, on_name || on_icon || on_text, cx.global::<crate::settings::Settings>().row_selection_box, plain);
+        let band = row_press_band(self.view_mode, on_name || on_icon || on_text, was_selected, cx.global::<crate::settings::Settings>().row_selection_box, plain);
         self.drag_origin = Some(RowPress { origin: ev.position, open_on_release: plain && single && !second, on_release, band });
         // Explorer: a click on the name of the item that was already the only one selected
         // renames it, once the double-click time passes without a second click or a drag
@@ -4390,6 +4391,12 @@ impl FolderView {
 
     fn on_row_right_down(&mut self, vi: usize, window: &mut Window, cx: &mut Context<Self>) {
         cx.stop_propagation();
+        // The row being renamed: a right click is the name box's own (its Cut, Copy, Paste menu). The row took it, gave the list
+        // the keyboard and so ended the rename (Discord: "right-click inside the text field to paste ... causes rf to exit the
+        // renaming mode").
+        if self.renaming.as_ref().is_some_and(|(ei, _)| self.visible.get(vi) == Some(ei)) {
+            return;
+        }
         window.focus(&self.focus, cx);
         if let Some(&ei) = self.visible.get(vi) {
             if !self.selected.contains(&ei) {
@@ -7037,8 +7044,13 @@ fn hover_time() -> std::time::Duration {
 /// the name and the icon did, so a file taken by its date or size "cannot be dragged out, it only gets highlighted", and a short
 /// name left almost nothing to take it by. `boxes_from_rows` is the setting that turns the whole rule off: every press on a row
 /// then drags, as before 0.9.9, and a box starts from the empty area below the rows.
-fn row_press_band(mode: ViewMode, on_item: bool, boxes_from_rows: bool, plain: bool) -> Option<bool> {
-    (boxes_from_rows && matches!(mode, ViewMode::Details | ViewMode::Columns) && !on_item).then_some(!plain)
+/// Whether a press on a row starts a selection box (`Some(adds)`) rather than taking the item (`None`). A row that was already
+/// selected is taken from anywhere, as in Explorer: the selection is what one came to drag, and a press on its row's empty space
+/// that drew a box instead felt random (issue 393); with Ctrl it is a copy, as Explorer's. Elsewhere a row's empty space starts a
+/// box, unless the setting says rows never do; with Ctrl or Shift the box adds to the selection.
+fn row_press_band(mode: ViewMode, on_item: bool, was_selected: bool, boxes_from_rows: bool, plain: bool) -> Option<bool> {
+    let takes_item = on_item || was_selected;
+    (boxes_from_rows && matches!(mode, ViewMode::Details | ViewMode::Columns) && !takes_item).then_some(!plain)
 }
 
 #[cfg(test)]
@@ -7048,14 +7060,17 @@ mod row_press_tests {
     #[test]
     fn a_row_is_dragged_by_its_item_and_starts_a_box_from_its_empty_space() {
         for mode in [ViewMode::Details, ViewMode::Columns] {
-            assert_eq!(row_press_band(mode, true, true, true), None, "a press on the name, the icon or a cell's text drags the item");
-            assert_eq!(row_press_band(mode, false, true, true), Some(false), "a press on the row's empty space starts a box");
-            assert_eq!(row_press_band(mode, false, true, false), Some(true), "with Ctrl or Shift the box adds to the selection");
-            assert_eq!(row_press_band(mode, false, false, true), None, "with the setting off the whole row drags");
-            assert_eq!(row_press_band(mode, false, false, false), None);
+            assert_eq!(row_press_band(mode, true, false, true, true), None, "a press on the name, the icon or a cell's text drags the item");
+            assert_eq!(row_press_band(mode, false, false, true, true), Some(false), "a press on an unselected row's empty space starts a box");
+            assert_eq!(row_press_band(mode, false, false, true, false), Some(true), "with Ctrl or Shift the box adds to the selection");
+            assert_eq!(row_press_band(mode, false, false, false, true), None, "with the setting off the whole row drags");
+            assert_eq!(row_press_band(mode, false, false, false, false), None);
+            // issue 393: a selected row is dragged from anywhere on it, as in Explorer
+            assert_eq!(row_press_band(mode, false, true, true, true), None, "a selected row's empty space drags the selection");
+            assert_eq!(row_press_band(mode, false, true, true, false), None, "with Ctrl too: a Ctrl drag of the selection copies it");
         }
         // (a tile has empty space around it: a press on the tile always takes the item)
-        assert_eq!(row_press_band(ViewMode::Grid, false, true, true), None);
+        assert_eq!(row_press_band(ViewMode::Grid, false, false, true, true), None);
     }
 }
 
