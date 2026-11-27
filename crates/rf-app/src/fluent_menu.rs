@@ -152,6 +152,8 @@ pub struct MenuView {
     /// Keyboard highlight: (level, index).
     hl: Option<(usize, usize)>,
     pending: std::collections::HashMap<&'static str, Pending>,
+    /// Rows held back until their lazy items arrive (`hold_back`): added at the end, after a line, only when something came.
+    held: std::collections::HashMap<&'static str, Item>,
     hover_gen: u64,
     focus: FocusHandle,
     /// Set when the levels live in their own Acrylic popup windows.
@@ -262,6 +264,7 @@ fn show_ex(
         open: Vec::new(),
         hl: None,
         pending: Default::default(),
+        held: Default::default(),
         hover_gen: 0,
         focus: cx.focus_handle(),
         popup: None,
@@ -713,8 +716,29 @@ impl MenuView {
         cx.notify();
     }
 
+    /// Takes the lazy submenu `key` out of the menu for now: it is added at the end (after a line) when its items arrive and are not
+    /// empty, and never shown when they are (issue 368: "Show more options" showed for a moment and then went).
+    pub fn hold_back(&mut self, key: &'static str) {
+        let pos = self.root.iter().position(|it| matches!(it, Item::Sub { items: Sub::Pending { key: k, .. }, .. } if *k == key));
+        if let Some(ix) = pos {
+            let mut root: Vec<Item> = self.root.iter().cloned().collect();
+            let item = root.remove(ix);
+            self.root = Rc::new(without_stray_separators(root));
+            self.held.insert(key, item);
+        }
+    }
+
     pub fn set_pending(&mut self, key: &'static str, p: Pending, cx: &mut Context<Self>) {
         let empty = matches!(&p, Pending::Ready(v) if v.is_empty());
+        // a held-back row whose items came: it joins the menu at the end
+        if !empty && matches!(p, Pending::Ready(_)) && let Some(item) = self.held.remove(key) {
+            let mut root: Vec<Item> = self.root.iter().cloned().collect();
+            root.push(Item::Separator);
+            root.push(item);
+            self.root = Rc::new(without_stray_separators(root));
+            self.root_gen += 1;
+            self.glides.borrow_mut().clear();
+        }
         self.pending.insert(key, p);
         // Nothing came for a submenu that has nothing else to show: its row goes, rather than opening on "No other options"
         // (issue 368: "Show more options" with nothing under it)

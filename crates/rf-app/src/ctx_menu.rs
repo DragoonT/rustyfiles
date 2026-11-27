@@ -93,6 +93,14 @@ impl FolderView {
         let me = cx.entity().downgrade();
         let menu = if background { self.background_menu(&me, &dir, cx) } else { self.items_menu(&me, &dir, &items, cx) };
         let menu_view = fluent_menu::show_context(menu, window.mouse_position(), window, cx);
+        // "Show more options": held back where it came back empty the last time for the same kind of item, so that it does not show
+        // for a moment and go (issue 368); it is added when something comes after all. (Not with the shell's items in the menu
+        // itself: there is no row to hold back.)
+        let more_key = more_kind(background, &items);
+        let inline_more = !cx.global::<crate::settings::Settings>().menu.shell_submenu;
+        if !inline_more && more_was_empty(&more_key) {
+            menu_view.update(cx, |m, _| m.hold_back("more"));
+        }
 
         // Shell items in the background: QueryContextMenu can take a second with slow extensions.
         let target = if background { ShellTarget::Background(dir.clone()) } else { ShellTarget::Items(items.clone()) };
@@ -144,6 +152,9 @@ impl FolderView {
                 };
                 let open_with = with_own_programs(&me, own, open_with);
                 let more = with_packaged(packaged, more, cx.global::<crate::settings::Settings>().menu.prefer_classic_commands);
+                if let Pending::Ready(v) = &more {
+                    remember_more(more_key.clone(), v.is_empty());
+                }
                 let inline = !cx.global::<crate::settings::Settings>().menu.shell_submenu;
                 if let Some(m) = menu_weak.upgrade() {
                     m.update(cx, |m, cx| {
@@ -1122,6 +1133,31 @@ fn open_terminal(d: PathBuf) {
     std::thread::spawn(move || {
         let _ = rf_win::shell::open_terminal(&d);
     });
+}
+
+/// The kind of thing a menu is for, as far as "Show more options" goes: the folder's background, or an item by its extension (the
+/// shell's commands for an item depend on its type; a folder and a file without one are one kind here, as the disk is not asked on
+/// the interface's thread). Pure.
+fn more_kind(background: bool, items: &[PathBuf]) -> String {
+    if background {
+        return "<background>".into();
+    }
+    match items {
+        [one] => one.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_else(|| "<none>".into()),
+        _ => "<several>".into(),
+    }
+}
+
+static MORE_EMPTY: std::sync::LazyLock<parking_lot::Mutex<std::collections::HashMap<String, bool>>> =
+    std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
+
+/// Whether "Show more options" came back empty the last time for this kind of item.
+fn more_was_empty(kind: &str) -> bool {
+    MORE_EMPTY.lock().get(kind).copied().unwrap_or(false)
+}
+
+fn remember_more(kind: String, empty: bool) {
+    MORE_EMPTY.lock().insert(kind, empty);
 }
 
 /// "<name> - Kısayol.lnk" next to each item (unique name), like Explorer's "Create shortcut".
