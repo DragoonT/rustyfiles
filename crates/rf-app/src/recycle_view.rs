@@ -190,6 +190,9 @@ impl RecycleView {
     }
 
     fn empty_bin(&mut self, cx: &mut Context<Self>) {
+        if self.items.is_empty() || self.busy {
+            return;
+        }
         self.status = None;
         // confirm = true → Windows asks the user first
         self.run(cx, || rf_win::recycle::empty(true));
@@ -504,15 +507,16 @@ impl Render for RecycleView {
             )
             .child(
                 button("rb-restore", L::Undo2, t!("Geri yükle"), has_sel && !self.busy, &p)
-                    .on_click(cx.listener(|this, _, _, cx| this.restore_selected(cx))),
+                    .when(has_sel && !self.busy, |b| b.on_click(cx.listener(|this, _, _, cx| this.restore_selected(cx)))),
             )
             .child(
                 button("rb-delete", L::TrashOff, t!("Kalıcı olarak sil"), has_sel && !self.busy, &p)
-                    .on_click(cx.listener(|this, _, window, cx| this.delete_selected(window, cx))),
+                    .when(has_sel && !self.busy, |b| b.on_click(cx.listener(|this, _, window, cx| this.delete_selected(window, cx)))),
             )
             .child(
+                // (a greyed button takes no click: an empty bin asked whether to empty it, issue 409)
                 button("rb-empty", L::Trash, t!("Kutuyu boşalt"), !self.items.is_empty() && !self.busy, &p)
-                    .on_click(cx.listener(|this, _, _, cx| this.empty_bin(cx))),
+                    .when(!self.items.is_empty() && !self.busy, |b| b.on_click(cx.listener(|this, _, _, cx| this.empty_bin(cx)))),
             )
             .child(
                 button("rb-settings", L::Settings, t!("Ayarlar"), true, &p).on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx))),
