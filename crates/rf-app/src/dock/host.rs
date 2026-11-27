@@ -1647,6 +1647,8 @@ fn apply_reloaded(fresh: Option<Settings>, stamp: Option<SystemTime>, cx: &mut A
     }
     // the bell's dot follows its setting
     super::notif_state::sync(cx);
+    // (read by every island's next look at its backdrop)
+    super::backdrop::set_adaptive(cx.global::<Settings>().dock_adaptive_tone);
     let Some(host) = host_mut(cx) else { return };
     host.settings_stamp = stamp;
     let ch = changes(&host.prefs, &new);
@@ -1871,6 +1873,7 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
     let prefs = Prefs::of(cx.global::<Settings>());
     // (before the islands are made: each glass takes the switch when it is made)
     super::look::set_plain(prefs.opaque);
+    super::backdrop::set_adaptive(cx.global::<Settings>().dock_adaptive_tone);
     // (before the islands are made: their widths depend on it)
     super::plan::set_search_mode(prefs.search);
     let (tx, mut events) = futures::channel::mpsc::unbounded::<SystemEvent>();

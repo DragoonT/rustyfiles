@@ -64,6 +64,18 @@ pub struct IslandGlass {
     plain: bool,
 }
 
+/// Settings › Dock: the glass's tone follows what is behind it (`Settings::dock_adaptive_tone`, on by default). Set by the host when
+/// the dock starts and whenever its settings change.
+static ADAPTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn set_adaptive(on: bool) {
+    ADAPTIVE.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn adaptive() -> bool {
+    ADAPTIVE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 impl IslandGlass {
     pub fn new() -> IslandGlass {
         IslandGlass { hwnd: 0, machine: Machine::default(), tone: Tone::new(true), scale: 1.0, shape: NO_SHAPE, sent_dark: true, attached: false, hidden: false, plain: super::look::plain() }
@@ -156,6 +168,14 @@ impl IslandGlass {
     /// Looks at how bright the backdrop is (a few times a second, from the host) and moves the foreground and the glass tint if the
     /// page behind went across a line. True when the island has to be drawn again; false and nothing else when nothing changed.
     pub fn poll_tone(&mut self, now_ms: u64) -> bool {
+        // (the setting is off: the theme decides, as without glass; issue 388)
+        if !adaptive() {
+            let changed = self.tone.feed(None, now_ms);
+            if changed {
+                self.send_tint();
+            }
+            return changed;
+        }
         // a glass that is put away measures nothing (it has no area): the tone stays as it was until the glass is back
         if self.hidden {
             return false;
@@ -215,7 +235,7 @@ impl IslandGlass {
     pub fn sync(&mut self, dark: bool, scale: f32, now_ms: u64) {
         let scale_changed = (scale - self.scale).abs() > 0.001;
         self.scale = scale;
-        let known = self.attached && !self.machine.fallback() && rf_win::glass::backdrop_luma(self.hwnd).is_some();
+        let known = adaptive() && self.attached && !self.machine.fallback() && rf_win::glass::backdrop_luma(self.hwnd).is_some();
         self.tone.set_system(dark, known, now_ms);
         if !self.attached {
             return;
