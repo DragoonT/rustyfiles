@@ -2224,5 +2224,6 @@
  "53d85cf8": "le serveur a refusé la demande",
  "50c83481": "la session FTP a été annulée",
  "bd3c41cf": "Ouvrir les Paramètres et la Corbeille dans un nouvel onglet",
- "32e6819a": "Le dossier ouvert reste en place. Depuis l'Accueil ou l'une des deux pages, ils s'ouvrent dans le même onglet."
+ "32e6819a": "Le dossier ouvert reste en place. Depuis l'Accueil ou l'une des deux pages, ils s'ouvrent dans le même onglet.",
+ "8872682e": "Programmes qui utilisent la fenêtre Ouvrir / Enregistrer de Windows"
 }

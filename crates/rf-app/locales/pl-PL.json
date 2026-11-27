@@ -2224,5 +2224,6 @@
  "53d85cf8": "serwer odrzucił żądanie",
  "50c83481": "sesja FTP została anulowana",
  "bd3c41cf": "Otwieraj Ustawienia i Kosz na nowej karcie",
- "32e6819a": "Otwarty folder zostaje na miejscu. Ze strony głównej lub z jednej z tych dwóch stron otwierają się na tej samej karcie."
+ "32e6819a": "Otwarty folder zostaje na miejscu. Ze strony głównej lub z jednej z tych dwóch stron otwierają się na tej samej karcie.",
+ "8872682e": "Programy, które dostają własne okno Otwórz / Zapisz systemu Windows"
 }

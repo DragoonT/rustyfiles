@@ -13424,5 +13424,11 @@
   "key": "Açık klasör yerinde kalır. Giriş sayfasından ya da bu iki sayfadan birinden açılınca aynı sekmede açılırlar.",
   "tr": "Açık klasör yerinde kalır. Giriş sayfasından ya da bu iki sayfadan birinden açılınca aynı sekmede açılırlar.",
   "en": "The open folder stays where it is. From Home or from one of the two pages they open in the same tab."
+ },
+ {
+  "id": "8872682e",
+  "key": "Windows'un Aç / Kaydet penceresini alan programlar",
+  "tr": "Windows'un Aç / Kaydet penceresini alan programlar",
+  "en": "Programs that get Windows' own Open / Save window"
  }
 ]

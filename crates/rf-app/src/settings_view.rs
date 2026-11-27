@@ -3120,7 +3120,7 @@ mod ext_tests {
     }
 }
 
-fn advanced(p: &Palette, s: &Settings, cx: &App) -> Vec<AnyElement> {
+fn advanced(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     let start_on = rf_win::dialogs::starts_with_windows();
     let load = hybrid::load_snapshot();
     let pct = |v: Option<f32>| v.map(crate::i18n::pct).unwrap_or_else(|| "—".into());
@@ -3349,18 +3349,36 @@ fn advanced(p: &Palette, s: &Settings, cx: &App) -> Vec<AnyElement> {
             }),
         ));
     }
-    // the apps whose Open / Save windows stay Windows' own (added with the dialog's own button, issue 371)
-    for (i, app) in s.dialog_windows_apps.iter().enumerate() {
-        let key = app.clone();
-        out.push(card(
+    // the apps whose Open / Save windows stay Windows' own (added with the dialog's own button, issue 371), in a card of their own
+    // that opens: one card per program made the page long (the reporter: "a sub-section ... to keep the menu clean")
+    if !s.dialog_windows_apps.is_empty() {
+        let apps = s.dialog_windows_apps.clone();
+        let pp = *p;
+        out.push(expander(
+            "dlg-windows-apps",
             p,
             L::AppWindow,
-            app.trim_end_matches(".exe"),
-            Some(t!("Bu programda Windows'un Aç / Kaydet penceresi açılır.")),
-            button(("dlg-windows", i), p, t!("Kaldır"), move |_, cx| {
-                let key = key.clone();
-                crate::settings::update(cx, move |s| s.dialog_windows_apps.retain(|a| *a != key));
-            }),
+            t!("Windows'un Aç / Kaydet penceresini alan programlar"),
+            None,
+            None,
+            move || {
+                apps.iter()
+                    .enumerate()
+                    .map(|(i, app)| {
+                        let key = app.clone();
+                        sub(
+                            &pp,
+                            app.trim_end_matches(".exe"),
+                            Some(t!("Bu programda Windows'un Aç / Kaydet penceresi açılır.")),
+                            button(("dlg-windows", i), &pp, t!("Kaldır"), move |_, cx| {
+                                let key = key.clone();
+                                crate::settings::update(cx, move |s| s.dialog_windows_apps.retain(|a| *a != key));
+                            }),
+                        )
+                    })
+                    .collect()
+            },
+            cx,
         ));
     }
     out.extend([

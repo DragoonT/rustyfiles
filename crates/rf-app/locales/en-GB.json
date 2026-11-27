@@ -2224,5 +2224,6 @@
  "53d85cf8": "the server refused the request",
  "50c83481": "the FTP session was cancelled",
  "bd3c41cf": "Open Settings and the Recycle Bin in a new tab",
- "32e6819a": "The open folder stays where it is. From Home or from one of the two pages they open in the same tab."
+ "32e6819a": "The open folder stays where it is. From Home or from one of the two pages they open in the same tab.",
+ "8872682e": "Programs that get Windows' own Open / Save window"
 }

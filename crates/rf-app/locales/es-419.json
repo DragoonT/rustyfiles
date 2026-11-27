@@ -2224,5 +2224,6 @@
  "53d85cf8": "el servidor rechazó la solicitud",
  "50c83481": "se canceló la sesión FTP",
  "bd3c41cf": "Abrir Configuración y la Papelera de reciclaje en una pestaña nueva",
- "32e6819a": "La carpeta abierta se queda donde está. Desde Inicio o desde una de las dos páginas se abren en la misma pestaña."
+ "32e6819a": "La carpeta abierta se queda donde está. Desde Inicio o desde una de las dos páginas se abren en la misma pestaña.",
+ "8872682e": "Programas que usan la ventana Abrir / Guardar propia de Windows"
 }

@@ -2224,5 +2224,6 @@
  "53d85cf8": "server odmietol požiadavku",
  "50c83481": "relácia FTP bola zrušená",
  "bd3c41cf": "Otvárať Nastavenia a Kôš na novej karte",
- "32e6819a": "Otvorený priečinok zostane na mieste. Z Domov alebo z jednej z týchto dvoch stránok sa otvoria na tej istej karte."
+ "32e6819a": "Otvorený priečinok zostane na mieste. Z Domov alebo z jednej z týchto dvoch stránok sa otvoria na tej istej karte.",
+ "8872682e": "Programy, ktoré dostávajú vlastné okno Windows Otvoriť / Uložiť"
 }
