@@ -1128,6 +1128,7 @@ fn open_terminal(d: PathBuf) {
 fn create_shortcuts(items: Vec<PathBuf>) {
     std::thread::spawn(move || {
         rf_win::shell::ensure_com();
+        let mut made = Vec::new();
         for target in items {
             let (Some(parent), Some(name)) = (target.parent(), target.file_name()) else { continue };
             let base = format!("{} - {}", name.to_string_lossy(), t!("Kısayol"));
@@ -1137,9 +1138,14 @@ fn create_shortcuts(items: Vec<PathBuf>) {
                 link = parent.join(format!("{base} ({n}).lnk"));
                 n += 1;
             }
-            if let Err(e) = rf_win::shortcut::create(&link, &target) {
-                log::warn!("shortcut: {e:#}");
+            match rf_win::shortcut::create(&link, &target) {
+                Ok(()) => made.push(link),
+                Err(e) => log::warn!("shortcut: {e:#}"),
             }
+        }
+        // (Ctrl+Z takes them away, and does not undo the operation before them: see `paste_shortcuts`)
+        if !made.is_empty() {
+            crate::undo::push(crate::undo::UndoOp::CreatedAll { paths: made });
         }
     });
 }

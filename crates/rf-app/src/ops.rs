@@ -419,6 +419,7 @@ impl FolderView {
         cx.spawn(async move |this, cx| {
             let Ok(Some((paths, _))) = rx.await else { return };
             let work = cx.background_spawn(async move {
+                let mut made = Vec::new();
                 for p in paths {
                     let stem = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Kısayol".into());
                     // never overwrite: "x.lnk", "x (2).lnk", …
@@ -428,9 +429,16 @@ impl FolderView {
                         link = dir.join(format!("{stem} ({n}).lnk"));
                         n += 1;
                     }
-                    if let Err(e) = rf_win::shortcut::create(&link, &p) {
-                        log::warn!("shortcut {link:?}: {e:#}");
+                    match rf_win::shortcut::create(&link, &p) {
+                        Ok(()) => made.push(link),
+                        Err(e) => log::warn!("shortcut {link:?}: {e:#}"),
                     }
+                }
+                // Ctrl+Z takes these shortcuts away. Without a record it undid the operation BEFORE them: after a copy of two
+                // pictures and a mistaken "Paste shortcut", Ctrl+Z sent the two pictures to the Recycle Bin and left the shortcut
+                // (a Discord report, 1.0.0).
+                if !made.is_empty() {
+                    crate::undo::push(crate::undo::UndoOp::CreatedAll { paths: made });
                 }
             });
             work.await;

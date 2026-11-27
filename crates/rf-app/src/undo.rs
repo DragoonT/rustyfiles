@@ -12,6 +12,8 @@ use rf_win::fileops::Transfer;
 pub enum UndoOp {
     Renamed { from: PathBuf, to: PathBuf },
     Created { path: PathBuf },
+    /// Several items made by one command (the shortcuts of "Paste shortcut" or "Create shortcut"): one Ctrl+Z takes them all away.
+    CreatedAll { paths: Vec<PathBuf> },
     /// (source, result) pairs reported by the shell.
     Transferred { kind: Transfer, pairs: Vec<(PathBuf, PathBuf)> },
     /// (original path, path inside the Recycle Bin)
@@ -40,7 +42,7 @@ pub fn push(op: UndoOp) {
 fn label(op: &UndoOp) -> &'static str {
     match op {
         UndoOp::Renamed { .. } => t!("Yeniden adlandırma"),
-        UndoOp::Created { .. } => t!("Oluşturma"),
+        UndoOp::Created { .. } | UndoOp::CreatedAll { .. } => t!("Oluşturma"),
         UndoOp::Transferred { kind: Transfer::Copy, .. } => t!("Kopyalama"),
         UndoOp::Transferred { kind: Transfer::Move, .. } => t!("Taşıma"),
         UndoOp::Recycled { .. } => t!("Silme"),
@@ -115,7 +117,7 @@ pub fn forget_organized(token: u64) -> bool {
 
 fn undo_op(op: UndoOp, cx: &mut App) {
     // creating an item can't be replayed (its contents may have changed), everything else can
-    if !matches!(op, UndoOp::Created { .. }) {
+    if !matches!(op, UndoOp::Created { .. } | UndoOp::CreatedAll { .. }) {
         REDO.lock().push(op.clone());
     }
     match op {
@@ -126,6 +128,7 @@ fn undo_op(op: UndoOp, cx: &mut App) {
             });
         }
         UndoOp::Created { path } => crate::status_center::delete_ex(cx, vec![path], false, false),
+        UndoOp::CreatedAll { paths } => crate::status_center::delete_ex(cx, paths, false, false),
         UndoOp::Transferred { kind: Transfer::Copy, pairs } => {
             crate::status_center::delete_ex(cx, pairs.into_iter().map(|(_, dst)| dst).collect(), false, false)
         }
@@ -174,7 +177,7 @@ pub fn redo(cx: &mut App) {
                 rf_win::fileops::rename(&from, &name)
             });
         }
-        UndoOp::Created { .. } => {}
+        UndoOp::Created { .. } | UndoOp::CreatedAll { .. } => {}
         UndoOp::Transferred { kind, pairs } => {
             let mut groups: std::collections::BTreeMap<PathBuf, Vec<PathBuf>> = Default::default();
             for (src, dst) in pairs {

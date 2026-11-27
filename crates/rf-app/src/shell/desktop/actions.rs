@@ -236,8 +236,9 @@ impl DesktopView {
         }
         cx.spawn(async move |this, cx| {
             let made = rx.await.unwrap_or_default();
-            for p in &made {
-                crate::undo::push(crate::undo::UndoOp::Created { path: p.clone() });
+            // (one Ctrl+Z takes all of them away)
+            if !made.is_empty() {
+                crate::undo::push(crate::undo::UndoOp::CreatedAll { paths: made.clone() });
             }
             let ids: Vec<ItemId> = made.iter().filter_map(|p| p.file_name()).map(|n| ItemId::user(&n.to_string_lossy())).collect();
             if !ids.is_empty() {
