@@ -611,6 +611,8 @@ pub struct Settings {
     pub new_tab_opens: NewTabOpens,
     /// A new tab (Ctrl+T, the + button) puts the keyboard in the address bar, ready for a typed or pasted path (issue 240).
     pub new_tab_address: bool,
+    /// Settings and the Recycle Bin open in a tab of their own instead of the tab in front, so its folder is not left (issue 386). Off.
+    pub pages_in_new_tab: bool,
     /// The details shown when the pointer rests on an item (size, dates, a picture's size). Issue 264: some find them in the way.
     pub item_hover_details: bool,
     /// A folder opened from outside (Win+E, the desktop, another program) gets a window of its own instead of a tab in the newest
@@ -846,6 +848,9 @@ pub struct Settings {
     pub dock_autohide_windows: bool,
     /// The dock's islands on a solid fill instead of the glass (off; issue 113).
     pub dock_opaque: bool,
+    /// The glass's tone follows what is behind it (on): light glass with dark text over a bright page. Off: the theme alone decides,
+    /// glass or not (issue 388: "the dark theme randomly resets to light" over a bright window).
+    pub dock_adaptive_tone: bool,
     /// The Dock without its motions and on a solid fill: less work while a game keeps the graphics card busy (issue 133).
     pub dock_performance: bool,
     /// A thin "Show desktop" strip at the right end of the primary monitor's right island, after the bell, as on Windows' taskbar (off;
@@ -1028,6 +1033,7 @@ impl Default for Settings {
             focus_new_tab: false,
             new_tab_opens: NewTabOpens::Home,
             new_tab_address: false,
+            pages_in_new_tab: false,
             item_hover_details: true,
             launch_in_new_window: false,
             sessions_in_this_window: false,
@@ -1140,6 +1146,7 @@ impl Default for Settings {
             dock_autohide: false,
             dock_autohide_windows: false,
             dock_opaque: false,
+            dock_adaptive_tone: true,
             dock_performance: false,
             dock_show_desktop: false,
             dock_labels: false,

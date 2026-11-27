@@ -1965,6 +1965,15 @@ impl Workspace {
             self.activate(ix, window, cx);
             return;
         }
+        // Settings and the Recycle Bin in a tab of their own when the setting says so, unless the tab in front shows nothing to keep:
+        // Home, or one of the two pages (issue 386: "prevent the user from losing their current position")
+        if matches!(loc, Location::Settings | Location::RecycleBin)
+            && cx.global::<crate::settings::Settings>().pages_in_new_tab
+            && !matches!(self.active_tab().read(cx).location(), Location::Home | Location::Settings | Location::RecycleBin)
+        {
+            self.open_tab(loc, window, cx);
+            return;
+        }
         // Settings always gets a single pane: asked for from a split tab, it opens in a tab of its own (issue 281).
         if matches!(loc, Location::Settings) && self.tabs[self.active].right.is_some() {
             self.open_tab(loc, window, cx);
@@ -6045,7 +6054,30 @@ impl Render for Workspace {
                             .children(star_strip)
                             .children(donate_strip)
                             .when(show_statusbar, |d| d.child(status))
-                            .children(picker_footer),
+                            .children(picker_footer)
+                            // Windows' own Open / Save keys in rustyfiles' dialog (issue 389): Alt+S saves, Alt+O opens (a folder dialog
+                            // takes either), Alt+N goes to the name box; from the list or from the box
+                            .when(self.picker.is_some(), |d| {
+                                d.capture_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                                    let k = &ev.keystroke;
+                                    if !k.modifiers.alt || k.modifiers.control || k.modifiers.shift {
+                                        return;
+                                    }
+                                    let Some(s) = this.picker() else { return };
+                                    use rustyfiles_dialog::proto::Mode;
+                                    match (k.key.as_str(), s.req.mode) {
+                                        ("s", Mode::Save | Mode::Folder) | ("o", Mode::Open | Mode::Folder) => {
+                                            cx.stop_propagation();
+                                            crate::picker::accept(this, window, cx);
+                                        }
+                                        ("n", _) => {
+                                            cx.stop_propagation();
+                                            s.name.update(cx, |st, cx| st.focus(window, cx));
+                                        }
+                                        _ => {}
+                                    }
+                                }))
+                            }),
                     ),
             )
             .when(!windows_theme && !compact, |d| d.child(div().h(px(8.))))
