@@ -2215,5 +2215,14 @@
  "5ee616e9": "Od teď používat vlastní okno Windows pro:",
  "529850df": "Tento program dostává vlastní okno Windows Otevřít / Uložit.",
  "d59927ac": "Materiál místních nabídek",
- "338db07f": "Určuje pozadí místních nabídek a rozevíracích seznamů. Barvy se řídí zvoleným motivem."
+ "338db07f": "Určuje pozadí místních nabídek a rozevíracích seznamů. Barvy se řídí zvoleným motivem.",
+ "279e7bd2": "Sklo se řídí tím, co je za ním",
+ "4ac9d922": "Zapnuto: před světlým oknem nebo tapetou se ostrov změní na světlé sklo s tmavým textem. Vypnuto: sklo se vždy řídí motivem.",
+ "c7b98217": "přihlášení se nezdařilo",
+ "c6b76004": "spojení bylo přerušeno",
+ "3e4b9013": "server spojení obnovil",
+ "53d85cf8": "server požadavek odmítl",
+ "50c83481": "relace FTP byla zrušena",
+ "bd3c41cf": "Otevírat Nastavení a Koš na nové kartě",
+ "32e6819a": "Otevřená složka zůstane, kde je. Z Domů nebo z jedné z těchto dvou stránek se otevřou na stejné kartě."
 }

@@ -2215,5 +2215,14 @@
  "5ee616e9": "Brug fremover Windows' eget vindue til:",
  "529850df": "Dette program får Windows' eget Åbn / Gem-vindue.",
  "d59927ac": "Materiale for pop op-menuer",
- "338db07f": "Bestemmer baggrunden for genvejsmenuer og rullelister. Farverne følger det valgte tema."
+ "338db07f": "Bestemmer baggrunden for genvejsmenuer og rullelister. Farverne følger det valgte tema.",
+ "279e7bd2": "Glasset følger det, der er bag det",
+ "4ac9d922": "Til: foran et lyst vindue eller baggrund skifter en ø til lyst glas med mørk tekst. Fra: glasset følger altid temaet.",
+ "c7b98217": "kunne ikke logge på",
+ "c6b76004": "forbindelsen blev afbrudt",
+ "3e4b9013": "serveren nulstillede forbindelsen",
+ "53d85cf8": "serveren afviste anmodningen",
+ "50c83481": "FTP-sessionen blev annulleret",
+ "bd3c41cf": "Åbn Indstillinger og Papirkurv i en ny fane",
+ "32e6819a": "Den åbne mappe bliver, hvor den er. Fra Start eller fra en af de to sider åbnes de i samme fane."
 }

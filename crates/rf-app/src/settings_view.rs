@@ -187,7 +187,10 @@ fn matching(all: Vec<Found>, query: &str) -> Vec<Found> {
     let mut seen = HashSet::new();
     all.into_iter()
         .filter(|f| {
-            let text = rf_core::entry::fold_case(&format!("{} {}", f.title, f.desc.as_deref().unwrap_or("")));
+            // (the English name too, in any other language: issue 381, a setting known from an English issue or changelog)
+            let desc = f.desc.as_deref().unwrap_or("");
+            let english = [crate::i18n::english_of(&f.title), crate::i18n::english_of(desc)];
+            let text = rf_core::entry::fold_case(&format!("{} {} {}", f.title, desc, english.iter().flatten().copied().collect::<Vec<_>>().join(" ")));
             !words.is_empty() && words.iter().all(|w| text.contains(w.as_str()))
         })
         // (a setting drawn twice on a page is one result)
@@ -967,6 +970,13 @@ fn general(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         t!("Yeni sekmede adres çubuğuna yaz"),
         Some(t!("Ctrl+T ve + düğmesi: bir yolu hemen yazabilir ya da yapıştırabilirsiniz")),
         sw("new-tab-address", p, s.new_tab_address, |s, v| s.new_tab_address = v),
+    ));
+    v.push(card(
+        p,
+        L::Settings,
+        t!("Ayarlar ve Geri Dönüşüm Kutusu yeni sekmede açılsın"),
+        Some(t!("Açık klasör yerinde kalır. Giriş sayfasından ya da bu iki sayfadan birinden açılınca aynı sekmede açılırlar.")),
+        sw("pages-new-tab", p, s.pages_in_new_tab, |s, v| s.pages_in_new_tab = v),
     ));
     v.push(card(
         p,

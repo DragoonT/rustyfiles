@@ -2215,5 +2215,14 @@
  "5ee616e9": "Mulai sekarang, gunakan jendela milik Windows untuk:",
  "529850df": "Program ini mendapat jendela Buka / Simpan milik Windows.",
  "d59927ac": "Bahan menu pop-up",
- "338db07f": "Mengatur latar belakang menu konteks dan daftar tarik-turun. Warna mengikuti tema yang dipilih."
+ "338db07f": "Mengatur latar belakang menu konteks dan daftar tarik-turun. Warna mengikuti tema yang dipilih.",
+ "279e7bd2": "Kaca mengikuti apa yang ada di belakangnya",
+ "4ac9d922": "Aktif: di depan jendela atau wallpaper yang terang, pulau berubah menjadi kaca terang dengan teks gelap. Nonaktif: kaca selalu mengikuti tema.",
+ "c7b98217": "tidak dapat masuk",
+ "c6b76004": "koneksi terputus",
+ "3e4b9013": "server mengatur ulang koneksi",
+ "53d85cf8": "server menolak permintaan",
+ "50c83481": "sesi FTP dibatalkan",
+ "bd3c41cf": "Buka Pengaturan dan Recycle Bin di tab baru",
+ "32e6819a": "Folder yang terbuka tetap di tempatnya. Dari Beranda atau salah satu dari dua halaman itu, keduanya terbuka di tab yang sama."
 }

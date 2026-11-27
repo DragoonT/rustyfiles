@@ -264,6 +264,31 @@ fn table(i: u16) -> Option<&'static HashMap<u32, &'static str>> {
     }))
 }
 
+/// The English words of a text shown in the active language (a setting's name in Spanish: its English name), for a search that
+/// finds things by the names people read in English issues, notes and changelogs (issue 381). `None` for English itself and for a
+/// text no table has. A table per language from shown text to English, made once.
+pub fn english_of(shown: &str) -> Option<&'static str> {
+    static MAPS: LazyLock<parking_lot::Mutex<HashMap<u16, &'static HashMap<&'static str, &'static str>>>> =
+        LazyLock::new(|| parking_lot::Mutex::new(HashMap::new()));
+    let (lang, i) = match active() {
+        Lang::En => return None,
+        Lang::Tr | Lang::System => (u16::MAX, None),
+        Lang::Other(i) => (i, Some(i)),
+    };
+    let map = *MAPS.lock().entry(lang).or_insert_with(|| {
+        let mut m: HashMap<&'static str, &'static str> = HashMap::with_capacity(EN.len());
+        for (&tr, &en) in EN.iter() {
+            let local = match i {
+                None => tr,
+                Some(i) => table(i).and_then(|t| t.get(&key_id(tr)).copied()).unwrap_or(en),
+            };
+            m.entry(local).or_insert(en);
+        }
+        Box::leak(Box::new(m))
+    });
+    map.get(shown).copied().filter(|en| *en != shown)
+}
+
 /// The id of a key: FNV-1a 32 over its UTF-8 bytes (same as the tools in scripts/).
 pub fn key_id(key: &str) -> u32 {
     key.bytes().fold(0x811C_9DC5u32, |h, b| (h ^ b as u32).wrapping_mul(0x0100_0193))
@@ -323,9 +348,12 @@ pub fn td(s: &str) -> String {
     if let Some((head, code)) = coded(s) {
         return format!("{} ({} {code})", lookup(head).unwrap_or(head), lookup("kod").unwrap_or("code"));
     }
-    if let Some((head, rest)) = s.split_once(": ") {
-        if let Some(t) = lookup(head) {
-            return format!("{t}: {rest}");
+    // "<what>: <why>", each part on its own: an FTP error is "InternetConnect: zaman aşımı", whose first part is a name and whose
+    // second is listed (issue 376: the reason stayed Turkish in the English interface)
+    if s.contains(": ") {
+        let parts: Vec<&str> = s.split(": ").collect();
+        if parts.iter().any(|p| lookup(p).is_some()) {
+            return parts.iter().map(|p| lookup(p).unwrap_or(p)).collect::<Vec<_>>().join(": ");
         }
     }
     s.to_string()
@@ -438,6 +466,10 @@ mod tests {
         assert_eq!(td("Klasör bulunamadı: C:/x"), "Folder not found: C:/x");
         // a text with a system code after it is translated around its number
         assert_eq!(td("Listeleme hatası (kod 87)"), "Listing error (code 87)");
+        // issue 376: every part of "<step>: <reason>" (FTP's errors), a name that is not listed kept as it is
+        assert_eq!(td("FTP bağlantısı: zaman aşımı"), "FTP connection: timed out");
+        assert_eq!(td("InternetConnect: zaman aşımı"), "InternetConnect: timed out");
+        assert_eq!(td("FTP listeleme: bağlantı kesildi"), "FTP listing: the connection was lost");
         assert_eq!(td("Listeleme hatası (kod -5)"), "Listing error (code -5)");
         assert_eq!(td("bilinmeyen bir metin (kod 3)"), "bilinmeyen bir metin (code 3)", "a text nobody listed keeps its words");
         assert_eq!(td("rapor (kod yok).txt"), "rapor (kod yok).txt", "a file's name that only looks like it is left alone");
@@ -452,9 +484,14 @@ mod tests {
             assert!(!table(i).unwrap().is_empty(), "{} is empty or unreadable", LOCALES[i as usize].0);
             assert!(!t("Yeni klasör").is_empty());
             assert!(items(5).contains('5'));
+            // issue 381: a shown name leads to its English one (the settings search)
+            let shown = t("Yeni klasör");
+            assert!(shown == "New folder" || english_of(shown) == Some("New folder"), "{}: {shown}", LOCALES[i as usize].0);
         }
         set(Lang::Tr);
         assert_eq!(td("Listeleme hatası (kod 87)"), "Listeleme hatası (kod 87)", "Turkish is the text itself");
+        assert_eq!(english_of("Yeni klasör"), Some("New folder"));
+        assert_eq!(english_of("bambaşka bir metin"), None);
         assert_eq!(rf_core::format::size(1536), "1,50 KB");
     }
 }

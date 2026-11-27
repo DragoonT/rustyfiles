@@ -2215,5 +2215,14 @@
  "5ee616e9": "Voortaan het eigen venster van Windows gebruiken voor:",
  "529850df": "Dit programma krijgt het eigen Openen / Opslaan-venster van Windows.",
  "d59927ac": "Materiaal van pop-upmenu's",
- "338db07f": "Bepaalt de achtergrond van contextmenu's en vervolgkeuzelijsten. De kleuren volgen het gekozen thema."
+ "338db07f": "Bepaalt de achtergrond van contextmenu's en vervolgkeuzelijsten. De kleuren volgen het gekozen thema.",
+ "279e7bd2": "Glas volgt wat erachter is",
+ "4ac9d922": "Aan: voor een licht venster of bureaubladachtergrond gaat een eiland over op licht glas met donkere tekst. Uit: het glas volgt altijd het thema.",
+ "c7b98217": "aanmelden mislukt",
+ "c6b76004": "de verbinding is verbroken",
+ "3e4b9013": "de server heeft de verbinding opnieuw ingesteld",
+ "53d85cf8": "de server heeft het verzoek geweigerd",
+ "50c83481": "de FTP-sessie is geannuleerd",
+ "bd3c41cf": "Instellingen en Prullenbak openen in een nieuw tabblad",
+ "32e6819a": "De geopende map blijft waar hij is. Vanaf Start of een van de twee pagina's openen ze in hetzelfde tabblad."
 }

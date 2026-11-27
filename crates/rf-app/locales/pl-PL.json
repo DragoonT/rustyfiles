@@ -2215,5 +2215,14 @@
  "5ee616e9": "Od teraz używaj własnego okna systemu Windows dla:",
  "529850df": "Ten program dostaje własne okno Otwórz / Zapisz systemu Windows.",
  "d59927ac": "Materiał menu podręcznych",
- "338db07f": "Określa tło menu kontekstowych i list rozwijanych. Kolory zależą od wybranego motywu."
+ "338db07f": "Określa tło menu kontekstowych i list rozwijanych. Kolory zależą od wybranego motywu.",
+ "279e7bd2": "Szkło dopasowuje się do tego, co jest za nim",
+ "4ac9d922": "Wł.: przed jasnym oknem lub tapetą wyspa przechodzi na jasne szkło z ciemnym tekstem. Wył.: szkło zawsze odpowiada motywowi.",
+ "c7b98217": "nie można się zalogować",
+ "c6b76004": "połączenie zostało utracone",
+ "3e4b9013": "serwer zresetował połączenie",
+ "53d85cf8": "serwer odrzucił żądanie",
+ "50c83481": "sesja FTP została anulowana",
+ "bd3c41cf": "Otwieraj Ustawienia i Kosz na nowej karcie",
+ "32e6819a": "Otwarty folder zostaje na miejscu. Ze strony głównej lub z jednej z tych dwóch stron otwierają się na tej samej karcie."
 }

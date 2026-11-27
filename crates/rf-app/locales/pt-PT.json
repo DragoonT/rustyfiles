@@ -2215,5 +2215,14 @@
  "5ee616e9": "A partir de agora, usar a janela do próprio Windows para:",
  "529850df": "Este programa usa a janela Abrir / Guardar do próprio Windows.",
  "d59927ac": "Material dos menus de contexto",
- "338db07f": "Define o fundo dos menus de contexto e das listas pendentes. As cores seguem o tema escolhido."
+ "338db07f": "Define o fundo dos menus de contexto e das listas pendentes. As cores seguem o tema escolhido.",
+ "279e7bd2": "O vidro acompanha o que está atrás",
+ "4ac9d922": "Ligado: diante de uma janela ou imagem de fundo clara, uma ilha passa a vidro claro com texto escuro. Desligado: o vidro segue sempre o tema.",
+ "c7b98217": "não foi possível iniciar sessão",
+ "c6b76004": "a ligação foi perdida",
+ "3e4b9013": "o servidor reiniciou a ligação",
+ "53d85cf8": "o servidor recusou o pedido",
+ "50c83481": "a sessão FTP foi cancelada",
+ "bd3c41cf": "Abrir as Definições e a Reciclagem num novo separador",
+ "32e6819a": "A pasta aberta fica onde está. A partir do Início ou de uma das duas páginas, abrem no mesmo separador."
 }

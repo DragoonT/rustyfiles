@@ -2215,5 +2215,14 @@
  "5ee616e9": "From now on, use Windows' own window for",
  "529850df": "This program gets Windows' own Open / Save window.",
  "d59927ac": "Popup menu material",
- "338db07f": "Sets the background of context menus and drop-down lists. Colours follow the selected theme."
+ "338db07f": "Sets the background of context menus and drop-down lists. Colours follow the selected theme.",
+ "279e7bd2": "Glass follows what is behind it",
+ "4ac9d922": "On: over a bright window or wallpaper an island turns to light glass with dark text. Off: the glass always follows the theme.",
+ "c7b98217": "could not log in",
+ "c6b76004": "the connection was lost",
+ "3e4b9013": "the server reset the connection",
+ "53d85cf8": "the server refused the request",
+ "50c83481": "the FTP session was cancelled",
+ "bd3c41cf": "Open Settings and the Recycle Bin in a new tab",
+ "32e6819a": "The open folder stays where it is. From Home or from one of the two pages they open in the same tab."
 }

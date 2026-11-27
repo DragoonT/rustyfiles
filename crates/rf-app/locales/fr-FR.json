@@ -2215,5 +2215,14 @@
  "5ee616e9": "Désormais, utiliser la fenêtre de Windows pour :",
  "529850df": "Ce programme utilise la fenêtre Ouvrir / Enregistrer de Windows.",
  "d59927ac": "Matériau des menus contextuels",
- "338db07f": "Définit l'arrière-plan des menus contextuels et des listes déroulantes. Les couleurs suivent le thème choisi."
+ "338db07f": "Définit l'arrière-plan des menus contextuels et des listes déroulantes. Les couleurs suivent le thème choisi.",
+ "279e7bd2": "Le verre suit ce qui est derrière",
+ "4ac9d922": "Activé : devant une fenêtre ou un fond d'écran clair, un îlot passe au verre clair avec du texte sombre. Désactivé : le verre suit toujours le thème.",
+ "c7b98217": "connexion impossible",
+ "c6b76004": "la connexion a été perdue",
+ "3e4b9013": "le serveur a réinitialisé la connexion",
+ "53d85cf8": "le serveur a refusé la demande",
+ "50c83481": "la session FTP a été annulée",
+ "bd3c41cf": "Ouvrir les Paramètres et la Corbeille dans un nouvel onglet",
+ "32e6819a": "Le dossier ouvert reste en place. Depuis l'Accueil ou l'une des deux pages, ils s'ouvrent dans le même onglet."
 }

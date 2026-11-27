@@ -2215,5 +2215,14 @@
  "5ee616e9": "Käytä tästä lähtien Windowsin omaa ikkunaa ohjelmalle:",
  "529850df": "Tämä ohjelma saa Windowsin oman Avaa / Tallenna -ikkunan.",
  "d59927ac": "Ponnahdusvalikoiden materiaali",
- "338db07f": "Määrittää pikavalikoiden ja avattavien luetteloiden taustan. Värit seuraavat valittua teemaa."
+ "338db07f": "Määrittää pikavalikoiden ja avattavien luetteloiden taustan. Värit seuraavat valittua teemaa.",
+ "279e7bd2": "Lasi mukautuu taustaansa",
+ "4ac9d922": "Päällä: vaalean ikkunan tai taustakuvan edessä saari vaihtuu vaaleaksi lasiksi ja tummaksi tekstiksi. Pois: lasi seuraa aina teemaa.",
+ "c7b98217": "kirjautuminen epäonnistui",
+ "c6b76004": "yhteys katkesi",
+ "3e4b9013": "palvelin nollasi yhteyden",
+ "53d85cf8": "palvelin hylkäsi pyynnön",
+ "50c83481": "FTP-istunto peruttiin",
+ "bd3c41cf": "Avaa Asetukset ja Roskakori uudessa välilehdessä",
+ "32e6819a": "Avoin kansio pysyy paikallaan. Aloitussivulta tai jommaltakummalta näistä sivuista ne avautuvat samaan välilehteen."
 }

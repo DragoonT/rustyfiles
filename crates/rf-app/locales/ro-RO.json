@@ -2215,5 +2215,14 @@
  "5ee616e9": "De acum înainte, folosește fereastra proprie Windows pentru:",
  "529850df": "Acest program primește fereastra Deschidere / Salvare proprie Windows.",
  "d59927ac": "Materialul meniurilor pop-up",
- "338db07f": "Stabilește fundalul meniurilor contextuale și al listelor derulante. Culorile urmează tema aleasă."
+ "338db07f": "Stabilește fundalul meniurilor contextuale și al listelor derulante. Culorile urmează tema aleasă.",
+ "279e7bd2": "Sticla urmează ce e în spatele ei",
+ "4ac9d922": "Activat: în fața unei ferestre sau a unui fundal luminos o insulă trece la sticlă deschisă cu text închis. Dezactivat: sticla urmează mereu tema.",
+ "c7b98217": "autentificarea nu a reușit",
+ "c6b76004": "conexiunea s-a pierdut",
+ "3e4b9013": "serverul a resetat conexiunea",
+ "53d85cf8": "serverul a refuzat cererea",
+ "50c83481": "sesiunea FTP a fost anulată",
+ "bd3c41cf": "Deschide Setările și Coșul de reciclare într-o filă nouă",
+ "32e6819a": "Folderul deschis rămâne pe loc. Din Acasă sau din una dintre cele două pagini se deschid în aceeași filă."
 }

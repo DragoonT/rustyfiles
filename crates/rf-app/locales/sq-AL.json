@@ -2215,5 +2215,14 @@
  "5ee616e9": "Tani e tutje, përdor dritaren e vetë Windows për:",
  "529850df": "Ky program merr dritaren Hap / Ruaj të vetë Windows.",
  "d59927ac": "Materiali i menyve që shfaqen",
- "338db07f": "Përcakton sfondin e menyve të kontekstit dhe të listave rënëse. Ngjyrat ndjekin temën e zgjedhur."
+ "338db07f": "Përcakton sfondin e menyve të kontekstit dhe të listave rënëse. Ngjyrat ndjekin temën e zgjedhur.",
+ "279e7bd2": "Xhami ndjek atë që ka pas",
+ "4ac9d922": "Aktiv: para një dritareje ose sfondi të çelët, ishulli kalon në xham të çelët me tekst të errët. Joaktiv: xhami ndjek gjithmonë temën.",
+ "c7b98217": "hyrja dështoi",
+ "c6b76004": "lidhja u ndërpre",
+ "3e4b9013": "serveri e rivendosi lidhjen",
+ "53d85cf8": "serveri e refuzoi kërkesën",
+ "50c83481": "sesioni FTP u anulua",
+ "bd3c41cf": "Hap Cilësimet dhe Koshin e riciklimit në skedë të re",
+ "32e6819a": "Dosja e hapur mbetet aty ku është. Nga Kreu ose nga një nga dy faqet hapen në të njëjtën skedë."
 }

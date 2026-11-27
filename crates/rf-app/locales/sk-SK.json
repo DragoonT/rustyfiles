@@ -2215,5 +2215,14 @@
  "5ee616e9": "Odteraz používať vlastné okno Windows pre:",
  "529850df": "Tento program dostáva vlastné okno Windows Otvoriť / Uložiť.",
  "d59927ac": "Materiál kontextových ponúk",
- "338db07f": "Určuje pozadie kontextových ponúk a rozbaľovacích zoznamov. Farby sa riadia zvoleným motívom."
+ "338db07f": "Určuje pozadie kontextových ponúk a rozbaľovacích zoznamov. Farby sa riadia zvoleným motívom.",
+ "279e7bd2": "Sklo sa riadi tým, čo je za ním",
+ "4ac9d922": "Zapnuté: pred svetlým oknom alebo tapetou sa ostrov zmení na svetlé sklo s tmavým textom. Vypnuté: sklo sa vždy riadi motívom.",
+ "c7b98217": "prihlásenie zlyhalo",
+ "c6b76004": "spojenie sa prerušilo",
+ "3e4b9013": "server obnovil spojenie",
+ "53d85cf8": "server odmietol požiadavku",
+ "50c83481": "relácia FTP bola zrušená",
+ "bd3c41cf": "Otvárať Nastavenia a Kôš na novej karte",
+ "32e6819a": "Otvorený priečinok zostane na mieste. Z Domov alebo z jednej z týchto dvoch stránok sa otvoria na tej istej karte."
 }

@@ -2215,5 +2215,14 @@
  "5ee616e9": "Mostantól a Windows saját ablakát használja ennél:",
  "529850df": "Ez a program a Windows saját Megnyitás / Mentés ablakát kapja.",
  "d59927ac": "Előugró menük anyaga",
- "338db07f": "A helyi menük és legördülő listák hátterét állítja be. A színek a választott témát követik."
+ "338db07f": "A helyi menük és legördülő listák hátterét állítja be. A színek a választott témát követik.",
+ "279e7bd2": "Az üveg igazodik ahhoz, ami mögötte van",
+ "4ac9d922": "Be: világos ablak vagy háttérkép előtt a sziget világos üvegre és sötét szövegre vált. Ki: az üveg mindig a témát követi.",
+ "c7b98217": "nem sikerült bejelentkezni",
+ "c6b76004": "megszakadt a kapcsolat",
+ "3e4b9013": "a kiszolgáló alaphelyzetbe állította a kapcsolatot",
+ "53d85cf8": "a kiszolgáló elutasította a kérést",
+ "50c83481": "az FTP-munkamenet megszakadt",
+ "bd3c41cf": "A Beállítások és a Lomtár új lapon nyíljon meg",
+ "32e6819a": "A megnyitott mappa a helyén marad. A Kezdőlapról vagy a két oldal valamelyikéről ugyanazon a lapon nyílnak meg."
 }

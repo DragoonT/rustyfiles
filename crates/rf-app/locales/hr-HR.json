@@ -2215,5 +2215,14 @@
  "5ee616e9": "Od sada koristi vlastiti prozor sustava Windows za:",
  "529850df": "Ovaj program dobiva vlastiti prozor sustava Windows za otvaranje / spremanje.",
  "d59927ac": "Materijal skočnih izbornika",
- "338db07f": "Određuje pozadinu kontekstnih izbornika i padajućih popisa. Boje prate odabranu temu."
+ "338db07f": "Određuje pozadinu kontekstnih izbornika i padajućih popisa. Boje prate odabranu temu.",
+ "279e7bd2": "Staklo prati ono što je iza njega",
+ "4ac9d922": "Uključeno: ispred svijetlog prozora ili pozadine otok prelazi na svijetlo staklo s tamnim tekstom. Isključeno: staklo uvijek prati temu.",
+ "c7b98217": "prijava nije uspjela",
+ "c6b76004": "veza je prekinuta",
+ "3e4b9013": "poslužitelj je ponovno postavio vezu",
+ "53d85cf8": "poslužitelj je odbio zahtjev",
+ "50c83481": "FTP sesija je otkazana",
+ "bd3c41cf": "Otvaraj Postavke i Koš za smeće u novoj kartici",
+ "32e6819a": "Otvorena mapa ostaje gdje jest. S Početne ili s jedne od te dvije stranice otvaraju se u istoj kartici."
 }

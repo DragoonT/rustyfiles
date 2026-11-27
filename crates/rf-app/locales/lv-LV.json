@@ -2215,5 +2215,14 @@
  "5ee616e9": "Turpmāk izmantot pašas Windows logu programmai:",
  "529850df": "Šī programma saņem pašas Windows atvēršanas / saglabāšanas logu.",
  "d59927ac": "Uznirstošo izvēlņu materiāls",
- "338db07f": "Nosaka konteksta izvēlņu un nolaižamo sarakstu fonu. Krāsas atbilst izvēlētajam motīvam."
+ "338db07f": "Nosaka konteksta izvēlņu un nolaižamo sarakstu fonu. Krāsas atbilst izvēlētajam motīvam.",
+ "279e7bd2": "Stikls pielāgojas tam, kas aiz tā",
+ "4ac9d922": "Ieslēgts: gaiša loga vai fona priekšā sala kļūst par gaišu stiklu ar tumšu tekstu. Izslēgts: stikls vienmēr atbilst motīvam.",
+ "c7b98217": "neizdevās pieteikties",
+ "c6b76004": "savienojums tika zaudēts",
+ "3e4b9013": "serveris atiestatīja savienojumu",
+ "53d85cf8": "serveris noraidīja pieprasījumu",
+ "50c83481": "FTP sesija tika atcelta",
+ "bd3c41cf": "Atvērt Iestatījumus un Atkritni jaunā cilnē",
+ "32e6819a": "Atvērtā mape paliek savā vietā. No Sākuma vai no vienas no šīm divām lapām tās atveras tajā pašā cilnē."
 }

@@ -2215,5 +2215,14 @@
  "5ee616e9": "Ab jetzt das Windows-eigene Fenster verwenden für:",
  "529850df": "Dieses Programm bekommt das Windows-eigene Öffnen-/Speichern-Fenster.",
  "d59927ac": "Material der Popupmenüs",
- "338db07f": "Legt den Hintergrund von Kontextmenüs und Dropdownlisten fest. Die Farben folgen dem gewählten Design."
+ "338db07f": "Legt den Hintergrund von Kontextmenüs und Dropdownlisten fest. Die Farben folgen dem gewählten Design.",
+ "279e7bd2": "Glas passt sich dem Hintergrund an",
+ "4ac9d922": "Ein: Vor einem hellen Fenster oder Hintergrundbild wechselt eine Insel zu hellem Glas mit dunkler Schrift. Aus: Das Glas folgt immer dem Design.",
+ "c7b98217": "Anmeldung nicht möglich",
+ "c6b76004": "Verbindung unterbrochen",
+ "3e4b9013": "Der Server hat die Verbindung zurückgesetzt",
+ "53d85cf8": "Der Server hat die Anfrage abgelehnt",
+ "50c83481": "FTP-Sitzung abgebrochen",
+ "bd3c41cf": "Einstellungen und Papierkorb in einem neuen Tab öffnen",
+ "32e6819a": "Der geöffnete Ordner bleibt, wo er ist. Von der Startseite oder einer der beiden Seiten aus öffnen sie sich im selben Tab."
 }

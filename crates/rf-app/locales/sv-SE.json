@@ -2215,5 +2215,14 @@
  "5ee616e9": "Använd hädanefter Windows eget fönster för:",
  "529850df": "Det här programmet får Windows eget Öppna / Spara-fönster.",
  "d59927ac": "Material för snabbmenyer",
- "338db07f": "Anger bakgrunden för snabbmenyer och listrutor. Färgerna följer det valda temat."
+ "338db07f": "Anger bakgrunden för snabbmenyer och listrutor. Färgerna följer det valda temat.",
+ "279e7bd2": "Glaset följer det som är bakom",
+ "4ac9d922": "På: framför ett ljust fönster eller en ljus bakgrundsbild växlar en ö till ljust glas med mörk text. Av: glaset följer alltid temat.",
+ "c7b98217": "det gick inte att logga in",
+ "c6b76004": "anslutningen bröts",
+ "3e4b9013": "servern återställde anslutningen",
+ "53d85cf8": "servern avvisade begäran",
+ "50c83481": "FTP-sessionen avbröts",
+ "bd3c41cf": "Öppna Inställningar och Papperskorgen i en ny flik",
+ "32e6819a": "Den öppna mappen stannar där den är. Från Start eller från någon av de två sidorna öppnas de i samma flik."
 }

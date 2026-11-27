@@ -2215,5 +2215,14 @@
  "5ee616e9": "Bruk heretter Windows' eget vindu for:",
  "529850df": "Dette programmet får Windows' eget Åpne / Lagre-vindu.",
  "d59927ac": "Materiale for hurtigmenyer",
- "338db07f": "Bestemmer bakgrunnen for hurtigmenyer og nedtrekkslister. Fargene følger det valgte temaet."
+ "338db07f": "Bestemmer bakgrunnen for hurtigmenyer og nedtrekkslister. Fargene følger det valgte temaet.",
+ "279e7bd2": "Glasset følger det som er bak det",
+ "4ac9d922": "På: foran et lyst vindu eller bakgrunnsbilde går en øy over til lyst glass med mørk tekst. Av: glasset følger alltid temaet.",
+ "c7b98217": "kunne ikke logge på",
+ "c6b76004": "forbindelsen ble brutt",
+ "3e4b9013": "serveren tilbakestilte forbindelsen",
+ "53d85cf8": "serveren avviste forespørselen",
+ "50c83481": "FTP-økten ble avbrutt",
+ "bd3c41cf": "Åpne Innstillinger og Papirkurv i en ny fane",
+ "32e6819a": "Den åpne mappen blir der den er. Fra Hjem eller fra en av de to sidene åpnes de i samme fane."
 }

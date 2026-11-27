@@ -2215,5 +2215,14 @@
  "5ee616e9": "De ahora en adelante, usar la ventana propia de Windows para:",
  "529850df": "Este programa usa la ventana Abrir / Guardar propia de Windows.",
  "d59927ac": "Material de los menús emergentes",
- "338db07f": "Define el fondo de los menús contextuales y las listas desplegables. Los colores siguen el tema elegido."
+ "338db07f": "Define el fondo de los menús contextuales y las listas desplegables. Los colores siguen el tema elegido.",
+ "279e7bd2": "El vidrio se adapta a lo que hay detrás",
+ "4ac9d922": "Activado: frente a una ventana o un fondo claro, una isla pasa a vidrio claro con texto oscuro. Desactivado: el vidrio siempre sigue el tema.",
+ "c7b98217": "no se pudo iniciar sesión",
+ "c6b76004": "se perdió la conexión",
+ "3e4b9013": "el servidor restableció la conexión",
+ "53d85cf8": "el servidor rechazó la solicitud",
+ "50c83481": "se canceló la sesión FTP",
+ "bd3c41cf": "Abrir Configuración y la Papelera de reciclaje en una pestaña nueva",
+ "32e6819a": "La carpeta abierta se queda donde está. Desde Inicio o desde una de las dos páginas se abren en la misma pestaña."
 }

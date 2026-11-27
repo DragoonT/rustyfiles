@@ -2215,5 +2215,14 @@
  "5ee616e9": "D'ora in poi, usa la finestra di Windows per:",
  "529850df": "Questo programma usa la finestra Apri / Salva di Windows.",
  "d59927ac": "Materiale dei menu a comparsa",
- "338db07f": "Imposta lo sfondo dei menu contestuali e degli elenchi a discesa. I colori seguono il tema scelto."
+ "338db07f": "Imposta lo sfondo dei menu contestuali e degli elenchi a discesa. I colori seguono il tema scelto.",
+ "279e7bd2": "Il vetro segue ciò che c'è dietro",
+ "4ac9d922": "Attivo: davanti a una finestra o uno sfondo chiaro un'isola passa a vetro chiaro con testo scuro. Disattivo: il vetro segue sempre il tema.",
+ "c7b98217": "accesso non riuscito",
+ "c6b76004": "connessione persa",
+ "3e4b9013": "il server ha reimpostato la connessione",
+ "53d85cf8": "il server ha rifiutato la richiesta",
+ "50c83481": "sessione FTP annullata",
+ "bd3c41cf": "Apri Impostazioni e Cestino in una nuova scheda",
+ "32e6819a": "La cartella aperta resta dov'è. Dalla Home o da una delle due pagine si aprono nella stessa scheda."
 }

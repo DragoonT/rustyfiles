@@ -2215,5 +2215,14 @@
  "5ee616e9": "De agora em diante, usar a janela do próprio Windows para:",
  "529850df": "Este programa usa a janela Abrir / Salvar do próprio Windows.",
  "d59927ac": "Material dos menus pop-up",
- "338db07f": "Define o fundo dos menus de contexto e das listas suspensas. As cores seguem o tema escolhido."
+ "338db07f": "Define o fundo dos menus de contexto e das listas suspensas. As cores seguem o tema escolhido.",
+ "279e7bd2": "O vidro acompanha o que está atrás",
+ "4ac9d922": "Ligado: diante de uma janela ou papel de parede claro, uma ilha passa para vidro claro com texto escuro. Desligado: o vidro sempre segue o tema.",
+ "c7b98217": "não foi possível entrar",
+ "c6b76004": "a conexão foi perdida",
+ "3e4b9013": "o servidor redefiniu a conexão",
+ "53d85cf8": "o servidor recusou a solicitação",
+ "50c83481": "a sessão FTP foi cancelada",
+ "bd3c41cf": "Abrir Configurações e a Lixeira em uma nova guia",
+ "32e6819a": "A pasta aberta fica onde está. A partir do Início ou de uma das duas páginas, elas abrem na mesma guia."
 }
