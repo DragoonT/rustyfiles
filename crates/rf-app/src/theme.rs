@@ -182,6 +182,12 @@ impl Palette {
             p.titlebar_bg = hex(0xCCDEEC);
             p.tab_active = hex(0xF0F5F9);
         }
+        // The Explorer look in the light theme keeps the title and tab strip on the material, as Explorer itself does (Mica, or Mica
+        // Alt tinted by the wallpaper): its fixed greys covered the material, and the window looked solid whatever was chosen (issue
+        // 390; the dark theme's strip was see-through already). Where there is no material, or "Solid" is chosen, the greys stay.
+        if explorer_look && !p.dark && crate::settings::materials_available() && !crate::settings::solid_backdrop() {
+            p.titlebar_bg.a = 0.0;
+        }
         if crate::settings::solid_backdrop() {
             // "Solid" material: Windows 11's plain window color instead of Mica
             p.window_bg = if p.dark { hex(0x202020) } else { hex(0xF3F3F3) };
