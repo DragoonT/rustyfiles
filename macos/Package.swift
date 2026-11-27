@@ -6,6 +6,9 @@ import Foundation
 import PackageDescription
 
 let repoRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().path
+// The Rust core: this Mac's own build, or the one for both Apple silicon and Intel that
+// build.sh makes for a release (RF_UNIVERSAL=1).
+let rustLib = ProcessInfo.processInfo.environment["RF_RUST_LIB"] ?? "\(repoRoot)/target/mac/release/librf_mac.a"
 
 let package = Package(
     name: "RustyFiles",
@@ -19,7 +22,7 @@ let package = Package(
             path: "Sources/RustyFiles",
             linkerSettings: [
                 // The static library by full path, so the linker never picks the .dylib next to it.
-                .unsafeFlags(["\(repoRoot)/target/mac/release/librf_mac.a"]),
+                .unsafeFlags([rustLib]),
                 .linkedFramework("AppKit"),
                 .linkedFramework("Quartz"),
                 .linkedFramework("CoreWLAN"),

@@ -1,7 +1,9 @@
 #!/bin/sh
-# Packs build/rustyfiles.app into build/rustyfiles-mac-arm64.dmg: the app and a link to
+# Packs build/rustyfiles.app into build/rustyfiles-mac.dmg: the app and a link to
 # /Applications to drag it onto. Run ./build.sh first. The name has no version in it, so
-# README can link releases/latest/download/rustyfiles-mac-arm64.dmg.
+# README can link releases/latest/download/rustyfiles-mac.dmg. (The app in it runs on Apple
+# silicon and Intel; a copy named rustyfiles-mac-arm64.dmg, as it was called when it was
+# Apple silicon only, keeps the links made then working.)
 #
 # Signing and notarization happen by themselves when this Mac is set up for them:
 #   - a "Developer ID Application" certificate in the keychain (Xcode › Settings › Accounts
@@ -14,7 +16,7 @@ set -eu
 cd "$(dirname "$0")/.."
 # (APP: another bundle to pack, such as the one vpk made in release.sh)
 APP="${APP:-build/rustyfiles.app}"
-OUT=build/rustyfiles-mac-arm64.dmg
+OUT=build/rustyfiles-mac.dmg
 PROFILE="${NOTARY_PROFILE:-rustyfiles}"
 [ -d "$APP" ] || { echo "no $APP: run ./build.sh first" >&2; exit 1; }
 

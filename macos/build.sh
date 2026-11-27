@@ -15,6 +15,18 @@ RF_MAC=(--manifest-path crates/rf-mac/Cargo.toml --target-dir target/mac)
 
 echo "==> Rust core (rf-mac)"
 cargo build "${RF_MAC[@]}" --lib --release
+# RF_UNIVERSAL=1 (release.sh): Apple silicon and Intel in one app. The core is built for
+# both and joined into one library; Package.swift links that one (RF_RUST_LIB).
+SWIFT_ARCH=()
+if [ "${RF_UNIVERSAL:-0}" = 1 ]; then
+    cargo build "${RF_MAC[@]}" --lib --release --target aarch64-apple-darwin
+    cargo build "${RF_MAC[@]}" --lib --release --target x86_64-apple-darwin
+    mkdir -p target/mac/universal
+    lipo -create target/mac/aarch64-apple-darwin/release/librf_mac.a target/mac/x86_64-apple-darwin/release/librf_mac.a \
+        -output target/mac/universal/librf_mac.a
+    export RF_RUST_LIB="$PWD/target/mac/universal/librf_mac.a"
+    SWIFT_ARCH=(--arch arm64 --arch x86_64)
+fi
 
 echo "==> Swift bindings"
 cargo run -q --release "${RF_MAC[@]}" --bin uniffi-bindgen -- generate \
@@ -25,8 +37,8 @@ cp target/mac/uniffi-swift/rf_macFFI.h "$SWIFT_SRC/rf_macFFI/include/rf_macFFI.h
 cp target/mac/uniffi-swift/rf_macFFI.modulemap "$SWIFT_SRC/rf_macFFI/include/module.modulemap"
 
 echo "==> Swift app ($CONFIG)"
-swift build --package-path macos -c "$CONFIG"
-BIN="$(swift build --package-path macos -c "$CONFIG" --show-bin-path)"
+swift build --package-path macos -c "$CONFIG" ${SWIFT_ARCH[@]+"${SWIFT_ARCH[@]}"}
+BIN="$(swift build --package-path macos -c "$CONFIG" ${SWIFT_ARCH[@]+"${SWIFT_ARCH[@]}"} --show-bin-path)"
 
 echo "==> Bundle"
 VERSION="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)"

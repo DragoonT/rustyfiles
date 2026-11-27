@@ -6,7 +6,7 @@ import CryptoKit
 ///
 /// WHERE THEY COME FROM: addons.json in rustyfiles' repository, the same list the Windows app
 /// reads: each add-on's version and, per platform, its zip's URL and SHA-256 (the Mac's is
-/// "macos-arm64"). A zip whose SHA-256 is not the listed one is not installed. Nothing is
+/// "macos-arm64", or "macos-x64" on an Intel Mac). A zip whose SHA-256 is not the listed one is not installed. Nothing is
 /// downloaded before the user clicks Install or Update.
 ///
 /// WHERE THEY GO: Application Support/rustyfiles/addons/<id>/<version>/, with installed.json
@@ -15,7 +15,11 @@ import CryptoKit
 /// RF_ADDONS_MANIFEST names another list (a URL or a file) for testing.
 enum Addons {
     static let manifestURL = URL(string: "https://raw.githubusercontent.com/gelenmedya/rustyfiles/main/addons.json")!
+    #if arch(x86_64)
+    static let platform = "macos-x64"
+    #else
     static let platform = "macos-arm64"
+    #endif
 
     struct FileRef: Decodable, Sendable {
         let url: String
