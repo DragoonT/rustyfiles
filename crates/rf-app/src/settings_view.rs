@@ -1997,6 +1997,10 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     ));
     let (bar_hidden, bar_extra) = (s.toolbar_hidden.clone(), s.toolbar_extra.clone());
     let commands = s.toolbar_commands.clone();
+    let explorer = s.windows_file_explorer_theme;
+    let bar_order = crate::toolbar_layout::order(&s.toolbar_order, explorer);
+    let bar_looks = s.toolbar_look.clone();
+    let icon_size = s.toolbar_icon_size;
     // the switch and the buttons it shows stand together (issue 111)
     v.push(card(p, L::PanelTop, t!("Araç çubuğunu göster"), Some("Ctrl+Shift+B"), sw("toolbar", p, s.show_toolbar, |s, v| s.show_toolbar = v)));
     v.push(expander(
@@ -2007,8 +2011,9 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         None,
         None,
         move || {
+            use crate::toolbar_layout::{Look, SEP};
             // (key, id, label, off unless asked for)
-            const BUTTONS: [(&str, &str, &str, bool); 17] = [
+            const BUTTONS: [(&str, &str, &str, bool); 18] = [
                 ("new", "tb-new", "Yeni", false),
                 ("newfolder", "tb-newfolder", "Yeni klasör", true),
                 ("cut", "tb-cut", "Kes", false),
@@ -2022,32 +2027,108 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                 ("terminal", "tb-terminal", "Terminalde aç", true),
                 ("hidden", "tb-hidden", "Gizli öğeleri göster/gizle", true),
                 ("refresh", "tb-refresh", "Yenile", true),
+                ("more", "tb-more", "Diğer", false),
                 ("filter", "tb-filter", "Filtrele", false),
                 ("sort", "tb-sort", "Sırala ve gruplandır", false),
                 ("view", "tb-view", "Görünüm", false),
                 ("preview", "tb-preview", "Önizleme paneli", false),
             ];
-            let mut rows: Vec<_> = BUTTONS
-                .iter()
-                .map(|&(key, id, label, optional)| {
-                    let shown = if optional { bar_extra.iter().any(|k| k == key) } else { !bar_hidden.iter().any(|k| k == key) };
-                    sub(
-                        &pp,
-                        crate::i18n::t(label),
-                        None,
-                        switch(id, &pp, shown, move |_, cx| {
-                            settings::update(cx, |s| {
-                                let list = if optional { &mut s.toolbar_extra } else { &mut s.toolbar_hidden };
-                                list.retain(|k| k != key);
-                                // (the optional ones are listed when on, the others when off)
-                                if shown != optional {
-                                    list.push(key.to_string());
-                                }
-                            })
-                        }),
-                    )
+            let button_of = |key: &str| BUTTONS.iter().find(|b| b.0 == key).copied();
+            let shown_switch = |key: &'static str, id: &'static str, optional: bool| {
+                let shown = if optional { bar_extra.iter().any(|k| k == key) } else { !bar_hidden.iter().any(|k| k == key) };
+                switch(id, &pp, shown, move |_, cx| {
+                    settings::update(cx, |s| {
+                        let list = if optional { &mut s.toolbar_extra } else { &mut s.toolbar_hidden };
+                        list.retain(|k| k != key);
+                        // (the optional ones are listed when on, the others when off)
+                        if shown != optional {
+                            list.push(key.to_string());
+                        }
+                    })
                 })
-                .collect();
+            };
+            // a button's look: as it was, its picture, its word, or both (issue 374)
+            let look_box = |key: &'static str| {
+                let now = crate::toolbar_layout::look_of(&bar_looks, key);
+                let name = |l: Look| -> &'static str {
+                    match l {
+                        Look::Auto => t!("Otomatik"),
+                        Look::Icon => t!("Simge"),
+                        Look::Text => t!("Yazı"),
+                        Look::Both => t!("Simge ve yazı"),
+                    }
+                };
+                crate::select_box::select_box_h(format!("tb-look-{key}"), &pp, name(now), 32., move |_| {
+                    [Look::Auto, Look::Icon, Look::Text, Look::Both]
+                        .into_iter()
+                        .map(|l| {
+                            Choice::new(name(l), l == now, move |_, cx| {
+                                settings::update(cx, |s| s.toolbar_look = crate::toolbar_layout::with_look(&s.toolbar_look, key, l))
+                            })
+                        })
+                        .collect()
+                })
+            };
+            let set_order = move |o: Vec<String>, cx: &mut App| settings::update(cx, move |s| s.toolbar_order = o);
+            // up and down for the entry at `i` of the left group (issue 373: "move it to another position")
+            let arrows = |i: usize| {
+                let (up, down) = (bar_order.clone(), bar_order.clone());
+                h_flex()
+                    .gap_1()
+                    .child(icon_button(("tb-up", i), &pp, L::ChevronUp, t!("Yukarı taşı"), move |_, cx| set_order(crate::toolbar_layout::moved(&up, i, true), cx)))
+                    .child(icon_button(("tb-down", i), &pp, L::ChevronDown, t!("Aşağı taşı"), move |_, cx| set_order(crate::toolbar_layout::moved(&down, i, false), cx)))
+            };
+            let mut rows: Vec<AnyElement> = Vec::new();
+            // the pictures' size (issue 248)
+            rows.push(sub(
+                &pp,
+                t!("Simge boyutu"),
+                None,
+                crate::select_box::select_box_h(
+                    "tb-icon-size",
+                    &pp,
+                    match icon_size {
+                        settings::ToolbarIconSize::Small => t!("Küçük"),
+                        settings::ToolbarIconSize::Medium => t!("Orta boy"),
+                        settings::ToolbarIconSize::Large => t!("Büyük"),
+                    },
+                    32.,
+                    move |_| {
+                        [(settings::ToolbarIconSize::Small, t!("Küçük")), (settings::ToolbarIconSize::Medium, t!("Orta boy")), (settings::ToolbarIconSize::Large, t!("Büyük"))]
+                            .into_iter()
+                            .map(|(v, l)| Choice::new(l, v == icon_size, move |_, cx| settings::update(cx, |s| s.toolbar_icon_size = v)))
+                            .collect()
+                    },
+                ),
+            ));
+            // the left group in its order, lines included
+            for (i, name) in bar_order.iter().enumerate() {
+                if name == SEP {
+                    let o = bar_order.clone();
+                    let remove = button(("tb-sep-x", i), &pp, t!("Kaldır"), move |_, cx| set_order(crate::toolbar_layout::without(&o, i), cx));
+                    rows.push(sub(&pp, t!("Ayırıcı"), None, h_flex().gap_2().items_center().child(arrows(i)).child(remove).into_any_element()));
+                    continue;
+                }
+                let Some((key, id, label, optional)) = button_of(name) else { continue };
+                let controls = h_flex().gap_2().items_center().child(look_box(key)).child(arrows(i)).child(shown_switch(key, id, optional));
+                rows.push(sub(&pp, crate::i18n::t(label), None, controls.into_any_element()));
+            }
+            // the right group: shown or not, and the look of Sort and View (their place is fixed, as Explorer's)
+            for &(key, id, label, optional) in BUTTONS.iter().filter(|b| !bar_order.iter().any(|o| o == b.0)) {
+                let controls = h_flex().gap_2().items_center().when(matches!(key, "sort" | "view"), |d| d.child(look_box(key))).child(shown_switch(key, id, optional));
+                rows.push(sub(&pp, crate::i18n::t(label), None, controls.into_any_element()));
+            }
+            let with_line = bar_order.clone();
+            rows.push(sub(
+                &pp,
+                t!("Ayırıcı"),
+                None,
+                h_flex()
+                    .gap_2()
+                    .child(button("tb-add-sep", &pp, t!("Ayırıcı ekle"), move |_, cx| set_order(crate::toolbar_layout::with_line(&with_line), cx)))
+                    .child(button("tb-reset-order", &pp, t!("Varsayılan sıra"), |_, cx| settings::update(cx, |s| s.toolbar_order.clear())))
+                    .into_any_element(),
+            ));
             rows.extend(commands.into_iter().enumerate().map(|(i, command)| {
                 sub(&pp, command.name(), Some(&command.program), crate::quick_commands::controls(i, command.clone(), &pp).into_any_element())
             }));

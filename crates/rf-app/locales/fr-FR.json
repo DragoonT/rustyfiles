@@ -2226,5 +2226,10 @@
  "bd3c41cf": "Ouvrir les Paramètres et la Corbeille dans un nouvel onglet",
  "32e6819a": "Le dossier ouvert reste en place. Depuis l'Accueil ou l'une des deux pages, ils s'ouvrent dans le même onglet.",
  "8872682e": "Programmes qui utilisent la fenêtre Ouvrir / Enregistrer de Windows",
- "c1ba122b": "La modification de ce raccourci nécessite des droits d'administrateur"
+ "c1ba122b": "La modification de ce raccourci nécessite des droits d'administrateur",
+ "efdcd320": "Texte",
+ "9a6fe2c6": "Icône et texte",
+ "c684c8a9": "Séparateur",
+ "976b42f8": "Ajouter un séparateur",
+ "4cc75906": "Ordre par défaut"
 }

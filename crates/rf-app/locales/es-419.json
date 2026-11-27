@@ -2226,5 +2226,10 @@
  "bd3c41cf": "Abrir Configuración y la Papelera de reciclaje en una pestaña nueva",
  "32e6819a": "La carpeta abierta se queda donde está. Desde Inicio o desde una de las dos páginas se abren en la misma pestaña.",
  "8872682e": "Programas que usan la ventana Abrir / Guardar propia de Windows",
- "c1ba122b": "Para cambiar este acceso directo se necesitan permisos de administrador"
+ "c1ba122b": "Para cambiar este acceso directo se necesitan permisos de administrador",
+ "efdcd320": "Texto",
+ "9a6fe2c6": "Icono y texto",
+ "c684c8a9": "Separador",
+ "976b42f8": "Agregar un separador",
+ "4cc75906": "Orden predeterminado"
 }

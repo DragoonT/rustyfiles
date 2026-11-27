@@ -86,6 +86,7 @@ mod recycle_settings_view;
 mod recycle_text;
 mod recycle_view;
 mod rtl;
+pub(crate) mod toolbar_layout;
 mod theme;
 mod themes;
 mod thumb_cache;

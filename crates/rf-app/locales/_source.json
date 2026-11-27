@@ -13436,5 +13436,35 @@
   "key": "Bu kısayolu değiştirmek yönetici izni ister",
   "tr": "Bu kısayolu değiştirmek yönetici izni ister",
   "en": "Changing this shortcut needs administrator rights"
+ },
+ {
+  "id": "efdcd320",
+  "key": "Yazı",
+  "tr": "Yazı",
+  "en": "Text"
+ },
+ {
+  "id": "9a6fe2c6",
+  "key": "Simge ve yazı",
+  "tr": "Simge ve yazı",
+  "en": "Icon and text"
+ },
+ {
+  "id": "c684c8a9",
+  "key": "Ayırıcı",
+  "tr": "Ayırıcı",
+  "en": "Separator"
+ },
+ {
+  "id": "976b42f8",
+  "key": "Ayırıcı ekle",
+  "tr": "Ayırıcı ekle",
+  "en": "Add a separator"
+ },
+ {
+  "id": "4cc75906",
+  "key": "Varsayılan sıra",
+  "tr": "Varsayılan sıra",
+  "en": "Default order"
  }
 ]

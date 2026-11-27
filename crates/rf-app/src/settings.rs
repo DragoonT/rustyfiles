@@ -230,6 +230,16 @@ pub enum MenuMaterial {
     Glass,
 }
 
+/// The size of the command bar's pictures (issue 248).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ToolbarIconSize {
+    Small,
+    #[default]
+    Medium,
+    Large,
+}
+
 impl MenuMaterial {
     /// For the popups that are not menus (the View flyout, the Status Center: issue 380, they did not follow the setting): what a
     /// popup that would draw `auto_liquid` glass, and an opaque card in the Explorer look (`explorer`), gets with this material.
@@ -529,6 +539,16 @@ pub struct Settings {
     /// Buttons of the command bar that are off unless asked for ("newfolder", "terminal",
     /// "hidden", "refresh").
     pub toolbar_extra: Vec<String>,
+    /// The order of the command bar's left group, with "sep" for a line (`toolbar_layout`; issues 373, 248, 258). Empty: the
+    /// default order.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub toolbar_order: Vec<String>,
+    /// How each command bar button is shown, "name=icon|text|both" (`toolbar_layout::Look`, issue 374). A button not named here is
+    /// drawn as it always was.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub toolbar_look: Vec<String>,
+    /// The size of the command bar's pictures (issue 248).
+    pub toolbar_icon_size: ToolbarIconSize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub toolbar_commands: Vec<crate::quick_commands::QuickCommand>,
     pub preview_width: f32,
@@ -1007,6 +1027,9 @@ impl Default for Settings {
             recent_cleared_ms: 0,
             search_history: Vec::new(),
             toolbar_hidden: Vec::new(),
+            toolbar_order: Vec::new(),
+            toolbar_look: Vec::new(),
+            toolbar_icon_size: ToolbarIconSize::Medium,
             toolbar_extra: Vec::new(),
             toolbar_commands: Vec::new(),
             preview_width: 300.,
