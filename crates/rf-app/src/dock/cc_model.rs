@@ -685,6 +685,21 @@ pub fn network_text(s: &NetworkSnapshot, w: Words) -> TileText {
     }
 }
 
+/// The network tile of a PC with a wired card (`rf_win::ethernet`): the card turned off, on and in use, or on with something else in
+/// use (no cable, or Wi-Fi in front). Its button turns the card on and off; it is lit while the card is on.
+pub fn wired_text(enabled: bool, net: Option<&NetworkSnapshot>, w: Words) -> TileText {
+    let tr = w.tr;
+    let t = |subtitle: &str, active: bool| TileText { title: "Ethernet".into(), subtitle: subtitle.into(), active };
+    if !enabled {
+        return t(tr("Kapalı"), false);
+    }
+    match net.map(|n| (&n.link, n.reach)) {
+        Some((Link::Ethernet, Reach::Internet)) => t(tr("Bağlı"), true),
+        Some((Link::Ethernet, _)) => t(tr("İnternet yok"), true),
+        _ => t(tr("Bağlı değil"), true),
+    }
+}
+
 /// The Wi-Fi tile: off, on with nothing connected, or the network it is on. The name comes from the list of networks, or, when
 /// Windows does not give that list (location is off), from the connection in use.
 pub fn wifi_text(s: &WifiSnapshot, net: Option<&NetworkSnapshot>, w: Words) -> TileText {
@@ -1459,6 +1474,12 @@ mod tests {
     fn the_network_tile_says_what_the_machine_is_connected_through_in_both_languages() {
         let eth = net(Link::Ethernet, Reach::Internet);
         assert_eq!(network_text(&eth, TR), TileText { title: "Ethernet".into(), subtitle: "Bağlı".into(), active: true });
+        // a PC with a wired card: its tile, which turns the card on and off (the user, 2026-11-27)
+        assert_eq!(wired_text(false, Some(&eth), TR), TileText { title: "Ethernet".into(), subtitle: "Kapalı".into(), active: false });
+        assert_eq!(wired_text(true, Some(&eth), TR).subtitle, "Bağlı");
+        assert!(wired_text(true, Some(&eth), TR).active);
+        assert_eq!(wired_text(true, Some(&net(Link::Ethernet, Reach::Local)), TR).subtitle, "İnternet yok");
+        assert_eq!(wired_text(true, None, TR).subtitle, "Bağlı değil", "on, with nothing on the cable");
         assert_eq!(network_text(&eth, EN), TileText { title: "Ethernet".into(), subtitle: "Connected".into(), active: true });
         let none = net(Link::Disconnected, Reach::None);
         assert_eq!(network_text(&none, TR), TileText { title: "Ağ".into(), subtitle: "Bağlı değil".into(), active: false });

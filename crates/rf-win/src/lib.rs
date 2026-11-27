@@ -65,6 +65,7 @@ pub mod ownfolder;
 pub mod taskbar_hide;
 pub mod taskbar_progress;
 pub mod usn;
+pub mod ethernet;
 pub mod network;
 pub mod pe;
 pub mod security;

@@ -74,6 +74,13 @@ use rf_win::sysstatus::inuse::{self, InUse};
 use rf_win::sysstatus::network::{self, Link};
 use rf_win::sysstatus::power::{self, BatterySnapshot};
 use rf_win::sysstatus::radio::{self, Kind as RadioKind, Power as RadioPower};
+
+/// What a tile's round button turns on and off: a radio (Wi-Fi, Bluetooth), or the PC's wired card (`rf_win::ethernet`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Switch {
+    Radio(RadioKind),
+    Wired,
+}
 use rf_win::sysstatus::toggles::{self, PowerMode};
 use rf_win::sysstatus::wifi::{self, Listing, WifiSnapshot};
 
@@ -215,6 +222,10 @@ pub struct CcView {
     /// What the last press on a radio's button asked for, and when (`cc_model::shown_power`).
     wifi_ask: Option<(bool, Instant)>,
     bt_ask: Option<(bool, Instant)>,
+    /// The PC's wired cards (`rf_win::ethernet`, read when the panel opens and after a change), and what a press on the Ethernet
+    /// tile's button asked for while Windows asks the user and `netsh` runs.
+    wired: Vec<rf_win::ethernet::Adapter>,
+    wired_ask: Option<bool>,
     /// The network the user chose to connect to, and when: its row says so until Windows has connected (or `JOIN_WAIT` is over).
     joining: Option<(String, Instant)>,
     /// The network whose password is being asked for (a row with a field under its own), the field, and whether what was typed
@@ -311,6 +322,8 @@ impl CcView {
             _unfold: None,
             wifi_ask: None,
             bt_ask: None,
+            wired: Vec::new(),
+            wired_ask: None,
             joining: None,
             wifi_asking: None,
             wifi_input: None,
@@ -352,7 +365,61 @@ impl CcView {
         let net = sysstate::network(cx).filter(|_| !hidden("network", cx));
         let wifi = self.wifi.as_ref().filter(|_| !hidden("wifi", cx));
         let bt = self.bluetooth.as_ref().filter(|_| !hidden("bluetooth", cx));
-        cc_model::tiles(net.as_ref(), wifi, bt, self.battery.as_ref().filter(|_| !hidden("battery", cx)))
+        let mut tiles = cc_model::tiles(net.as_ref(), wifi, bt, self.battery.as_ref().filter(|_| !hidden("battery", cx)));
+        // a PC with a wired card always has the network tile: its button turns the card on and off, also while the PC is on Wi-Fi or
+        // the card is off (when it would have no tile of its own)
+        if !self.wired.is_empty() && !hidden("network", cx) && !tiles.contains(&Tile::Network) {
+            let at = tiles.iter().position(|t| *t == Tile::Battery).unwrap_or(tiles.len());
+            tiles.insert(at, Tile::Network);
+        }
+        tiles
+    }
+
+    /// The wired card the Ethernet tile stands for: the first one that is on, else the first one.
+    fn wired_card(&self) -> Option<&rf_win::ethernet::Adapter> {
+        self.wired.iter().find(|a| a.enabled).or_else(|| self.wired.first())
+    }
+
+    /// Reads the wired cards off the interface's thread; the panel is laid out again when they changed.
+    fn read_wired(&mut self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let cards = cx.background_spawn(async { rf_win::ethernet::adapters() }).await;
+            let _ = this.update(cx, |cc, cx| {
+                if cc.wired != cards {
+                    cc.wired = cards;
+                    cc.refit(cx);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// The Ethernet tile's button: the card is turned the other way. Windows asks the user first (UAC); the tile shows what was asked
+    /// for until `netsh` is done, then what the card really is.
+    fn press_wired(&mut self, cx: &mut Context<Self>) {
+        if !self.shown || self.closing || self.wired_ask.is_some() {
+            return;
+        }
+        let Some(card) = self.wired_card().cloned() else { return };
+        let want = !card.enabled;
+        self.wired_ask = Some(want);
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let name = card.name.clone();
+            let outcome = cx.background_spawn(async move { rf_win::ethernet::set_enabled(&name, want) }).await;
+            if outcome == rf_win::ethernet::Outcome::Failed {
+                log::warn!("ethernet: turning {:?} {} failed", card.name, if want { "on" } else { "off" });
+            }
+            let cards = cx.background_spawn(async { rf_win::ethernet::adapters() }).await;
+            let _ = this.update(cx, |cc, cx| {
+                cc.wired_ask = None;
+                cc.wired = cards;
+                cc.refit(cx);
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// The sides of the sound card that are there and shown: the speaker (0), the microphone (1).
@@ -472,6 +539,7 @@ impl CcView {
         self._unfold = None;
         self.wifi_ask = None;
         self.bt_ask = None;
+        self.read_wired(cx);
         self.joining = None;
         self.wifi_asking = None;
         self.wifi_bad = false;
@@ -1177,7 +1245,7 @@ impl CcView {
     /// first, at the owner's word; at 8.5 px it was hard to read on the accent, and the glyph had to shrink off centre to make room.
     /// The owner then asked for a better place: "bence sürüm yerlerini daha iyi yapabiliriz".)
     #[allow(clippy::too_many_arguments)]
-    fn tile(&self, id: &'static str, icon: L, text: cc_model::TileText, tag: Option<String>, look: &Look, act: TileAct, radio: Option<RadioKind>, cx: &mut Context<Self>) -> AnyElement {
+    fn tile(&self, id: &'static str, icon: L, text: cc_model::TileText, tag: Option<String>, look: &Look, act: TileAct, radio: Option<Switch>, cx: &mut Context<Self>) -> AnyElement {
         let pressed = look.pal.pressed_fill().hsla();
         let ring = look.accent;
         let secondary = look.pal.text_secondary().hsla();
@@ -1190,7 +1258,10 @@ impl CcView {
                 self.round_button((id, 1usize), icon, 40.0, text.active, look, (Some(&stop), Some(tip))).on_click(cx.listener(move |this, _, _, cx| {
                     // (the press is the button's: the tile under it does not open)
                     cx.stop_propagation();
-                    this.press_radio(kind, cx);
+                    match kind {
+                        Switch::Radio(kind) => this.press_radio(kind, cx),
+                        Switch::Wired => this.press_wired(cx),
+                    }
                 }))
             }
             None => self.round_button((id, 1usize), icon, 40.0, text.active, look, (None, None)),
@@ -1245,15 +1316,23 @@ impl CcView {
             items.push(match t {
                 Tile::Wifi => {
                     let w = self.wifi_now().unwrap_or_default();
-                    self.tile("cc-wifi", cc_model::wifi_icon(&w), cc_model::wifi_text(&w, net.as_ref(), words), cc_model::wifi_tag(&w), look, act, Some(RadioKind::WiFi), cx)
+                    self.tile("cc-wifi", cc_model::wifi_icon(&w), cc_model::wifi_text(&w, net.as_ref(), words), cc_model::wifi_tag(&w), look, act, Some(Switch::Radio(RadioKind::WiFi)), cx)
                 }
-                Tile::Network => {
-                    let n = net.clone().unwrap_or_default();
-                    self.tile("cc-network", cc_model::network_icon(network::glyph(&n)), cc_model::network_text(&n, words), None, look, act, None, cx)
-                }
+                Tile::Network => match self.wired_card() {
+                    // a wired card: the Ethernet tile, whose button turns it on and off
+                    Some(card) => {
+                        let on = self.wired_ask.unwrap_or(card.enabled);
+                        let text = cc_model::wired_text(on, net.as_ref(), words);
+                        self.tile("cc-network", L::EthernetPort, text, None, look, act, Some(Switch::Wired), cx)
+                    }
+                    None => {
+                        let n = net.clone().unwrap_or_default();
+                        self.tile("cc-network", cc_model::network_icon(network::glyph(&n)), cc_model::network_text(&n, words), None, look, act, None, cx)
+                    }
+                },
                 Tile::Bluetooth => {
                     let b = self.bt_now().unwrap_or_default();
-                    self.tile("cc-bluetooth", cc_model::bluetooth_icon(&b), cc_model::bluetooth_text(&b, words), cc_model::bluetooth_tag(&b), look, act, Some(RadioKind::Bluetooth), cx)
+                    self.tile("cc-bluetooth", cc_model::bluetooth_icon(&b), cc_model::bluetooth_text(&b, words), cc_model::bluetooth_tag(&b), look, act, Some(Switch::Radio(RadioKind::Bluetooth)), cx)
                 }
                 Tile::Battery => {
                     let b = self.battery.unwrap_or_default();
